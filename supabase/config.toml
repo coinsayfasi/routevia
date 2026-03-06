@@ -1,0 +1,139 @@
+project_id = "routevia"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 17
+
+[db.migrations]
+enabled = true
+schema_paths = []
+
+[db.seed]
+enabled = false
+
+[realtime]
+enabled = true
+
+[studio]
+enabled = true
+port = 54323
+api_url = "http://127.0.0.1"
+
+[inbucket]
+enabled = true
+port = 54324
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:3000"
+additional_redirect_urls = ["http://127.0.0.1:3000", "routevia://auth-callback"]
+jwt_expiry = 3600
+enable_signup = true
+enable_anonymous_sign_ins = false
+
+[auth.email]
+enable_signup = true
+enable_confirmations = false
+
+[edge_runtime]
+enabled = true
+policy = "oneshot"
+inspector_port = 8083
+
+[analytics]
+enabled = false
+port = 54327
+backend = "postgres"
+
+[functions.seed_turkey_admin]
+verify_jwt = true
+
+[functions.nearby_places]
+verify_jwt = false
+
+[functions.generate_trip_plan_v2]
+verify_jwt = false
+
+[functions.generate_trip_plan]
+verify_jwt = false
+
+[functions.ai_suggest_now]
+verify_jwt = false
+
+[functions.place_detail]
+verify_jwt = false
+
+[functions.photo_proxy]
+verify_jwt = false
+
+[functions.get_place_stats]
+verify_jwt = false
+
+[functions.sunset_now]
+verify_jwt = false
+
+[functions.live_explore]
+verify_jwt = false
+
+[functions.get_route_polyline]
+verify_jwt = false
+
+[functions.get_shared_trip]
+verify_jwt = false
+
+[functions.enqueue_all_district_jobs]
+verify_jwt = true
+
+[functions.run_ingest_batch]
+verify_jwt = true
+
+[functions.ingest_district]
+verify_jwt = true
+
+[functions.get_ingest_progress]
+verify_jwt = true
+
+[functions.requeue_failed_jobs]
+verify_jwt = true
+
+[functions.cache_google_thumbnails]
+verify_jwt = true
+
+[functions.reset_stuck_running_jobs]
+verify_jwt = true
+
+[functions.admin_import_csv_clean]
+verify_jwt = true
+
+[functions.admin_build_clean_dataset_from_raw]
+verify_jwt = true
+
+[functions.admin_attach_open_license_media]
+verify_jwt = true
+
+[functions.eco_score]
+verify_jwt = false
+
+[functions.get_live_status]
+verify_jwt = false
+
+[functions.optimize_trip_v2]
+verify_jwt = false
+
+[functions.smart_season_suggestions]
+verify_jwt = false
+
+[functions.trend_map]
+verify_jwt = false

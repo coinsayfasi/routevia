@@ -1,0 +1,32 @@
+{
+  "rows": [
+    {
+      "province_slug": "izmir",
+      "district_slug": "konak",
+      "name": "Kordon Promenade",
+      "slug": "kordon-promenade",
+      "category": "viewpoint",
+      "lat": 38.4383,
+      "lng": 27.1382,
+      "short_summary": "Seaside walk with sunset colors and tram access.",
+      "best_time": "sunset",
+      "duration_min": 60,
+      "tags": ["sunset", "walkable", "family"],
+      "popularity_score": 95
+    },
+    {
+      "province_slug": "antalya",
+      "district_slug": "muratpasa",
+      "name": "Kaleici Old Town",
+      "slug": "kaleici-old-town",
+      "category": "historical",
+      "lat": 36.884,
+      "lng": 30.7053,
+      "short_summary": "Ottoman lanes and restored mansions by old harbor.",
+      "best_time": "day",
+      "duration_min": 120,
+      "tags": ["walkable", "photo", "history"],
+      "popularity_score": 97
+    }
+  ]
+}

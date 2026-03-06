@@ -1,0 +1,21 @@
+name: Compliance Guard
+
+on:
+  pull_request:
+  push:
+    branches: [ main, master, develop ]
+
+jobs:
+  compliance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ripgrep and jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ripgrep jq
+
+      - name: Compliance fail-fast
+        run: bash scripts/compliance_guard_failfast.sh

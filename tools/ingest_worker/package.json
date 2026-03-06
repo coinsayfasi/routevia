@@ -1,0 +1,31 @@
+{
+  "name": "routevia-ingest-worker",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "ingest:turkey": "node worker.mjs",
+    "curated:import": "node import_curated_batch.mjs",
+    "curated:push:db": "node import_curated_to_db.mjs",
+    "curated:clean:geofence": "node clean_curated_geofence.mjs",
+    "curated:clean:dedup": "node clean_curated_duplicates.mjs",
+    "province:full": "node run_province_full.mjs",
+    "province:hot": "node run_hot_provinces.mjs",
+    "province:prioritize": "node prioritize_provinces.mjs",
+    "curated:wave": "node run_curated_wave.mjs",
+    "curated:generate:antalya": "node generate_antalya_full_batch.mjs",
+    "curated:generate:province": "node generate_province_full_batch.mjs",
+    "curated:generate:district:boost": "node generate_district_tourism_boost.mjs",
+    "curated:media:upload": "node upload_curated_media.mjs",
+    "clean:media:placeholder": "node ensure_clean_media_placeholders.mjs",
+    "clean:build:wave": "node build_clean_dataset_wave.mjs",
+    "clean:sync:weak-provinces": "node weak_provinces_clean_sync.mjs",
+    "clean:coverage:wave": "node wave_sync_coverage_report.mjs",
+    "ingest:dry": "node worker.mjs --dry-run",
+    "ingest:once": "node worker.mjs --once --resume",
+    "ingest:resume": "node worker.mjs --resume",
+    "ingest:drain": "node worker.mjs --resume --until-done --batch=5 --sleep=3000",
+    "ingest:supervisor": "bash ./run_forever.sh",
+    "ingest:report": "node worker.mjs --report"
+  }
+}

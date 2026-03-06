@@ -1,0 +1,85 @@
+name: Nightly POI District Self-Heal
+
+on:
+  schedule:
+    # 00:40 UTC daily (03:40 Europe/Istanbul in winter, 03:40/04:40 with DST differences).
+    - cron: "40 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  district-self-heal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      QUALITY_ISSUE_RATE_THRESHOLD: "0.002"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Validate required secrets
+        run: |
+          test -n "$SUPABASE_URL" || (echo "SUPABASE_URL is missing" && exit 1)
+          test -n "$SUPABASE_SERVICE_ROLE_KEY" || (echo "SUPABASE_SERVICE_ROLE_KEY is missing" && exit 1)
+
+      - name: Apply DB location overrides (RPC)
+        run: |
+          node -e '
+            const url = process.env.SUPABASE_URL;
+            const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+            (async () => {
+              const res = await fetch(`${url}/rest/v1/rpc/apply_poi_location_overrides`, {
+                method: "POST",
+                headers: {
+                  apikey: key,
+                  Authorization: `Bearer ${key}`,
+                  "Content-Type": "application/json",
+                },
+                body: "{}",
+              });
+              if (!res.ok) {
+                console.error(await res.text());
+                process.exit(1);
+              }
+              const text = await res.text();
+              console.log(`apply_poi_location_overrides updated: ${text}`);
+            })().catch((e) => {
+              console.error(e);
+              process.exit(1);
+            });
+          '
+
+      - name: Run district auto-fix pass
+        run: node tools/fix_poi_districts_nominatim.mjs --max-updates=120 --delay-ms=1100
+
+      - name: Build district quality report
+        run: |
+          mkdir -p docs/reports
+          node tools/poi_district_quality_report.mjs > docs/reports/nightly_poi_district_quality.json
+          cat docs/reports/nightly_poi_district_quality.json
+
+      - name: Enforce quality threshold
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const report = JSON.parse(fs.readFileSync("docs/reports/nightly_poi_district_quality.json", "utf8"));
+            const threshold = Number(process.env.QUALITY_ISSUE_RATE_THRESHOLD || "0.002");
+            if ((report.issue_rate ?? 1) > threshold) {
+              console.error(`issue_rate ${report.issue_rate} exceeded threshold ${threshold}`);
+              process.exit(1);
+            }
+            console.log(`issue_rate OK: ${report.issue_rate} <= ${threshold}`);
+          '
+
+      - name: Upload nightly report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-poi-district-quality
+          path: docs/reports/nightly_poi_district_quality.json
+          if-no-files-found: error

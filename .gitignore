@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# Flutter
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/build/
+**/ios/Pods/
+**/android/.gradle/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Node worker
+tools/ingest_worker/node_modules/
+
+# Supabase local
+supabase/.temp/

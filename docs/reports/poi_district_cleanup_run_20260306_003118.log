@@ -1,0 +1,266 @@
+[RUN] passes=3 max_updates=120 delay_ms=1100
+[RUN] pass 1/3 started...
+Loading provinces/districts...
+Loading POIs...
+POI loaded: 27008
+Mismatch candidates: 261
+[1] Şirinyer Restaurant Otelcilik Turizm Tic. A.Ş. 1978 | district: - -> Arsuz
+[2] Karaman Otel - Aygün Otel | district: - -> Merkez
+[3] Levent Vadisi Seyir Terası | district: - -> Akçadağ | city: Bingöl -> Malatya
+[4] Hürrem Dayı Evi | district: - -> Merkez
+[5] Bolu Koru Hotels Spa & Convention | district: - -> Merkez
+[6] Hisaraltı Çay Bahçesi/ Şark Köşesi | district: - -> Merkez
+[7] Çameli Taş Konaklar | district: - -> Çameli | city: Burdur -> Denizli
+[8] FOLEYA MOUNTAIN RESORT | district: - -> Tonya | city: Giresun -> Trabzon
+[9] Alusso Thermal Hotel SPA & Convention Center | district: - -> Merkez
+[10] Ihlara Vadisi | district: - -> Güzelyurt | city: Kayseri -> Aksaray
+[11] Tartan konağı | district: - -> Merkez
+[12] Ulugöl Tabiat Parkı | district: - -> Gölköy | city: Karaman -> Ordu
+[13] Zelve Açık Hava Müzesi | district: - -> Avanos | city: Düzce -> Nevşehir
+[14] Prusias ad Hypium Antik Kenti | district: - -> Merkez
+[15] Fırın Sahara | district: - -> Merkez
+[16] Manavgat Şelalesi | district: - -> Manavgat | city: Yozgat -> Antalya
+[17] Kdz. Ereğli Belediyesi Kent Müzesi | district: - -> Ereğli | city: Düzce -> Zonguldak
+[18] İncesu Mağarası | district: - -> Merkez
+[19] Kastabala Antik Kenti | district: - -> Merkez | city: Adana -> Osmaniye
+[20] Sudüşen Şelalesi | district: - -> Gemlik | city: Tekirdağ -> Bursa
+[21] Efe Termal Otel Spa | district: - -> Merkez
+[22] Tunceli Kent Ormanı | district: - -> Merkez
+[23] Kadirli Belediyesi Kent Müzesi | district: - -> Kadirli | city: Kahramanmaraş -> Osmaniye
+[24] Kadınlar Denizi Plajı | district: - -> Kuşadası | city: Muğla -> Aydın
+[25] Tarihi Sarıkaya Kaplıcaları | district: - -> Sarıkaya
+[26] Başdeğirmen Emrut Şelalesi | district: - -> Kızıltepe | city: Şırnak -> Mardin
+[27] Otel Almina Park | district: - -> Merkez
+[28] Ihlara Vadisi | district: - -> Güzelyurt | city: Nevşehir -> Aksaray
+[29] Kardeşler Restoran, Kahvaltı & Kebap Salonu | district: - -> Merkez
+[30] Kızıldağ Milli Parkı | district: - -> Şarkikaraağaç | city: Afyonkarahisar -> Isparta
+[31] Green Canyon | district: - -> Akseki | city: Konya -> Antalya
+[32] Fenerbahçe Topuk Yaylası Resort&Sport | district: - -> Kaynaşlı | city: Bolu -> Düzce
+[33] Yaka Şelalesi Şelale Park | district: - -> Kemer
+[34] Gizlikent Şelalesi | district: - -> Kemer
+[35] Aigai (Aiolis) Antik Kenti | district: - -> Yunusemre | city: İzmir -> Manisa
+[36] Darıdere Tabiat Parkı | district: - -> Edremit | city: Çanakkale -> Balıkesir
+[37] Karatepe Aslantaş Açık Hava Müzesi | district: - -> Kadirli | city: Kahramanmaraş -> Osmaniye
+[38] Sünnet Gölü Tabiat Parkı | district: - -> Safranbolu
+[39] Güray Müze | district: - -> Avanos | city: Kayseri -> Nevşehir
+[40] Büyük Kale Otel - KARS | district: - -> Merkez
+[41] Hançer Deresi Milli Parkı | district: - -> Saimbeyli | city: Kahramanmaraş -> Adana
+[42] Burdur Arkeoloji Müzesi | district: - -> Merkez
+[43] Sinopark Otel | district: - -> Merkez
+[44] Ulubey Kanyonu Tabiat Parkı | district: - -> Ulubey | city: Afyonkarahisar -> Uşak
+[45] Köprülü Kanyon Milli Parkı | district: - -> Manavgat | city: Afyonkarahisar -> Antalya
+[46] KMU Mehmet Usta | Aksaray Restaurant & Kahvaltı | district: - -> Merkez
+[47] Kayabaşı Tabiat Parkı | district: - -> Akçaabat | city: Rize -> Trabzon
+[48] Çetmi Şelalesi | district: - -> Taşkent | city: Karaman -> Konya
+[49] Beyzade Et Balık Restaurant | district: - -> Sarıkaya
+[50] Suuçtu Tabiat Parkı ve Şelalesi | district: - -> Marmara
+[51] Sürmeli Mangal Keyfi SİNAN CHEF | district: - -> Merkez
+[52] İncesu Kanyonu | district: - -> Ortaköy | city: Karaman -> Çorum
+[53] Köprülü Kanyon Milli Parkı | district: - -> Manavgat | city: Uşak -> Antalya
+[54] Pamukkale Travertenleri | district: - -> Pamukkale | city: Uşak -> Denizli
+[55] Gürleyik Şelalesi | district: - -> Mihalıççık | city: Ankara -> Eskişehir
+[56] Ihlara Vadisi | district: - -> Güzelyurt | city: Kayseri -> Aksaray
+[57] Başpınar Tabiat Parkı Kamp ve Piknik Alanı | district: - -> Aksu | city: Konya -> Isparta
+[58] City Wok | district: - -> Çankaya | city: Karaman -> Ankara
+[59] RAMADA BY WYNDHAM NİĞDE | district: - -> Merkez
+[60] KARS ATAPARK BOUTIQUE HOTEL | district: - -> Merkez
+[61] Sapran Deluxe Hotel | district: - -> Merkez
+[62] Mustafa Chef Restaurant | district: - -> Merkez
+[63] Güzelcehisar Plajı | district: - -> Merkez
+[64] Büyük Abant Oteli | district: - -> Mudurnu | city: Düzce -> Bolu
+[65] Melen Tesisleri | district: - -> Merkez
+[66] Ihlara Vadisi | district: - -> Güzelyurt | city: Karaman -> Aksaray
+[67] Wagoon Cafe & Restaurant | district: - -> Merkez
+[68] Çamlıca Tabiat Parkı | district: - -> Merkez
+[69] Kapuzbaşı Şelalesi | district: - -> Yahyalı | city: Niğde -> Kayseri
+[70] NG Afyon | district: - -> Merkez
+[71] Samandere Şelalesi Tabiat Anıtı | district: - -> Merkez | city: Sakarya -> Düzce
+[72] İZTUZU PLAJI | district: - -> Ortaca | city: Karaman -> Muğla
+[73] Harmankaya Kanyonu Tabiat Parkı | district: - -> Yenipazar | city: Kütahya -> Bilecik
+[74] İncekum Tabiat Parkı | district: - -> Alanya | city: Karaman -> Antalya
+[75] Abant Tabiat Müzesi | district: - -> Mudurnu | city: Düzce -> Bolu
+[76] Nest Cappadocia Hotel | district: - -> Merkez
+[77] Ağlayan Kaya - Sakızcılar Asmaaltı Şelalesi | district: - -> Çal | city: Uşak -> Denizli
+[78] Anadolu Medeniyetleri Müzesi | district: - -> Altındağ | city: Burdur -> Ankara
+[79] Samandere Şelalesi Tabiat Anıtı | district: - -> Merkez
+[80] Goreme Acik Hava Muzesi | district: - -> Ürgüp
+[81] Bolu Kültür ve Turizm İl Müdürlüğü | district: - -> Merkez
+[82] rise suit otel | district: - -> Sarıkaya
+[83] Kaya Life Resort Otel | district: - -> Çaykara | city: Bayburt -> Trabzon
+[84] Kanyon | district: - -> Şişli | city: Kocaeli -> İstanbul
+[85] Ocaklı Şelalesi | district: - -> Pazar | city: Yozgat -> Tokat
+[86] Yazılı Kanyon Tabiat Parkı | district: - -> Sütçüler | city: Aksaray -> Isparta
+[87] Zinav Kanyonu | district: - -> Reşadiye | city: Giresun -> Tokat
+[88] Kocakoru Tabiat Parkı | district: - -> Seydişehir | city: Karaman -> Konya
+[89] Tokatlı Kanyonu | district: - -> Safranbolu | city: Sakarya -> Karabük
+[90] Kanyon Cafe | district: - -> Selçuklu | city: Karaman -> Konya
+[91] Zafer Türk Mutfağı | district: - -> Merkez
+[92] Tokatlı Kanyonu | district: - -> Safranbolu | city: Uşak -> Karabük
+[93] Antik Tiyatro | district: - -> Merkez
+[94] Zelve Açık Hava Müzesi | district: - -> Avanos
+[95] Abant Sedir Park | district: - -> Merkez
+[96] Tunceli Müzesi | district: - -> Merkez
+[97] Aladağ Küp Şelalesi | district: - -> Aladağ | city: Niğde -> Adana
+[98] Kızılören Kekikli Et Mangal | district: - -> Meram | city: Afyonkarahisar -> Konya
+[99] İnci Cave Restaurant | district: - -> Merkez
+[100] Nevşehir Kalesi | district: - -> Merkez
+[101] Fransızın Yeri & Derism Antik Cafe Mekan | district: - -> Merkez
+[102] ViaSea Akvaryum | district: - -> Tuzla | city: Kocaeli -> İstanbul
+[103] Piri Resi Parkı | district: - -> Merkez
+[104] Tarz-ı Hayal Kafe&Bistro | district: - -> Merkez
+[105] Yerköprü Çağlayanı | district: - -> Mut | city: Karaman -> Mersin
+[106] Giresun Kalesi | district: - -> Merkez
+[107] Ayrık Vadi Otel & Restoran | district: - -> Merkez
+[108] Green Canyon | district: - -> Akseki | city: Kütahya -> Antalya
+[109] Sülüklü Göl Tabiat Parkı | district: - -> Mudurnu | city: Sakarya -> Bolu
+[110] PÖÇ TANDIR&ZEMZEM RESTAURANT | district: - -> Merkez
+[111] Anadolu Medeniyetleri Müzesi | district: - -> Altındağ | city: Bingöl -> Ankara
+[112] Arabica Coffee House Niğde | district: - -> Merkez
+[113] Aforia Thermal Residences Afyon | district: - -> Merkez
+[114] Konak Hotel 2 Kars | district: - -> Merkez
+[115] İstanbul Arkeoloji Müzeleri | district: - -> Fatih | city: Sakarya -> İstanbul
+[116] İstanbul Arkeoloji Müzeleri | district: - -> Fatih | city: Bingöl -> İstanbul
+[117] Boheme Bungalow Sapanca | district: - -> Sapanca | city: İstanbul -> Sakarya
+[118] Sultansazlığı Milli Parkı | district: - -> Yeşilhisar | city: Aksaray -> Kayseri
+[119] Akrones Otel | district: - -> Merkez
+[120] Hadim Göksu Şelalesi | district: - -> Güneysınır | city: Karaman -> Konya
+Done. checked=125, updated=120, dry_run=false, max_updates=120
+[RUN] pass 1/3 finished
+[RUN] pass 2/3 started...
+Loading provinces/districts...
+Loading POIs...
+POI loaded: 27008
+Mismatch candidates: 141
+[1] Değirmen Kır Lokantası | district: - -> Merkez
+[2] Yayla Lokantası | district: - -> Merkez
+[3] Salda Gölü Tabiat Parkı | district: - -> Yeşilova | city: Karaman -> Burdur
+[4] Sarı Çiçek Parkı | district: - -> Merkez
+[5] Porsuk Et Mangal | district: - -> Merkez
+[6] Köprülü Kanyon Milli Parkı | district: - -> Manavgat | city: Kütahya -> Antalya
+[7] Göreme Açık Hava Müzesi | district: - -> Merkez
+[8] Zelve Açık Hava Müzesi | district: - -> Avanos | city: Kayseri -> Nevşehir
+[9] Ağaran Şelalesi | district: - -> Köprübaşı
+[10] Alanya Benlidere Selalesi | district: - -> Alanya | city: Karaman -> Antalya
+[11] Yerköprü Şelalesi Tabiat Parkı Mut/Evren | district: - -> Mut | city: Karaman -> Mersin
+[12] Muş Müzesi | district: - -> Merkez
+[13] Yedigöller Milli Parkı | district: - -> Merkez
+[14] AL-Sİ Ametis Termal Otel & SPA | district: - -> Ulukışla | city: Adana -> Niğde
+[15] Şorba Lounge | district: - -> Merkez
+[16] Gökçe Çamlığı Mesire Yeri | district: - -> Merkez
+[17] ULUBEY KANYONLARI CAM TERAS Hisar Hediyelik Yöresel | district: - -> Ulubey | city: Afyonkarahisar -> Uşak
+[18] Ulubey Kanyonu Tabiat Parkı | district: - -> Ulubey | city: Yalova -> Uşak
+[19] Tazı Kanyonu | district: - -> Manavgat | city: Afyonkarahisar -> Antalya
+[20] Musakka Restaurant | district: - -> Merkez
+[21] Yukarı Düden Şelalesi | district: - -> Kepez | city: Kütahya -> Antalya
+[22] Karslıoğlu Konağı | district: - -> Merkez
+[23] Karatepe Aslantaş Milli Parkı | district: - -> Kadirli | city: Gaziantep -> Osmaniye
+[24] İlker Et Mangal | district: - -> Merkez
+[25] Ormanlı Plajı | district: - -> Çatalca | city: Tekirdağ -> İstanbul
+[26] Gölcük Tabiat Parkı | district: - -> Merkez
+[27] Bingöl Çınar Cağ Kebap | district: - -> Merkez
+[28] Özge Mantı evi | district: - -> Merkez
+[29] Grand Hotel Niğde | district: - -> Merkez
+[30] Hacı Hasan Bor Parkı | district: - -> Sarıkaya
+[31] Aktekke Cami | district: - -> Merkez
+[32] ULUBEY KANYONLARI CAM TERAS Hisar Hediyelik Yöresel | district: - -> Ulubey | city: İzmir -> Uşak
+[33] İncesu Kanyonu | district: - -> Ortaköy | city: Amasya -> Çorum
+[34] World Dreams Sapanca Bungalov | district: - -> Sapanca | city: İstanbul -> Sakarya
+[35] DKebap's | district: - -> Merkez
+[36] Sapadere Canyon (Beginning of the wooden footbridge in the length of the canyon) | district: - -> Alanya | city: Karaman -> Antalya
+[37] Seleukeia (Lyrbe) Ancient City | district: - -> Manavgat | city: Yozgat -> Antalya
+[38] Bolu Koru Hotels Spa & Convention | district: - -> Merkez
+[39] Manazan Mağaraları (Caves) | district: - -> Merkez
+[40] VELA VERDE HOTEL & SPA | district: - -> Merkez
+[41] Aladağlar Milli Parkı | district: - -> Çamardı | city: Kayseri -> Niğde
+[42] Karaman Seyir Terasları | district: - -> Merkez
+[43] Fakıllı Mağarası | district: - -> Akçakoca | city: Zonguldak -> Düzce
+[44] Konak Restaurant | district: - -> Sarıkaya
+[45] Karatepe Aslantaş Milli Parkı | district: - -> Kadirli | city: Kahramanmaraş -> Osmaniye
+[46] Abant Aden Boutique Hotel & Spa | district: - -> Merkez
+[47] Butik Ardana Hotel | district: - -> Merkez
+[48] Yazılı Kanyon Tabiat Parkı | district: - -> Sütçüler | city: Karaman -> Isparta
+[49] Nigrum Hotel Nevşehir | district: - -> Merkez
+[50] Kanyon Park | district: - -> Selçuklu | city: Karaman -> Konya
+[51] Palovit Şelalesi | district: - -> Çamlıhemşin | city: Bayburt -> Rize
+[52] Ahıska Palas Kars | district: - -> Merkez
+[53] The Camellia Cafe | district: - -> Merkez
+[54] Yazılı Kanyon Tabiat Parkı | district: - -> Sütçüler | city: Uşak -> Isparta
+[55] Akçakoca Poyraz Otel - Apart | district: - -> Akçakoca | city: Zonguldak -> Düzce
+[56] Çörekçi Pansiyon&Restorant | district: - -> Yahyalı | city: Niğde -> Kayseri
+[57] Göynük Kanyonu | district: - -> Kemer | city: Uşak -> Antalya
+[58] Kıdrak Beach | district: - -> Fethiye | city: Uşak -> Muğla
+[59] Flintstones cafe | district: - -> Merkez
+[60] Köprülü Kanyon Milli Parkı | district: - -> Manavgat | city: Karaman -> Antalya
+[61] Necmettin Erbakan Parkı | district: - -> Merkez
+[62] Alibey Adası | district: - -> Ayvalık | city: Çanakkale -> Balıkesir
+[63] Assos Köyüm Restaurant | district: - -> Ayvacık
+[64] AKÇAKOCA EFTELYA OTEL | district: - -> Akçakoca | city: Zonguldak -> Düzce
+[65] Yalova Kent Müzesi | district: - -> Merkez
+[66] Korel Thermal Afyon | district: - -> Merkez
+[67] Turan Otel - Düzce | district: - -> Merkez
+[68] Karasu Plajı | district: - -> Karasu | city: Düzce -> Sakarya
+[69] Hanedan Hotel | district: - -> Karakoçan | city: Bingöl -> Elazığ
+[70] Düzce Hızel Otel | district: - -> Merkez
+[71] Kossuth Müzesi (Macar Evi) | district: - -> Merkez
+[72] Tahıl ambarları | district: - -> Merkez
+[73] ULUBEY KANYONLARI CAM TERAS Hisar Hediyelik Yöresel | district: - -> Ulubey | city: Manisa -> Uşak
+[74] Palovit Şelalesi | district: - -> Çamlıhemşin | city: Aksaray -> Rize
+[75] Karpalas City Hotel & Spa | district: - -> Merkez
+[76] Çamlık Kafeterya | district: - -> Merkez
+[77] Karaca Arboretum | district: - -> Merkez
+[78] KELLE TİME ŞELALESİ SUSUZ/KARS | district: - -> Susuz | city: Ardahan -> Kars
+[79] Garden Kale Termal Otel | district: - -> Merkez
+[80] cafe keyf | district: - -> Sarıkaya
+[81] Nevsehir Forum Kapadokya | district: - -> Merkez
+[82] The Geyik Dersim | district: - -> Merkez
+[83] Green Canyon | district: - -> Akseki | city: Uşak -> Antalya
+[84] Aladağ Otel | district: - -> Aladağ | city: Niğde -> Adana
+[85] Myra Antik Kenti | district: - -> Demre | city: Yozgat -> Antalya
+[86] Kongre Ve Kent Muzesi | district: - -> Merkez
+[87] Burdur Kent Ormanı | district: - -> Merkez
+[88] SÜRMELİ MANGAL KEYFİ | district: - -> Merkez
+[89] Göynük Kanyonu | district: - -> Kemer | city: Karaman -> Antalya
+[90] Nükteli | district: - -> Çankaya | city: Karaman -> Ankara
+[91] Karaman Müzesi | district: - -> Merkez
+[92] Narven Wellness & Thermal Hotel | district: - -> Merkez
+[93] Mıhlı Çayı Taş Köprü | district: - -> Edremit | city: Çanakkale -> Balıkesir
+[94] Aladağlar Milli Parkı | district: - -> Çamardı | city: Aksaray -> Niğde
+[95] Serenler Tepesi Tabiat Parkı | district: - -> Merkez
+[96] Suuçtu Tabiat Parkı ve Şelalesi | district: - -> Mustafakemalpaşa | city: Manisa -> Bursa
+[97] GÖSTERİŞLİ OTEL | district: - -> Merkez
+[98] Sünnet Gölü Tabiat Parkı | district: - -> Göynük | city: Sakarya -> Bolu
+[99] Munzur Vadisi Milli Parkı | district: - -> Merkez
+[100] Çakıl Beach | district: - -> Konyaaltı | city: Uşak -> Antalya
+[101] Wyndham Afyonkarahisar Thermal&Spa | district: - -> Merkez
+[102] Giresun Uygulama Oteli | district: - -> Merkez
+[103] Cappadocia inans Cave | district: - -> Merkez
+[104] Maden Adası | district: - -> Ayvalık | city: Çanakkale -> Balıkesir
+[105] Sarımsaklı Plajı | district: - -> Ayvalık | city: Manisa -> Balıkesir
+[106] Taş Oda Gastronomi Mutfağı | district: - -> Merkez
+[107] Hacı Rıfatlar Konağı | Konaklama -Kahvaltı-Yemek | district: - -> Taraklı | city: Bilecik -> Sakarya
+[108] Karanlık Kanyon | district: - -> Kemaliye | city: Bayburt -> Erzincan
+[109] Kanyon | district: - -> Şişli | city: Tekirdağ -> İstanbul
+[110] Amorium Hotel | district: - -> Merkez
+[111] HİTİT OTEL ÇORUM | district: - -> Merkez
+[112] Sky Safran restaurant bar | district: - -> Manavgat | city: Yozgat -> Antalya
+[113] Karaman Aktekke Millet Bahçesi | district: - -> Merkez
+[114] Uçhisar Kalesi | district: - -> Merkez | city: Kayseri -> Nevşehir
+[115] Boğaz Beach | district: - -> Manavgat | city: Yozgat -> Antalya
+[116] Ardahan Kalesi | district: - -> Merkez
+[117] ULUBEY KANYONLARI CAM TERAS Hisar Hediyelik Yöresel | district: - -> Ulubey | city: Kütahya -> Uşak
+[118] Yaşayan Müze | district: - -> Beypazarı | city: Bilecik -> Ankara
+[119] Otel Düzce Sürur & SPA | district: - -> Merkez
+[120] Şeytan Sofrası | district: - -> Ayvalık | city: Çanakkale -> Balıkesir
+Done. checked=135, updated=120, dry_run=false, max_updates=120
+[RUN] pass 2/3 finished
+[RUN] pass 3/3 started...
+Loading provinces/districts...
+Loading POIs...
+POI loaded: 27008
+Mismatch candidates: 21
+[1] Göl Kafe | district: - -> Merkez
+[2] Kütahya Kalesi | district: - -> Merkez
+[3] Özkonak Yeraltı Şehri | district: - -> Avanos | city: Yozgat -> Nevşehir
+[4] Çiftlik Restaurant | district: - -> Merkez
+Done. checked=21, updated=4, dry_run=false, max_updates=120
+[RUN] pass 3/3 finished

@@ -1,0 +1,23 @@
+{
+  "generated_at": "2026-03-05T23:53:49.110Z",
+  "before_report": "/Users/yunusgunes/Desktop/02_Projeler/routevia/docs/reports/poi_district_quality_before_20260306_025336.json",
+  "after_report": "/Users/yunusgunes/Desktop/02_Projeler/routevia/docs/reports/poi_district_quality_after_20260306_025336.json",
+  "run_log": "/Users/yunusgunes/Desktop/02_Projeler/routevia/docs/reports/poi_district_cleanup_run_20260306_025336.log",
+  "before": {
+    "total_verified_pois": 27008,
+    "missing_district_count": 17,
+    "invalid_district_count": 0,
+    "issue_rate": 0.0006
+  },
+  "after": {
+    "total_verified_pois": 27008,
+    "missing_district_count": 0,
+    "invalid_district_count": 0,
+    "issue_rate": 0
+  },
+  "delta": {
+    "missing_district_reduced_by": 17,
+    "invalid_district_reduced_by": 0,
+    "issue_rate_change": -0.0006
+  }
+}

@@ -1,0 +1,164 @@
+[RUN] passes=5 max_updates=120 delay_ms=1100
+[RUN] pass 1/5 started...
+Loading provinces/districts...
+Loading POIs...
+POI loaded: 27008
+Mismatch candidates: 389
+[1] Heybeliada | İstanbul: - -> Adalar
+[2] Laden Kahvaltı & Et Restoran | Çanakkale: - -> Ayvacık
+[3] Kocahan | Ankara: - -> Nallıhan
+[4] Develi 1912 Kalamış | İstanbul: - -> Kadıköy
+[5] Andriake Camping Demre | Antalya: - -> Demre
+[6] Assos Hestia Otel | Çanakkale: - -> Ayvacık
+[7] Ethem Efendi Kahvaltı Bağdat Caddesi | İstanbul: - -> Kadıköy
+[8] ODTÜ Ormanı | Ankara: - -> Çankaya
+[9] Gilindire Mağarası | Yozgat: - -> Aydıncık
+[10] Dem Moda | İstanbul: - -> Kadıköy
+[11] Yumrukaya Piknik Alanı | Kocaeli: - -> Gebze
+[12] Beta Tea House | Adana: - -> Seyhan
+[13] Bayraktepe Denize Sevgi Parkı @darıcasevgiparkı #darıcasevgiparkı | Kocaeli: - -> Darıca
+[14] Yaşayan Müze | Ankara: - -> Beypazarı
+[15] Fahriye Cafe | İstanbul: - -> Kadıköy
+[16] Hotel Balikcilar | Konya: - -> Karatay
+[17] Koço Restaurant | İstanbul: - -> Kadıköy
+[18] Battalgazi Otağı | Malatya: - -> Battalgazi
+[19] Ürgüp Deringoller Breakfast&Cafe | Nevşehir: - -> Ürgüp
+[20] Taşliman Otel Çınarcık Yalova | Yalova: - -> Çınarcık
+[21] Hüdavendigar Kent Parkı | Bursa: - -> Osmangazi
+[22] Artukbey Hatay - SUVAROĞLU | Hatay: - -> Reyhanlı
+[23] Mem-u Zin Türbesi | Şırnak: - -> Cizre
+[24] Kaynarpınar Mesire Alanı | Yozgat: - -> Çayıralan
+[25] Bayçöpşiş | İstanbul: - -> Sarıyer
+[26] Irmak Mesire Alanı | Gişe Belgrad Ormanı | İstanbul: - -> Sarıyer
+[27] Aksaç Hotel | Malatya: - -> Yeşilyurt
+[28] Emirgan Sütiş | İstanbul: - -> Sarıyer
+[29] Four Points by Sheraton Istanbul Kagithane | İstanbul: - -> Kağıthane
+[30] Tavşanlı Belediyesi Balıklı Parkı | Kütahya: - -> Tavşanlı
+[31] Assos Kadırga Otel Restaurant & Beach | Çanakkale: - -> Ayvacık
+[32] Rumeli Feneri | İstanbul: - -> Sarıyer
+[33] Köfteci Nevzat Usta | Konya: - -> Karatay
+[34] Taraklı | Sakarya: - -> Taraklı
+[35] Flue Club | Nevşehir: - -> Ürgüp
+[36] Kekova Tekne Turu-Halil Kaptan-Kekova Private Boat Tour | Antalya: - -> Demre
+[37] Melek Hotels Moda | İstanbul: - -> Kadıköy
+[38] Munchies Crepes & Pancakes | İstanbul: - -> Kadıköy
+[39] Aydede Restaurant | Çanakkale: - -> Ayvacık
+[40] Rönesans Cafe&Restaurant | Kars: - -> Sarıkamış
+[41] MEVLANA PARKI | Yozgat: - -> Boğazlıyan
+[42] Rumeli Kale cafe & Restaurant (Merkez) | İstanbul: - -> Sarıyer
+[43] Trabzonspor M.Şamil Ekinci Müzesi | Trabzon: - -> Ortahisar
+[44] Canbazoğlu Et Mangal Kahvaltı | Konya: - -> Ereğli
+[45] GRAND BOĞAZİÇİ OTEL | Hatay: - -> Defne
+[46] Midin Pizza | Şırnak: - -> İdil
+[47] Karagöl Jeositi | Ankara: - -> Kızılcahamam
+[48] Meşhur Köfteci Mustafa | Sakarya: - -> Adapazarı
+[49] Su Otel | İzmir: - -> Bayındır
+[50] Adabalik restoran | Ardahan: - -> Çıldır
+[51] Karaalioğlu Parkı | Antalya: - -> Muratpaşa
+[52] Bablin Butik Otel | Konya: - -> Karatay
+[53] Side Star Resort Hotel | Antalya: - -> Manavgat
+[54] Bizim Lokanta Sırık Kebabı | Çorum: - -> Osmancık
+[55] Kozluyalı Glamping | Çanakkale: - -> Ayvacık
+[56] Bop Breakfast Of Pan | İstanbul: - -> Kadıköy
+[57] Kayseri Hayvanat Bahçesi | Kayseri: - -> Kocasinan
+[58] Site 2 Lokantası Siteler | Ankara: - -> Altındağ
+[59] Hadrian Kapısı | Antalya: - -> Muratpaşa
+[60] Balıkesir Saat Kulesi | Balıkesir: - -> Karesi
+[61] Adana Sinema Müzesi | Adana: - -> Seyhan
+[62] Şira Munzur Et Lokantası | Tunceli: - -> Ovacık
+[63] İskenderun Park Forbes AVM | Hatay: - -> İskenderun
+[64] Tepe Cafe Restaurant Sarıyer - Boğaz Manzarasında Kahvaltı Keyfi - İstanbul Bosphorus Breakfast | İstanbul: - -> Sarıyer
+[65] Davinci Coffee Shop - Yeni Nesil Kahve Dükkanı | Gaziantep: - -> Şehitkamil
+[66] Çetmihan Hotel | Çanakkale: - -> Ayvacık
+[67] Sarıkamış Kültür Evi mağara caffe | Kars: - -> Sarıkamış
+[68] Sunken City Kekova Tours | Antalya: - -> Demre
+[69] Mavi Bayrak Halk Plajı | İzmir: - -> Dikili
+[70] Kıdrak Beach | Muğla: - -> Fethiye
+[71] Necmi Asfuroğlu Arkeoloji Müzesi | Hatay: - -> Antakya
+[72] KARDEŞLER RESTORAN | Aksaray: - -> Sultanhanı
+[73] Sunset Grill&Bar | İstanbul: - -> Beşiktaş
+[74] Halilülrahman dinlenme tesisleri | Adana: - -> Pozantı
+[75] Katherina Köşkü Kalıntıları | Kars: - -> Sarıkamış
+[76] HayatPark | Antalya: - -> Konyaaltı
+[77] Sapanca Gölü | Sakarya: - -> Sapanca
+[78] Erdoğan Balıkçılık | Zonguldak: - -> Alaplı
+[79] Urartu Han Van Kahvaltısı ve Yöresel Yemekler | Van: - -> İpekyolu
+[80] Torbalı Kent Ormanı | İzmir: - -> Torbalı
+[81] Esire Termal | Kütahya: - -> Hisarcık
+[82] Petek Pastanesi | Hatay: - -> İskenderun
+[83] Çobandede Parkı | Adana: - -> Çukurova
+[84] Kadıköy White House Otel | İstanbul: - -> Kadıköy
+[85] Atatürk Kent Ormanı | İstanbul: - -> Sarıyer
+[86] Konya Sufi Restaurant Geleneksel Konya Mutfağı | Konya: - -> Karatay
+[87] Mimar Sinan Evi | Kayseri: - -> Melikgazi
+[88] Lui Pizza & Pasta | Çanakkale: - -> Ayvacık
+[89] Grand Hotel Gaziantep | Gaziantep: - -> Şehitkamil
+[90] Özgürlük Parkı | İstanbul: - -> Kadıköy
+[91] Konya Kulesite AVM | Konya: - -> Selçuklu
+[92] Adana Müzesi | Adana: - -> Seyhan
+[93] Mirsoum Han HOTEL | Mardin: - -> Artuklu
+[94] Büyük Dipsiz Göl | Yalova: - -> Çınarcık
+[95] Hacıhamza Kalesi | Çorum: - -> Kargı
+[96] The Grand Tarabya | İstanbul: - -> Sarıyer
+[97] İnözü Vadisi | Ankara: - -> Beypazarı
+[98] Çorba Diyarı | Konya: - -> Karapınar
+[99] DİLARA OTEL | Hatay: - -> Reyhanlı
+[100] Dora Butik Otel | Trabzon: - -> Araklı
+[101] Yeşilyurt Lezz-et Köşe'de Cafe & Restaurant | Çanakkale: - -> Ayvacık
+[102] Samandağ Plajı | Hatay: - -> Samandağ
+[103] Konak Avula Boutique Hotel | Hatay: - -> Antakya
+[104] Evrenli Doğal Park | Uşak: - -> Sivaslı
+[105] Assos Palamud Restaurant | Çanakkale: - -> Ayvacık
+[106] Zeytinli Rock Festivali Plaj | Balıkesir: - -> Edremit
+[107] Ali Dayının Yeri | Malatya: - -> Doğanşehir
+[108] Keçi Bungalow | Çanakkale: - -> Ayvacık
+[109] İzmir Arkeoloji Müzesi | İzmir: - -> Konak
+[110] Tren müzesi çamlık | İzmir: - -> Selçuk
+[111] Doors Urla Hotel & Bungalows | İzmir: - -> Urla
+[112] Selçuklu Uygarlığı Müzesi | Kayseri: - -> Kocasinan
+[113] Demokrasi ve Özgürlükler Adası | İstanbul: - -> Adalar
+[114] Emirgan Tulip Gardens | İstanbul: - -> Sarıyer
+[115] Güllük Dağı Termessos Milli Parkı | Antalya: - -> Döşemealtı
+[116] Hotel Su | Antalya: - -> Muratpaşa
+[117] Ida House Assos | Çanakkale: - -> Ayvacık
+[118] Lale Müzesi | İstanbul: - -> Sarıyer
+[119] İstinye Sahili | İstanbul: - -> Sarıyer
+[120] Vehbi Koç Evi | İstanbul: - -> Sarıyer
+Done. checked=380, updated=120, dry_run=false, max_updates=120
+[RUN] pass 1/5 finished
+[RUN] pass 2/5 started...
+Loading provinces/districts...
+Loading POIs...
+POI loaded: 27008
+Mismatch candidates: 269
+[1] Kekova Tekne Turu Durali Kaptan | Antalya: - -> Demre
+[2] Surp Takavor Ermeni Kilisesi | İstanbul: - -> Kadıköy
+[3] Belediye Parkı | Bingöl: - -> Kiğı
+[4] Cuppa Beach & Glamping | Çanakkale: - -> Ayvacık
+[5] ROP ROOMY | İstanbul: - -> Kadıköy
+[6] Şelale Balık lokantası | Rize: - -> Ardeşen
+[7] Dostlar Sofrası | Ankara: - -> Nallıhan
+[8] Tarım Kredi Mola Restoran | Denizli: - -> Acıpayam
+Done. checked=269, updated=8, dry_run=false, max_updates=120
+[RUN] pass 2/5 finished
+[RUN] pass 3/5 started...
+Loading provinces/districts...
+Loading POIs...
+POI loaded: 27008
+Mismatch candidates: 261
+Done. checked=261, updated=0, dry_run=false, max_updates=120
+[RUN] pass 3/5 finished
+[RUN] pass 4/5 started...
+Loading provinces/districts...
+Loading POIs...
+POI loaded: 27008
+Mismatch candidates: 261
+Done. checked=261, updated=0, dry_run=false, max_updates=120
+[RUN] pass 4/5 finished
+[RUN] pass 5/5 started...
+Loading provinces/districts...
+Loading POIs...
+POI loaded: 27008
+Mismatch candidates: 261
+Done. checked=261, updated=0, dry_run=false, max_updates=120
+[RUN] pass 5/5 finished

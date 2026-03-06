@@ -1,0 +1,175 @@
+{
+  "started_at": "2026-02-25T14:54:36.937Z",
+  "threshold": 120,
+  "raw_table": "places",
+  "batch": 1000,
+  "target_count": 15,
+  "provinces": [
+    {
+      "slug": "agri",
+      "province": "Ağrı",
+      "before": 110,
+      "after": 110,
+      "delta": 0,
+      "scanned": 126,
+      "inserted": 0,
+      "linked": 0,
+      "calls": 2
+    },
+    {
+      "slug": "aksaray",
+      "province": "Aksaray",
+      "before": 107,
+      "after": 145,
+      "delta": 38,
+      "scanned": 115,
+      "inserted": 108,
+      "linked": 108,
+      "calls": 2
+    },
+    {
+      "slug": "amasya",
+      "province": "Amasya",
+      "before": 98,
+      "after": 141,
+      "delta": 43,
+      "scanned": 110,
+      "inserted": 104,
+      "linked": 104,
+      "calls": 2
+    },
+    {
+      "slug": "ardahan",
+      "province": "Ardahan",
+      "before": 119,
+      "after": 139,
+      "delta": 20,
+      "scanned": 101,
+      "inserted": 96,
+      "linked": 96,
+      "calls": 2
+    },
+    {
+      "slug": "bartin",
+      "province": "Bartın",
+      "before": 100,
+      "after": 100,
+      "delta": 0,
+      "scanned": 104,
+      "inserted": 0,
+      "linked": 0,
+      "calls": 2
+    },
+    {
+      "slug": "bayburt",
+      "province": "Bayburt",
+      "before": 93,
+      "after": 97,
+      "delta": 4,
+      "scanned": 64,
+      "inserted": 62,
+      "linked": 62,
+      "calls": 2
+    },
+    {
+      "slug": "bingol",
+      "province": "Bingöl",
+      "before": 83,
+      "after": 139,
+      "delta": 56,
+      "scanned": 119,
+      "inserted": 112,
+      "linked": 112,
+      "calls": 2
+    },
+    {
+      "slug": "igdir",
+      "province": "Iğdır",
+      "before": 45,
+      "after": 45,
+      "delta": 0,
+      "scanned": 51,
+      "inserted": 0,
+      "linked": 0,
+      "calls": 2
+    },
+    {
+      "slug": "karabuk",
+      "province": "Karabük",
+      "before": 93,
+      "after": 141,
+      "delta": 48,
+      "scanned": 100,
+      "inserted": 95,
+      "linked": 95,
+      "calls": 2
+    },
+    {
+      "slug": "kars",
+      "province": "Kars",
+      "before": 112,
+      "after": 158,
+      "delta": 46,
+      "scanned": 118,
+      "inserted": 111,
+      "linked": 111,
+      "calls": 2
+    },
+    {
+      "slug": "kilis",
+      "province": "Kilis",
+      "before": 116,
+      "after": 116,
+      "delta": 0,
+      "scanned": 77,
+      "inserted": 74,
+      "linked": 74,
+      "calls": 2
+    },
+    {
+      "slug": "kirklareli",
+      "province": "Kırklareli",
+      "before": 89,
+      "after": 89,
+      "delta": 0,
+      "scanned": 98,
+      "inserted": 0,
+      "linked": 0,
+      "calls": 2
+    },
+    {
+      "slug": "kirsehir",
+      "province": "Kırşehir",
+      "before": 113,
+      "after": 113,
+      "delta": 0,
+      "scanned": 127,
+      "inserted": 0,
+      "linked": 0,
+      "calls": 2
+    },
+    {
+      "slug": "mus",
+      "province": "Muş",
+      "before": 114,
+      "after": 114,
+      "delta": 0,
+      "scanned": 81,
+      "inserted": 76,
+      "linked": 76,
+      "calls": 2
+    },
+    {
+      "slug": "yalova",
+      "province": "Yalova",
+      "before": 87,
+      "after": 127,
+      "delta": 40,
+      "scanned": 89,
+      "inserted": 84,
+      "linked": 84,
+      "calls": 2
+    }
+  ],
+  "finished_at": "2026-02-25T14:57:45.089Z"
+}

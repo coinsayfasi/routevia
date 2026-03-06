@@ -1,0 +1,25 @@
+[RUN] passes=1 max_updates=80 delay_ms=1100
+[RUN] pass 1/1 started...
+Loading provinces/districts...
+Loading POIs...
+POI loaded: 27008
+Mismatch candidates: 17
+[1] CEBECİ OTEL & RESTAURANT | district: - -> Merkez [manual]
+[2] Özdilek Uşak AVM | district: - -> Merkez [manual]
+[3] Dereova şelalesi | district: - -> Nazımiye [manual]
+[4] Hotel Akdağ | district: - -> Merkez [manual]
+[5] Nest Hotel | district: - -> Merkez [manual]
+[6] günpınar şelalesi tabiat parkı | district: - -> Darende | city: Tunceli -> Malatya [manual]
+[7] Altayhan Otel | district: - -> Merkez [manual]
+[8] Yücel Hotel | district: - -> Merkez [manual]
+[9] Uşak Konağı | district: - -> Merkez [manual]
+[10] Uşak Harran Kebap Baklava | district: - -> Merkez [manual]
+[11] Tavşancıl Sahil Parkı | district: - -> Dilovası | city: Kütahya -> Kocaeli [manual]
+[12] Asırlık İlyas Usta Lokantası | district: - -> Merkez [manual]
+[13] Alesta Cafe & Kahvaltı Salonu | district: - -> Merkez [manual]
+[14] Baran Aile Çay Bahçesi ve Restaurant | district: - -> Nazımiye [manual]
+[15] Elit Otelhan & Küçükağa Restaurant | district: - -> Merkez [manual]
+[16] Shish go Steakhouse | district: - -> Merkez [manual]
+[17] Uluhan Otel | district: - -> Merkez [manual]
+Done. checked=17, updated=17, dry_run=false, max_updates=80
+[RUN] pass 1/1 finished

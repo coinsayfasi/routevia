@@ -1,0 +1,10 @@
+{
+  "generated_at": "2026-03-05T20:56:21.018Z",
+  "total_verified_pois": 27008,
+  "unknown_province_count": 0,
+  "missing_district_count": 389,
+  "invalid_district_count": 0,
+  "issue_rate": 0.0144,
+  "top_cities_by_invalid_district": [],
+  "sample_invalid_rows": []
+}
