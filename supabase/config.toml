@@ -37,7 +37,7 @@ file_size_limit = "50MiB"
 
 [auth]
 enabled = true
-site_url = "https://auth.routevia.tabserve.com.tr"
+site_url = "routevia://auth-callback"
 additional_redirect_urls = [
   "routevia://auth-callback",
   "https://auth.routevia.tabserve.com.tr/*",
@@ -51,7 +51,7 @@ enable_anonymous_sign_ins = false
 enable_signup = true
 enable_confirmations = true
 max_frequency = "1m0s"
-otp_length = 8
+otp_length = 6
 
 [auth.email.smtp]
 enabled = true

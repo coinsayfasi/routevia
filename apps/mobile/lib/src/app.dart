@@ -45,6 +45,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(path: '/', redirect: (context, state) => '/home'),
       GoRoute(path: '/auth', builder: (context, state) => const AuthScreen()),
+      GoRoute(path: '/auth-callback', redirect: (context, state) => '/auth'),
       GoRoute(
         path: '/onboarding',
         builder: (context, state) => OnboardingScreen(

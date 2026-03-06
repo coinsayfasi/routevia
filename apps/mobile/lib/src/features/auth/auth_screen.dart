@@ -73,11 +73,11 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
     try {
       await ref.read(repositoryProvider).signInWithOtp(email);
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Giris baglantisi / kod e-postasi gonderildi.'),
+            content: Text(
+              'Giris e-postasi gonderildi. Baglantiya dokun veya kodu gir.',
+            ),
           ),
         );
         setState(() => _otpSent = true);
@@ -181,7 +181,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                 const SizedBox(height: 8),
                 Text(
                   _otpSent
-                      ? 'E-postana gelen 6 haneli kodu girerek devam et.'
+                      ? 'E-postadaki giris baglantisina dokunabilir veya 6 haneli kodu girebilirsin.'
                       : 'E-posta adresinle kod al, hizli ve guvenli sekilde giris yap.',
                   style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.78),
