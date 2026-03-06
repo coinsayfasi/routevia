@@ -1,6 +1,7 @@
 name: Mobile Quality Gate
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [ main, master, develop ]
