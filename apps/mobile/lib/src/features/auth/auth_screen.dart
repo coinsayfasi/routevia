@@ -75,7 +75,11 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('Giris kodu gonderildi.')));
+        ).showSnackBar(
+          const SnackBar(
+            content: Text('Giris baglantisi / kod e-postasi gonderildi.'),
+          ),
+        );
         setState(() => _otpSent = true);
       }
     } catch (e) {

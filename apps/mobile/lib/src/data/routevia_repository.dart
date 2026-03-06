@@ -45,6 +45,7 @@ class RouteviaRepository {
     await _client.auth.signInWithOtp(
       email: email.trim(),
       shouldCreateUser: true,
+      emailRedirectTo: 'routevia://auth-callback',
     );
   }
 
