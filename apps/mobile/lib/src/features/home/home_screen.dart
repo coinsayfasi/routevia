@@ -236,7 +236,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       try {
         provinces = await repo.listProvinces();
       } catch (_) {
-        startupWarning = 'İl verileri yüklenemedi. İnternet bağlantısını kontrol et.';
+        startupWarning =
+            'İl verileri yüklenemedi. İnternet bağlantısını kontrol et.';
       }
       if (provinces.isEmpty) {
         startupWarning ??=
@@ -755,21 +756,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Future<void> _openPromoApplication() async {
     // Ad/promo application is explicitly separated from organic ranking.
-    const formUrl = 'https://routevia.tabserve.com.tr/business';
-    const fallbackMail = 'mailto:routevia@tabserve.com.tr?subject=Routevia%20Tanitim%20Basvurusu';
-    final formUri = Uri.parse(formUrl);
+    const fallbackMail =
+        'mailto:routevia@tabserve.com.tr?subject=Routevia%20Tanitim%20Basvurusu';
     final mailUri = Uri.parse(fallbackMail);
     try {
-      final opened = await launchUrl(
-        formUri,
-        mode: LaunchMode.externalApplication,
-      );
-      if (opened) return;
       await launchUrl(mailUri, mode: LaunchMode.externalApplication);
     } catch (_) {
       if (!mounted) return;
       _showSnack(
-        'Basvuru formu acilamadi. routevia@tabserve.com.tr adresine yazabilirsin.',
+        'E-posta uygulamasi acilamadi. routevia@tabserve.com.tr adresine yazabilirsin.',
       );
     }
   }
@@ -2635,9 +2630,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
           const SizedBox(width: 4),
           TextButton(
-            onPressed: () => _showSnack(
-              'Tanitim: routevia@tabserve.com.tr',
-            ),
+            onPressed: () => _showSnack('Tanitim: routevia@tabserve.com.tr'),
             child: const Text('Politika'),
           ),
         ],
