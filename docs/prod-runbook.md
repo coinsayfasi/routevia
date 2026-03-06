@@ -71,3 +71,23 @@ What it does nightly:
 
 Manual trigger:
 - GitHub Actions > `Nightly POI District Self-Heal` > `Run workflow`.
+
+## 9) Nightly Backend Smoke (GitHub Actions)
+Workflow:
+- `.github/workflows/nightly-backend-smoke.yml`
+
+Repository secrets required:
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+What it validates:
+- `provinces` count threshold
+- `apply_poi_location_overrides()` RPC health
+- `get_live_status` edge function health
+- District quality thresholds (`missing/invalid/issue_rate`)
+
+Artifact:
+- `nightly_backend_smoke_report.json`
+
+Manual trigger:
+- GitHub Actions > `Nightly Backend Smoke` > `Run workflow`.

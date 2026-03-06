@@ -1,0 +1,44 @@
+name: Nightly Backend Smoke
+
+on:
+  schedule:
+    - cron: "20 1 * * *"
+  workflow_dispatch:
+
+jobs:
+  backend-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      MIN_PROVINCES: "81"
+      MAX_MISSING_DISTRICT: "0"
+      MAX_INVALID_DISTRICT: "0"
+      MAX_ISSUE_RATE: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Validate required secrets
+        run: |
+          test -n "$SUPABASE_URL" || (echo "SUPABASE_URL is missing" && exit 1)
+          test -n "$SUPABASE_SERVICE_ROLE_KEY" || (echo "SUPABASE_SERVICE_ROLE_KEY is missing" && exit 1)
+
+      - name: Run backend smoke checks
+        run: |
+          mkdir -p docs/reports
+          node tools/backend_smoke_check.mjs > docs/reports/nightly_backend_smoke_report.json
+          cat docs/reports/nightly_backend_smoke_report.json
+
+      - name: Upload smoke report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-backend-smoke-report
+          path: docs/reports/nightly_backend_smoke_report.json
+          if-no-files-found: error

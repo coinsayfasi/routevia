@@ -278,7 +278,20 @@ class _MapScreenState extends ConsumerState<MapScreen>
   }
 
   Future<void> _loadViewportPlaces({bool force = false}) async {
-    final bounds = _mapController.camera.visibleBounds;
+    LatLngBounds? bounds;
+    try {
+      bounds = _mapController.camera.visibleBounds;
+    } catch (_) {
+      // Map controller may not be attached yet on first frame.
+      if (force) {
+        _viewportDebounce?.cancel();
+        _viewportDebounce = Timer(const Duration(milliseconds: 300), () {
+          if (!mounted) return;
+          _loadViewportPlaces(force: true);
+        });
+      }
+      return;
+    }
     if (!force && !_isSignificantBoundsChange(bounds, _zoom)) return;
 
     final cacheKey = _boundsCacheKey(bounds, _zoom);

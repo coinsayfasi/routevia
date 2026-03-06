@@ -37,15 +37,34 @@ file_size_limit = "50MiB"
 
 [auth]
 enabled = true
-site_url = "http://127.0.0.1:3000"
-additional_redirect_urls = ["http://127.0.0.1:3000", "routevia://auth-callback"]
+site_url = "https://auth.routevia.tabserve.com.tr"
+additional_redirect_urls = [
+  "routevia://auth-callback",
+  "https://auth.routevia.tabserve.com.tr/*",
+  "http://127.0.0.1:3000",
+]
 jwt_expiry = 3600
 enable_signup = true
 enable_anonymous_sign_ins = false
 
 [auth.email]
 enable_signup = true
-enable_confirmations = false
+enable_confirmations = true
+max_frequency = "1m0s"
+otp_length = 8
+
+[auth.email.smtp]
+enabled = true
+host = "smtp.resend.com"
+port = 587
+user = "resend"
+pass = "hash:643497893d51e00f78720812ef25edc9169f34bcfa3c69a05fe1d709b03ba20a"
+admin_email = "noreply@mail.routevia.tabserve.com.tr"
+sender_name = "Routevia"
+
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
 
 [edge_runtime]
 enabled = true

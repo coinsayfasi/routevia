@@ -230,16 +230,39 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     List<Map<String, dynamic>> provinces = const [];
     bool isAdmin = false;
     Map<String, dynamic>? profile;
+    String? startupWarning;
     try {
       try {
         provinces = await repo.listProvinces();
-        isAdmin = await repo.isCurrentUserAdmin();
-        profile = await repo.getMyProfile();
       } catch (_) {
+        startupWarning = 'İl verileri yüklenemedi. İnternet bağlantısını kontrol et.';
+      }
+      if (provinces.isEmpty) {
+        startupWarning ??=
+            'İl verileri geçici olarak boş geldi. Lütfen tekrar dene.';
+      }
+
+      try {
+        isAdmin = await repo.isCurrentUserAdmin();
+      } catch (_) {}
+      try {
+        profile = await repo.getMyProfile();
+      } catch (_) {}
+
+      if (provinces.isEmpty) {
         if (!mounted) return;
-        _showSnack(
-          'İl verileri yüklenemedi. İnternet bağlantısını kontrol et.',
-        );
+        setState(() {
+          _provinces = const [];
+          _districts = const [];
+          _provinceSlug = null;
+          _districtId = null;
+          _position = null;
+          _popularPlaces = const [];
+          _scenicPicks = const [];
+          _foodPicks = const [];
+        });
+        _showSnack(startupWarning ?? 'Başlangıç verileri yüklenemedi.');
+        return;
       }
 
       final onboardingCompleted =
@@ -263,20 +286,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       String? initialProvince = preferredProvince;
 
       if (position != null) {
+        final posLat = position.latitude;
+        final posLng = position.longitude;
         final withCoords = provinces
             .where((p) => p['lat'] != null && p['lng'] != null)
             .toList();
         if (withCoords.isNotEmpty) {
           withCoords.sort((a, b) {
             final da = _distanceKm(
-              position!.latitude,
-              position.longitude,
+              posLat,
+              posLng,
               (a['lat'] as num).toDouble(),
               (a['lng'] as num).toDouble(),
             );
             final db = _distanceKm(
-              position.latitude,
-              position.longitude,
+              posLat,
+              posLng,
               (b['lat'] as num).toDouble(),
               (b['lng'] as num).toDouble(),
             );
@@ -307,9 +332,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         return;
       }
 
-      final entitlements = Supabase.instance.client.auth.currentSession == null
-          ? const <Map<String, dynamic>>[]
-          : await repo.getEntitlements();
+      List<Map<String, dynamic>> entitlements = const [];
+      if (Supabase.instance.client.auth.currentSession != null) {
+        try {
+          entitlements = await repo.getEntitlements();
+        } catch (_) {
+          entitlements = const [];
+        }
+      }
       DateTime? expiry;
       for (final e in entitlements) {
         if ((e['entitlement_key'] as String?) == 'pro_preview_7d') {
@@ -337,6 +367,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
       await _loadPopularForProvince();
       await _loadOfflinePacks();
+      if (startupWarning != null && mounted) {
+        _showSnack(startupWarning);
+      }
 
       if (!mounted) return;
       if ((permission == LocationPermission.denied ||
@@ -345,6 +378,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           Supabase.instance.client.auth.currentSession != null) {
         context.go('/location-setup');
         return;
+      }
+    } catch (e, st) {
+      debugPrint('[home] _loadInitial failed: $e');
+      debugPrintStack(stackTrace: st);
+      if (mounted) {
+        _showSnack('Başlangıç verileri yüklenemedi. Lütfen tekrar dene.');
       }
     } finally {
       if (mounted && _dataLoading) {
@@ -358,6 +397,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (slug == null) return;
     setState(() => _popularLoading = true);
     final repo = ref.read(repositoryProvider);
+    var serviceError = false;
     try {
       var places = await repo.listProvinceHubPlaces(
         provinceSlug: slug,
@@ -383,8 +423,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         final meta = Map<String, dynamic>.from(
           fallbackBundle['meta'] as Map? ?? const {},
         );
-        _popularServiceError =
-            (meta['reason'] as String?) == 'service_unavailable';
+        serviceError = (meta['reason'] as String?) == 'service_unavailable';
         final top =
             (fallbackBundle['top_picks'] as List<PlaceModel>? ?? const []);
         places = top.isNotEmpty
@@ -405,7 +444,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       }
       if (!mounted) return;
       setState(() {
-        _popularServiceError = false;
+        _popularServiceError = serviceError;
         _popularPlaces = _buildDiversePicks(places, limit: 16);
         _scenicPicks = places
             .where(
@@ -431,6 +470,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       unawaited(_loadSmartSeason());
       unawaited(_loadLiveStatusForTopPicks());
     } catch (_) {
+      serviceError = true;
       var places = await _fallbackTopPicks(repo, slug);
       if (places.isEmpty) {
         places = await repo.listProvinceOrNationalTopPicks(
@@ -440,7 +480,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       }
       if (!mounted) return;
       setState(() {
-        _popularServiceError = true;
+        _popularServiceError = serviceError;
         _popularPlaces = _buildDiversePicks(places, limit: 16);
         _scenicPicks = places
             .where(
@@ -488,9 +528,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Future<void> _loadOfflinePacks() async {
-    final map = await ref.read(repositoryProvider).listOfflineCityPacks();
-    if (!mounted) return;
-    setState(() => _offlinePacks = map);
+    try {
+      final map = await ref.read(repositoryProvider).listOfflineCityPacks();
+      if (!mounted) return;
+      setState(() => _offlinePacks = map);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _offlinePacks = const {});
+    }
   }
 
   Future<void> _downloadOfflinePack() async {
