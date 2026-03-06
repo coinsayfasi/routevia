@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme.dart';
 import '../../data/providers.dart';
@@ -750,6 +751,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         margin: const EdgeInsets.all(16),
       ),
     );
+  }
+
+  Future<void> _openPromoApplication() async {
+    // Ad/promo application is explicitly separated from organic ranking.
+    const formUrl = 'https://routevia.tabserve.com.tr/business';
+    const fallbackMail = 'mailto:routevia@tabserve.com.tr?subject=Routevia%20Tanitim%20Basvurusu';
+    final formUri = Uri.parse(formUrl);
+    final mailUri = Uri.parse(fallbackMail);
+    try {
+      final opened = await launchUrl(
+        formUri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (opened) return;
+      await launchUrl(mailUri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (!mounted) return;
+      _showSnack(
+        'Basvuru formu acilamadi. routevia@tabserve.com.tr adresine yazabilirsin.',
+      );
+    }
   }
 
   Future<void> _openProvincePicker() async {
@@ -2564,19 +2586,59 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
           ),
           const SizedBox(width: 12),
-          const Expanded(
-            child: Text(
-              'İşletmeni öne çıkar: Premium keşif kartlarında görün.',
-              style: TextStyle(
-                fontWeight: FontWeight.w600,
-                fontSize: 13,
-                color: RouteviaColors.textPrimary,
-              ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFEDD5),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: const Color(0xFFFED7AA)),
+                  ),
+                  child: const Text(
+                    'Sponsorlu / Reklam',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF9A3412),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'İşletmeni sponsorlu alanda göster. Organik sıralama ayrı kalır.',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    color: RouteviaColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Politika: reklam içeriği etiketlenir ve kullanıcıya şeffaf gösterilir.',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: RouteviaColors.textSecondary,
+                  ),
+                ),
+              ],
             ),
           ),
           TextButton(
-            onPressed: () => _showSnack('Yakında: Tanıtım başvurusu ekranı'),
+            onPressed: _openPromoApplication,
             child: const Text('Başvur'),
+          ),
+          const SizedBox(width: 4),
+          TextButton(
+            onPressed: () => _showSnack(
+              'Tanitim: routevia@tabserve.com.tr',
+            ),
+            child: const Text('Politika'),
           ),
         ],
       ),
