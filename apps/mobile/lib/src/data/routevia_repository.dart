@@ -2282,15 +2282,39 @@ class RouteviaRepository {
     String photoId, {
     required String status, // 'approved' | 'rejected' | 'hidden'
     String? note,
+    bool setCover = false, // If true, set as place cover image
   }) async {
+    final now = DateTime.now().toUtc().toIso8601String();
     await _client
         .from('place_photos')
         .update({
           'status': status,
           'moderation_note': note,
-          'updated_at': DateTime.now().toUtc().toIso8601String(),
+          'updated_at': now,
         })
         .eq('id', photoId);
+
+    // If approved and setCover, update the place's main media
+    if (status == 'approved' && setCover) {
+      final rows = await _client
+          .from('place_photos')
+          .select('place_id, image_url')
+          .eq('id', photoId)
+          .maybeSingle();
+      if (rows != null) {
+        final placeId = rows['place_id'] as String?;
+        final imageUrl = rows['image_url'] as String?;
+        if (placeId != null && imageUrl != null) {
+          // Update place's first media slot or community state cover
+          await _client
+              .from('place_community_state')
+              .upsert({
+                'place_id': placeId,
+                'cover_photo': imageUrl,
+              }, onConflict: 'place_id');
+        }
+      }
+    }
   }
 
   Future<List<Map<String, dynamic>>> adminGetPendingReviews({

@@ -44,14 +44,23 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
     setState(() => _loading = true);
     try {
       await ref.read(repositoryProvider).updatePassword(password);
-      // Refresh session so the new password's token is active
+      // After password update Supabase clears the recovery session.
+      // Sign out explicitly so state is clean, then redirect to /auth.
       try {
-        await Supabase.instance.client.auth.refreshSession();
+        await Supabase.instance.client.auth.signOut();
       } catch (_) {}
       if (!mounted) return;
       setState(() => _done = true);
       await Future.delayed(const Duration(seconds: 2));
-      if (mounted) context.go('/home');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Şifren güncellendi! Yeni şifrenle giriş yapabilirsin.'),
+            duration: Duration(seconds: 4),
+          ),
+        );
+        context.go('/auth');
+      }
     } catch (e) {
       if (!mounted) return;
       _snack('Hata: ${e.toString()}');

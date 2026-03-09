@@ -343,14 +343,17 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
     }
   }
 
-  Future<void> _reviewPhoto(String photoId, String status) async {
+  Future<void> _reviewPhoto(String photoId, String status, {bool setCover = false}) async {
     try {
       await ref.read(repositoryProvider).adminReviewPhoto(
         photoId,
         status: status,
         note: status == 'approved' ? 'admin_approved' : 'admin_rejected',
+        setCover: setCover,
       );
-      _toast(status == 'approved' ? 'Fotoğraf yayınlandı.' : 'Reddedildi.');
+      _toast(status == 'approved'
+          ? (setCover ? 'Fotoğraf yayınlandı ve ana görsel yapıldı.' : 'Fotoğraf yayınlandı.')
+          : 'Reddedildi.');
       await _loadPendingPhotos();
     } catch (e) {
       _toast(friendlyError(e));
@@ -877,6 +880,8 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
                       photo: photo,
                       onApprove: () =>
                           _reviewPhoto(photo['id'] as String, 'approved'),
+                      onApproveAsCover: () =>
+                          _reviewPhoto(photo['id'] as String, 'approved', setCover: true),
                       onReject: () =>
                           _reviewPhoto(photo['id'] as String, 'rejected'),
                     );
@@ -1874,11 +1879,13 @@ class _PhotoCard extends StatelessWidget {
   const _PhotoCard({
     required this.photo,
     required this.onApprove,
+    required this.onApproveAsCover,
     required this.onReject,
   });
 
   final Map<String, dynamic> photo;
   final VoidCallback onApprove;
+  final VoidCallback onApproveAsCover;
   final VoidCallback onReject;
 
   @override
@@ -1936,28 +1943,46 @@ class _PhotoCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 10),
-                Row(
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: onApprove,
-                        icon: const Icon(Icons.check_rounded, size: 18),
-                        label: const Text('Yayınla'),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xFF15803D),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: onApprove,
+                            icon: const Icon(Icons.check_rounded, size: 16),
+                            label: const Text('Yayınla'),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF15803D),
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                            ),
+                          ),
                         ),
-                      ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: onReject,
+                            icon: const Icon(Icons.close_rounded, size: 16),
+                            label: const Text('Reddet'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFFDC2626),
+                              side: const BorderSide(color: Color(0xFFDC2626)),
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: onReject,
-                        icon: const Icon(Icons.close_rounded, size: 18),
-                        label: const Text('Reddet'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFFDC2626),
-                          side: const BorderSide(color: Color(0xFFDC2626)),
-                        ),
+                    const SizedBox(height: 6),
+                    OutlinedButton.icon(
+                      onPressed: onApproveAsCover,
+                      icon: const Icon(Icons.image_rounded, size: 16),
+                      label: const Text('Yayınla + Ana Görsel Yap'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF0B3B68),
+                        side: const BorderSide(color: Color(0xFF0B3B68)),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
                       ),
                     ),
                   ],
