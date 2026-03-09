@@ -1,0 +1,120 @@
+:root {
+  --bg: #f5f7fb;
+  --panel: #ffffff;
+  --ink: #10233f;
+  --muted: #5b6b82;
+  --line: #dce5f0;
+  --accent: #0f766e;
+  --accent-2: #0b1f3a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  background:
+    radial-gradient(circle at top right, rgba(125, 211, 252, 0.24), transparent 32%),
+    linear-gradient(180deg, #eef5ff 0%, var(--bg) 55%, #f8fbff 100%);
+  color: var(--ink);
+}
+
+.shell {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 28px 18px 64px;
+}
+
+.hero {
+  background: linear-gradient(135deg, var(--accent-2), #133e75);
+  color: white;
+  border-radius: 28px;
+  padding: 32px 28px;
+  box-shadow: 0 20px 50px rgba(11, 31, 58, 0.18);
+}
+
+.hero h1 {
+  margin: 0 0 10px;
+  font-size: clamp(32px, 5vw, 52px);
+  line-height: 1;
+}
+
+.hero p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.8);
+  max-width: 700px;
+  line-height: 1.6;
+}
+
+.nav {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+
+.nav a,
+.cta {
+  text-decoration: none;
+  color: white;
+  padding: 11px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  margin-top: 22px;
+}
+
+.card,
+.section {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 20px;
+  box-shadow: 0 10px 24px rgba(16, 35, 63, 0.04);
+}
+
+.card h3,
+.section h2 {
+  margin-top: 0;
+}
+
+.section {
+  margin-top: 18px;
+}
+
+.section p,
+.section li,
+.card p {
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: #ebfffb;
+  padding: 6px 10px;
+  border-radius: 999px;
+}
+
+ul {
+  padding-left: 18px;
+}
+
+.footer {
+  margin-top: 30px;
+  color: var(--muted);
+  font-size: 14px;
+}
