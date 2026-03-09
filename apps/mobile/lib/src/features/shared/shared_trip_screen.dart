@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/error_utils.dart';
+
 class SharedTripScreen extends StatefulWidget {
   const SharedTripScreen({super.key});
 
@@ -27,7 +29,7 @@ class _SharedTripScreenState extends State<SharedTripScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Trip bulunamadi: $e')));
+      ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

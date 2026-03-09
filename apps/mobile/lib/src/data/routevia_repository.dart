@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
@@ -41,11 +43,193 @@ class RouteviaRepository {
     }
   }
 
+  Future<void> _persistTripArtifacts(TripPlan trip) async {
+    await _cache.saveLastTrip(trip.toMap());
+    await _cache.saveTripHistoryEntry(trip.toMap());
+  }
+
+  Future<TripPlan> _saveTripRemote(TripPlan trip) async {
+    final user = _client.auth.currentUser;
+    if (user == null) return trip;
+
+    final tripInsert = await _client
+        .from('trips_clean')
+        .insert({
+          'user_id': user.id,
+          'province_id': trip.province.id,
+          'days': trip.days,
+          'transport_mode': trip.transportMode,
+          'pace': trip.pace,
+          'persona_mode': trip.personaMode,
+          'preferences': trip.preferences,
+        })
+        .select('id')
+        .single();
+
+    final tripId = (tripInsert['id'] as String?) ?? trip.tripId;
+
+    try {
+      final dayPayload = trip.daysPlan
+          .map((day) => {'trip_id': tripId, 'day_number': day.dayNumber})
+          .toList();
+      final insertedDays = await _client
+          .from('trip_days_clean')
+          .insert(dayPayload)
+          .select('id,day_number');
+
+      final dayIdByNumber = {
+        for (final raw in (insertedDays as List))
+          (raw['day_number'] as num).toInt(): raw['id'] as String,
+      };
+
+      final stopPayload = <Map<String, dynamic>>[];
+      for (final day in trip.daysPlan) {
+        final tripDayId = dayIdByNumber[day.dayNumber];
+        if (tripDayId == null) continue;
+        for (final stop in day.stops) {
+          stopPayload.add({
+            'trip_day_id': tripDayId,
+            'place_id': stop.place.id,
+            'order_index': stop.orderIndex,
+            'arrival_time': stop.arrivalTime,
+            'duration_min': stop.durationMin,
+            'transport_mode': stop.transportMode,
+          });
+        }
+      }
+
+      if (stopPayload.isNotEmpty) {
+        await _client.from('trip_stops_clean').insert(stopPayload);
+      }
+
+      return TripPlan(
+        tripId: tripId,
+        days: trip.days,
+        transportMode: trip.transportMode,
+        pace: trip.pace,
+        personaMode: trip.personaMode,
+        preferences: trip.preferences,
+        province: trip.province,
+        daysPlan: trip.daysPlan,
+        startLat: trip.startLat,
+        startLng: trip.startLng,
+        radiusUsedKm: trip.radiusUsedKm,
+        districtStrict: trip.districtStrict,
+      );
+    } catch (_) {
+      await _client.from('trips_clean').delete().eq('id', tripId);
+      rethrow;
+    }
+  }
+
+  Future<void> _ensureFreshSession() async {
+    final session = _client.auth.currentSession;
+    if (session == null) return;
+    final expiresAt = session.expiresAt;
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    if (expiresAt == null || (expiresAt - now) <= 180) {
+      try {
+        await _client.auth.refreshSession();
+      } catch (e) {
+        // Only sign out if the refresh token is definitively invalid/expired.
+        // Transient network errors must NOT force sign-out — that causes the
+        // "oturum süreniz dolmuş" loop on poor connections.
+        final msg = e.toString().toLowerCase();
+        final isTokenInvalid =
+            msg.contains('invalid refresh token') ||
+            msg.contains('refresh_token_not_found') ||
+            msg.contains('token has expired') ||
+            msg.contains('user not found') ||
+            msg.contains('invalid_grant');
+        if (isTokenInvalid) {
+          try {
+            await _client.auth.signOut();
+          } catch (_) {}
+        }
+      }
+    }
+  }
+
+  Future<String> _requireAccessToken() async {
+    await _ensureFreshSession();
+    final token = _client.auth.currentSession?.accessToken;
+    if (token == null || token.isEmpty) {
+      throw Exception('Oturum bulunamadi. Lutfen tekrar giris yap.');
+    }
+    return token;
+  }
+
+  bool _isAuthError(Object error) {
+    final msg = error.toString().toLowerCase();
+    return msg.contains('functionexception(status: 401') ||
+        msg.contains('missing authorization header') ||
+        msg.contains('unauthorized') ||
+        msg.contains('invalid jwt') ||
+        (msg.contains('session') && msg.contains('expired'));
+  }
+
+  Future<dynamic> _invokeFunction(
+    String name, {
+    Object? body,
+    bool requireAuth = false,
+  }) async {
+    Future<dynamic> run() async {
+      await _ensureFreshSession();
+      final headers = <String, String>{};
+      if (requireAuth) {
+        headers['Authorization'] = 'Bearer ${await _requireAccessToken()}';
+      }
+      return _client.functions.invoke(name, body: body, headers: headers);
+    }
+
+    try {
+      return await run();
+    } catch (e) {
+      if (!requireAuth || !_isAuthError(e)) rethrow;
+      await _client.auth.refreshSession();
+      return run();
+    }
+  }
+
   Future<void> signInWithOtp(String email) async {
     await _client.auth.signInWithOtp(
       email: email.trim(),
       shouldCreateUser: true,
       emailRedirectTo: 'routevia://auth-callback',
+    );
+  }
+
+  Future<void> signInWithPassword({
+    required String email,
+    required String password,
+  }) async {
+    await _client.auth.signInWithPassword(
+      email: email.trim(),
+      password: password,
+    );
+  }
+
+  Future<void> signUpWithPassword({
+    required String email,
+    required String password,
+  }) async {
+    await _client.auth.signUp(
+      email: email.trim(),
+      password: password,
+      emailRedirectTo: 'routevia://auth-callback',
+    );
+  }
+
+  Future<void> resetPasswordForEmail(String email) async {
+    await _client.auth.resetPasswordForEmail(
+      email.trim(),
+      redirectTo: 'https://legal.routevia.tabserve.com.tr/auth-callback',
+    );
+  }
+
+  Future<void> updatePassword(String newPassword) async {
+    await _client.auth.updateUser(
+      UserAttributes(password: newPassword),
     );
   }
 
@@ -61,6 +245,7 @@ class RouteviaRepository {
   }
 
   Future<void> ensureProfile() async {
+    await _ensureFreshSession();
     final user = _client.auth.currentUser;
     if (user == null) return;
     await _client.from('profiles').upsert({
@@ -71,6 +256,7 @@ class RouteviaRepository {
   }
 
   Future<Map<String, dynamic>?> getMyProfile() async {
+    await _ensureFreshSession();
     final user = _client.auth.currentUser;
     if (user == null) return null;
     final row = await _client
@@ -90,6 +276,7 @@ class RouteviaRepository {
     required bool allowLocation,
     required bool allowNotifications,
   }) async {
+    await _ensureFreshSession();
     final user = _client.auth.currentUser;
     if (user == null) return;
     await _client.from('profiles').upsert({
@@ -112,6 +299,7 @@ class RouteviaRepository {
   }
 
   Future<bool> isCurrentUserAdmin() async {
+    await _ensureFreshSession();
     final user = _client.auth.currentUser;
     if (user == null) return false;
     try {
@@ -189,6 +377,7 @@ class RouteviaRepository {
     String? searchQuery,
     int limit = 1000,
     String? cityName,
+    String? districtName,
   }) async {
     final safeLimit = limit.clamp(1, 1000);
     dynamic query = _client
@@ -203,7 +392,9 @@ class RouteviaRepository {
     if (categories.isNotEmpty) {
       query = query.inFilter('category', categories);
     }
-    if (cityName != null && cityName.trim().isNotEmpty) {
+    if (districtName != null && districtName.trim().isNotEmpty) {
+      query = query.ilike('district', districtName.trim());
+    } else if (cityName != null && cityName.trim().isNotEmpty) {
       query = query.ilike('city', cityName.trim());
     }
     if (searchQuery != null && searchQuery.trim().isNotEmpty) {
@@ -237,6 +428,145 @@ class RouteviaRepository {
         .toList();
   }
 
+  static double _distanceKmRepo(
+    double lat1,
+    double lng1,
+    double lat2,
+    double lng2,
+  ) {
+    const r = 6371.0;
+    final dLat = (lat2 - lat1) * math.pi / 180.0;
+    final dLng = (lng2 - lng1) * math.pi / 180.0;
+    final a =
+        (math.sin(dLat / 2) * math.sin(dLat / 2)) +
+        math.cos(lat1 * math.pi / 180.0) *
+            math.cos(lat2 * math.pi / 180.0) *
+            (math.sin(dLng / 2) * math.sin(dLng / 2));
+    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+  }
+
+  // ── Tourist quality filter ───────────────────────────────────────────────
+
+  // Generic OSM names that are NOT tourist-worthy (exact, lowercase-trimmed)
+  static const _poisBlacklistExact = {
+    'park',
+    'çocuk parkı',
+    'çocuk oyun parkı',
+    'otopark',
+    'park yeri',
+    'eczane',
+    'banka',
+    'atm',
+    'ptt',
+    'ptt şubesi',
+    'okul',
+    'lise',
+    'ilkokul',
+    'ortaokul',
+    'kreş',
+    'anaokulu',
+    'yurt',
+    'hastane',
+    'klinik',
+    'sağlık ocağı',
+    'aile sağlığı merkezi',
+    'benzin',
+    'akaryakıt',
+    'akaryakıt istasyonu',
+    'benzin istasyonu',
+    'market',
+    'süpermarket',
+    'migros',
+    'bim',
+    'a101',
+    'şok',
+    'carrefour',
+    'otobüs durağı',
+    'durak',
+    'metro istasyonu',
+    'tren istasyonu',
+    'vergi dairesi',
+    'belediye',
+    'muhtarlık',
+    'karakol',
+    'emniyet',
+    'trafo',
+    'su deposu',
+    'elektrik',
+    'çöp',
+  };
+
+  // Keywords anywhere in name that disqualify a POI
+  static const _poisBlacklistKeywords = [
+    'otopark',
+    'akaryakıt',
+    'benzin istasyonu',
+    'benzin pump',
+    'trafo',
+    'transformatör',
+    'elektrik tesisi',
+    'su deposu',
+    'çöp kutusu',
+    'oyun alanı',
+    'belediyesi',
+    'muhtarlığı',
+    'kaymakamlık',
+  ];
+
+  static bool _isTouristWorthy(PlaceModel p) {
+    if (p.lat == null || p.lng == null) return false;
+    final name = p.name.toLowerCase().trim();
+    if (name.length < 4) return false;
+    if (_poisBlacklistExact.contains(name)) return false;
+    for (final kw in _poisBlacklistKeywords) {
+      if (name.contains(kw)) return false;
+    }
+    if (p.category == 'lodging') return false;
+    return true;
+  }
+
+  static List<PlaceModel> _sortByProximity(
+    List<PlaceModel> places, {
+    double? originLat,
+    double? originLng,
+  }) {
+    if (places.length <= 1) return places;
+    final withCoords = places
+        .where((p) => p.lat != null && p.lng != null)
+        .toList();
+    final withoutCoords = places
+        .where((p) => p.lat == null || p.lng == null)
+        .toList();
+    if (withCoords.isEmpty) return places;
+
+    final remaining = List<PlaceModel>.from(withCoords);
+    final sorted = <PlaceModel>[];
+    double curLat = originLat ?? remaining.first.lat!;
+    double curLng = originLng ?? remaining.first.lng!;
+
+    while (remaining.isNotEmpty) {
+      int bestIdx = 0;
+      double bestDist = double.infinity;
+      for (int i = 0; i < remaining.length; i++) {
+        final d = _distanceKmRepo(
+          curLat,
+          curLng,
+          remaining[i].lat!,
+          remaining[i].lng!,
+        );
+        if (d < bestDist) {
+          bestDist = d;
+          bestIdx = i;
+        }
+      }
+      final best = remaining.removeAt(bestIdx);
+      sorted.add(best);
+      curLat = best.lat!;
+      curLng = best.lng!;
+    }
+    return [...sorted, ...withoutCoords];
+  }
+
   Future<TripPlan> generateTripPlan({
     required String provinceSlug,
     required int days,
@@ -252,14 +582,21 @@ class RouteviaRepository {
     List<String> mustIncludePlaceIds = const [],
   }) async {
     // Compliance mode: generate trip only from compliant POIs dataset.
-    return generateDemoTripPlan(
+    final generated = await generateDemoTripPlan(
       provinceSlug: provinceSlug,
       days: days,
       transportMode: transportMode,
       pace: pace,
       personaMode: personaMode,
       preferences: preferences,
+      districtId: districtId,
+      allowOutsideDistrict: allowOutsideDistrict ?? false,
+      startLat: startLat,
+      startLng: startLng,
     );
+    final persisted = await _saveTripRemote(generated);
+    await _persistTripArtifacts(persisted);
+    return persisted;
   }
 
   Future<TripPlan> generateDemoTripPlan({
@@ -269,6 +606,10 @@ class RouteviaRepository {
     required String pace,
     required String personaMode,
     required List<String> preferences,
+    String? districtId,
+    bool allowOutsideDistrict = false,
+    double? startLat,
+    double? startLng,
   }) async {
     final provinceRes = await _client
         .from('provinces')
@@ -283,56 +624,127 @@ class RouteviaRepository {
       Map<String, dynamic>.from(provinceRes as Map),
     );
 
-    final placesRes = await _client
+    String? districtName;
+    if (districtId != null && districtId.isNotEmpty) {
+      final districtRes = await _client
+          .from('districts')
+          .select('name,province_id')
+          .eq('id', districtId)
+          .maybeSingle();
+      if (districtRes != null &&
+          districtRes['province_id']?.toString() == province.id) {
+        districtName = districtRes['name']?.toString();
+      }
+    }
+
+    // ── Fetch & filter places ─────────────────────────────────────────────
+    // OSM city field is unreliable — try three progressively broader queries.
+
+    final minNeeded = _stopsPerDayForPace(pace) * days;
+
+    Future<List<PlaceModel>> fetchFiltered(dynamic q) async {
+      final raw = (await (q as dynamic).limit(500)) as List;
+      return raw
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .map(
+            (row) => PlaceModel.fromMap({
+              'id': row['id'],
+              'name': row['name'],
+              'slug': row['id'],
+              'category': row['category'],
+              'short_summary':
+                  '${row['district'] ?? row['city'] ?? 'Keşif noktası'}',
+              'best_time': 'day',
+              'duration_min': 60,
+              'lat': row['lat'],
+              'lng': row['lng'],
+              'tags': ((row['tags'] as List?) ?? const []).cast<String>(),
+              'source_kind': row['source'],
+              'is_free': true,
+              'media': const [],
+              'app_score': 0,
+              'app_rating': 0,
+              'rating_count': 0,
+            }),
+          )
+          .where(_isTouristWorthy)
+          .toList();
+    }
+
+    // Try 1: exact province name match
+    var q1 = _client
         .from('pois')
         .select('id,name,category,lat,lng,city,district,tags,source')
         .eq('provenance_verified', true)
-        .ilike('city', province.name)
-        .limit(260);
+        .ilike('city', province.name);
+    if (!allowOutsideDistrict &&
+        districtName != null &&
+        districtName.trim().isNotEmpty) {
+      q1 = (q1 as dynamic).ilike('district', districtName.trim());
+    }
+    var places = await fetchFiltered(q1);
 
-    final places = (placesRes as List)
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .map(
-          (row) => PlaceModel.fromMap({
-            'id': row['id'],
-            'name': row['name'],
-            'slug': row['id'],
-            'category': row['category'],
-            'short_summary':
-                '${row['district'] ?? row['city'] ?? 'Keşif noktası'}',
-            'best_time': 'day',
-            'duration_min': 60,
-            'lat': row['lat'],
-            'lng': row['lng'],
-            'tags': ((row['tags'] as List?) ?? const []).cast<String>(),
-            'source_kind': row['source'],
-            'is_free': true,
-            'media': const [],
-            'app_score': 0,
-            'app_rating': 0,
-            'rating_count': 0,
-          }),
-        )
-        .where((p) => p.lat != null && p.lng != null)
-        .toList();
+    // Try 2: city contains province name (handles sub-district city values)
+    if (places.length < minNeeded) {
+      final q2 = _client
+          .from('pois')
+          .select('id,name,category,lat,lng,city,district,tags,source')
+          .eq('provenance_verified', true)
+          .ilike('city', '%${province.name}%');
+      final extra = await fetchFiltered(q2);
+      final seen1 = places.map((p) => p.id).toSet();
+      places = [...places, ...extra.where((p) => !seen1.contains(p.id))];
+    }
+
+    // Try 3: no city filter, but restrict by distance to province center
+    if (places.length < minNeeded) {
+      final coordRow = await _client
+          .from('provinces')
+          .select('lat,lng')
+          .eq('slug', provinceSlug)
+          .maybeSingle();
+      final pLat = (coordRow?['lat'] as num?)?.toDouble();
+      final pLng = (coordRow?['lng'] as num?)?.toDouble();
+
+      final q3 = _client
+          .from('pois')
+          .select('id,name,category,lat,lng,city,district,tags,source')
+          .eq('provenance_verified', true);
+      final all3 = await fetchFiltered(q3);
+      final seen2 = places.map((p) => p.id).toSet();
+      var extras = all3.where((p) => !seen2.contains(p.id)).toList();
+
+      if (pLat != null && pLng != null) {
+        extras.sort((a, b) {
+          final da = _distanceKmRepo(pLat, pLng, a.lat ?? 0, a.lng ?? 0);
+          final db = _distanceKmRepo(pLat, pLng, b.lat ?? 0, b.lng ?? 0);
+          return da.compareTo(db);
+        });
+        extras = extras
+            .where((p) => _distanceKmRepo(pLat, pLng, p.lat!, p.lng!) <= 80)
+            .toList();
+      }
+      places = [...places, ...extras.take(200)];
+    }
+
+    // Final dedup
+    final seenIds = <String>{};
+    places = places.where((p) => seenIds.add(p.id)).toList();
 
     if (places.isEmpty) {
       throw Exception(
-        'Bu ilde su an yeterli gezi verisi yok. Nearby/plan icin seed gerekiyor.',
+        districtName != null && !allowOutsideDistrict
+            ? 'Seçilen ilçede şu an yeterli gezi verisi yok.'
+            : 'Bu ilde şu an yeterli gezi verisi bulunamadı.',
       );
     }
 
     final perDay = _stopsPerDayForPace(pace);
     final needed = (days * perDay).clamp(1, places.length);
+    // Use shortSummary as district key (it's set to district ?? city name)
     final byDistrict = <String, List<PlaceModel>>{};
     for (final p in places) {
-      final districtKey =
-          ((placesRes as List)
-              .cast<Map>()
-              .firstWhere((r) => r['id'] == p.id, orElse: () => const {})
-              .cast<String, dynamic>()['district']
-              ?.toString()) ??
-          'none';
+      final districtKey = p.shortSummary.isNotEmpty ? p.shortSummary : 'other';
       byDistrict.putIfAbsent(districtKey, () => <PlaceModel>[]).add(p);
     }
     final districtPools = byDistrict.values.toList()
@@ -392,8 +804,15 @@ class RouteviaRepository {
         composed.add(p);
       }
 
-      for (int i = 0; i < composed.length && i < perDay; i++) {
-        final p = composed[i];
+      // Sort stops within this day by nearest-neighbor for a logical route
+      final composedSorted = _sortByProximity(
+        composed,
+        originLat: d == 1 ? startLat : null,
+        originLng: d == 1 ? startLng : null,
+      );
+
+      for (int i = 0; i < composedSorted.length && i < perDay; i++) {
+        final p = composedSorted[i];
         final hh = (minute ~/ 60).toString().padLeft(2, '0');
         final mm = (minute % 60).toString().padLeft(2, '0');
         stops.add(
@@ -424,7 +843,7 @@ class RouteviaRepository {
       daysPlan: dayPlans,
     );
 
-    await _cache.saveLastTrip(trip.toMap());
+    await _persistTripArtifacts(trip);
     return trip;
   }
 
@@ -434,10 +853,123 @@ class RouteviaRepository {
     return TripPlan.fromMap(map);
   }
 
+  Future<List<TripPlan>> readTripHistory() async {
+    final items = await _cache.readTripHistory();
+    return items.map(TripPlan.fromMap).toList();
+  }
+
+  Future<TripPlan?> getMyTripPlan(String tripId) async {
+    final user = _client.auth.currentUser;
+    if (user == null) return null;
+
+    final tripRow = await _client
+        .from('trips_clean')
+        .select(
+          'id,province:provinces(id,name,slug),days,transport_mode,pace,persona_mode,preferences,created_at',
+        )
+        .eq('id', tripId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+    if (tripRow == null) return null;
+
+    final dayRows = await _client
+        .from('trip_days_clean')
+        .select('id,day_number')
+        .eq('trip_id', tripId)
+        .order('day_number');
+
+    final days = (dayRows as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    if (days.isEmpty) return null;
+
+    final dayIds = days.map((e) => e['id'] as String).toList();
+    final stopRows = await _client
+        .from('trip_stops_clean')
+        .select(
+          'trip_day_id,order_index,arrival_time,duration_min,transport_mode,place_id',
+        )
+        .inFilter('trip_day_id', dayIds)
+        .order('order_index');
+
+    final stops = (stopRows as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    final placeIds = stops.map((e) => e['place_id'] as String).toSet().toList();
+    final placeMap = <String, PlaceModel>{};
+    if (placeIds.isNotEmpty) {
+      final pois = await _client
+          .from('pois')
+          .select('id,name,category,lat,lng,city,district,tags,source')
+          .inFilter('id', placeIds);
+      for (final raw in (pois as List)) {
+        final row = Map<String, dynamic>.from(raw as Map);
+        placeMap[row['id'] as String] = PlaceModel.fromMap({
+          'id': row['id'],
+          'name': row['name'],
+          'slug': row['id'],
+          'category': row['category'],
+          'short_summary':
+              '${row['district'] ?? row['city'] ?? 'Kesif noktasi'}',
+          'best_time': 'day',
+          'duration_min': 60,
+          'lat': row['lat'],
+          'lng': row['lng'],
+          'tags': ((row['tags'] as List?) ?? const []).cast<String>(),
+          'source_kind': row['source'],
+          'is_free': true,
+          'media': const [],
+          'app_score': 0,
+          'app_rating': 0,
+          'rating_count': 0,
+        });
+      }
+    }
+
+    final daysPlan = days.map((day) {
+      final tripDayId = day['id'] as String;
+      final dayStops = stops
+          .where((stop) => stop['trip_day_id'] == tripDayId)
+          .map((stop) {
+            final placeId = stop['place_id'] as String;
+            final place = placeMap[placeId];
+            if (place == null) return null;
+            return TripStop(
+              orderIndex: (stop['order_index'] as num).toInt(),
+              arrivalTime: stop['arrival_time'] as String,
+              durationMin: (stop['duration_min'] as num).toInt(),
+              transportMode: stop['transport_mode'] as String,
+              place: place,
+            );
+          })
+          .whereType<TripStop>()
+          .toList();
+      return TripDay(
+        dayNumber: (day['day_number'] as num).toInt(),
+        stops: dayStops,
+      );
+    }).toList();
+
+    return TripPlan(
+      tripId: tripId,
+      days: (tripRow['days'] as num).toInt(),
+      transportMode: tripRow['transport_mode'] as String,
+      pace: tripRow['pace'] as String,
+      personaMode: tripRow['persona_mode'] as String,
+      preferences: ((tripRow['preferences'] as List?) ?? const [])
+          .cast<String>(),
+      province: ProvinceModel.fromMap(
+        Map<String, dynamic>.from(tripRow['province'] as Map),
+      ),
+      daysPlan: daysPlan,
+    );
+  }
+
   Future<String> createShareToken(String tripId) async {
-    final result = await _client.functions.invoke(
+    final result = await _invokeFunction(
       'share_trip',
       body: {'trip_id': tripId},
+      requireAuth: true,
     );
     final data = Map<String, dynamic>.from(result.data as Map);
     return data['token'] as String;
@@ -457,20 +989,59 @@ class RouteviaRepository {
   }
 
   Future<List<Map<String, dynamic>>> listMyTrips() async {
-    final user = _client.auth.currentUser;
-    if (user == null) return const [];
-
-    final response = await _client
-        .from('trips_clean')
-        .select(
-          'id,days,transport_mode,pace,persona_mode,created_at,provinces(name,slug)',
+    final local = (await readTripHistory())
+        .map(
+          (trip) => {
+            'id': trip.tripId,
+            'days': trip.days,
+            'transport_mode': trip.transportMode,
+            'pace': trip.pace,
+            'persona_mode': trip.personaMode,
+            'created_at': null,
+            'province': {
+              'id': trip.province.id,
+              'name': trip.province.name,
+              'slug': trip.province.slug,
+            },
+            'source': 'local',
+            'plan': trip.toMap(),
+          },
         )
-        .eq('user_id', user.id)
-        .order('created_at', ascending: false);
-
-    return (response as List)
-        .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
+
+    final user = _client.auth.currentUser;
+    if (user == null) return local;
+
+    try {
+      final response = await _client
+          .from('trips_clean')
+          .select(
+            'id,days,transport_mode,pace,persona_mode,preferences,created_at,province:provinces(id,name,slug)',
+          )
+          .eq('user_id', user.id)
+          .order('created_at', ascending: false);
+
+      final remote = (response as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .map((row) => {...row, 'source': 'remote'})
+          .toList();
+      final merged = <String, Map<String, dynamic>>{
+        for (final item in local) item['id'] as String: item,
+      };
+      for (final item in remote) {
+        merged[item['id'] as String] = item;
+      }
+      return merged.values.toList()..sort((a, b) {
+        final aDate = DateTime.tryParse((a['created_at'] as String?) ?? '');
+        final bDate = DateTime.tryParse((b['created_at'] as String?) ?? '');
+        if (aDate == null && bDate == null) return 0;
+        if (aDate == null) return 1;
+        if (bDate == null) return -1;
+        return bDate.compareTo(aDate);
+      });
+    } catch (_) {
+      return local;
+    }
   }
 
   Future<PlaceModel> fetchPlaceDetail(String placeId) async {
@@ -484,6 +1055,36 @@ class RouteviaRepository {
       throw Exception('Place not found');
     }
     final row = Map<String, dynamic>.from(poi as Map);
+    Map<String, dynamic>? communityState;
+    List<MediaModel> media = const [];
+
+    try {
+      final state = await _client
+          .from('place_community_state')
+          .select(
+            'place_id,cover_photo,routevia_score,avg_rating,review_count,checkins_count,photo_count',
+          )
+          .eq('place_id', placeId)
+          .maybeSingle();
+      if (state != null) {
+        communityState = Map<String, dynamic>.from(state as Map);
+      }
+    } catch (_) {}
+
+    try {
+      final photos = await getPlacePhotos(placeId);
+      media = photos
+          .where((photo) => photo.isApproved)
+          .map(
+            (photo) => MediaModel(
+              storagePath: photo.storagePath,
+              publicUrl: photo.imageUrl,
+              sortOrder: 0,
+            ),
+          )
+          .toList();
+    } catch (_) {}
+
     return PlaceModel.fromMap({
       'id': row['id'],
       'name': row['name'],
@@ -495,12 +1096,12 @@ class RouteviaRepository {
       'lat': row['lat'],
       'lng': row['lng'],
       'tags': ((row['tags'] as List?) ?? const []).cast<String>(),
-      'media': const [],
+      'media': media,
       'source_kind': row['source'] ?? 'osm',
       'is_free': true,
-      'app_score': 0,
-      'app_rating': 0,
-      'rating_count': 0,
+      'app_score': communityState?['routevia_score'] ?? 0,
+      'app_rating': communityState?['avg_rating'] ?? 0,
+      'rating_count': communityState?['review_count'] ?? 0,
     });
   }
 
@@ -537,6 +1138,7 @@ class RouteviaRepository {
     String? provinceSlug,
     String? districtId,
     String? districtSlug,
+    String? districtName,
     String? category,
     List<String> categories = const [],
     List<String> tags = const [],
@@ -546,7 +1148,7 @@ class RouteviaRepository {
         ? categories
         : (category == null ? const <String>[] : <String>[category]);
     final cacheKey =
-        '${lat.toStringAsFixed(4)}:${lng.toStringAsFixed(4)}:$radiusKm:${provinceId ?? ''}:${provinceSlug ?? ''}:${districtId ?? ''}:${districtSlug ?? ''}:${categoryList.join('|')}:${tags.join(',')}:$freeOnly';
+        '${lat.toStringAsFixed(4)}:${lng.toStringAsFixed(4)}:$radiusKm:${provinceId ?? ''}:${provinceSlug ?? ''}:${districtId ?? ''}:${districtSlug ?? ''}:${districtName ?? ''}:${categoryList.join('|')}:${tags.join(',')}:$freeOnly';
     final cached = _nearbyCache[cacheKey];
     final now = DateTime.now();
     if (cached != null &&
@@ -586,6 +1188,7 @@ class RouteviaRepository {
         maxLng: maxLng,
         categories: categoryList,
         cityName: cityName,
+        districtName: districtName,
         limit: 1000,
       );
       final effectiveTopPicks = places.take(10).toList();
@@ -665,24 +1268,45 @@ class RouteviaRepository {
   }
 
   Future<PlaceStats> getPlaceStats(String placeId) async {
-    final rpc = await _client.rpc(
-      'get_poi_stats',
-      params: {'p_poi_id': placeId},
-    );
-    final map = Map<String, dynamic>.from((rpc as Map?) ?? const {});
-    if (map.isEmpty) {
-      return PlaceStats.fromMap({
-        'place_id': placeId,
-        'avg_rating': 0,
-        'review_count': 0,
-        'crowded_count': 0,
-        'family_count': 0,
-        'photo_spot_count': 0,
-        'sunset_worthy_count': 0,
-        'recent_reviews': const [],
-      });
+    Map<String, dynamic> state = const {};
+    try {
+      final row = await _client
+          .from('place_community_state')
+          .select(
+            'place_id,routevia_score,avg_rating,review_count,checkins_count,photo_count',
+          )
+          .eq('place_id', placeId)
+          .maybeSingle();
+      if (row != null) {
+        state = Map<String, dynamic>.from(row as Map);
+      }
+    } catch (_) {}
+
+    Map<String, dynamic> reviews = const {};
+    if (_client.auth.currentSession != null) {
+      try {
+        final result = await _invokeFunction(
+          'get_place_reviews',
+          body: {'place_id': placeId, 'limit': 20},
+          requireAuth: true,
+        );
+        reviews = Map<String, dynamic>.from((result.data as Map?) ?? const {});
+      } catch (_) {}
     }
-    return PlaceStats.fromMap({...map, 'place_id': map['place_id'] ?? placeId});
+
+    return PlaceStats.fromMap({
+      'place_id': placeId,
+      'avg_rating': reviews['avg_rating'] ?? state['avg_rating'] ?? 0,
+      'review_count': reviews['review_count'] ?? state['review_count'] ?? 0,
+      'routevia_score': state['routevia_score'] ?? 0,
+      'checkins_count': state['checkins_count'] ?? 0,
+      'photo_count': state['photo_count'] ?? 0,
+      'crowded_count': 0,
+      'family_count': 0,
+      'photo_spot_count': 0,
+      'sunset_worthy_count': 0,
+      'recent_reviews': reviews['reviews'] ?? const [],
+    });
   }
 
   Future<Map<String, PlaceStats>> getPlaceStatsBatch(
@@ -710,17 +1334,87 @@ class RouteviaRepository {
     required List<String> flags,
     required String commentShort,
   }) async {
-    final result = await _client.functions.invoke(
-      'submit_review',
+    final result = await _invokeFunction(
+      'add_review',
       body: {
         'place_id': placeId,
         'rating': rating,
         'flags': flags,
-        'comment_short': commentShort,
+        'comment': commentShort,
       },
+      requireAuth: true,
     );
     final data = Map<String, dynamic>.from(result.data as Map);
-    return PlaceStats.fromMap(Map<String, dynamic>.from(data['stats'] as Map));
+    final reviews = Map<String, dynamic>.from(data['reviews'] as Map);
+    final state = await _client
+        .from('place_community_state')
+        .select(
+          'place_id,routevia_score,avg_rating,review_count,checkins_count,photo_count',
+        )
+        .eq('place_id', placeId)
+        .maybeSingle();
+    final merged = {
+      ...Map<String, dynamic>.from((state as Map?) ?? const {}),
+      ...reviews,
+      'place_id': placeId,
+      'recent_reviews': reviews['reviews'] ?? const [],
+      'crowded_count': 0,
+      'family_count': 0,
+      'photo_spot_count': 0,
+      'sunset_worthy_count': 0,
+    };
+    return PlaceStats.fromMap(merged);
+  }
+
+  Future<List<PlacePhotoModel>> getPlacePhotos(
+    String placeId, {
+    int limit = 24,
+  }) async {
+    if (_client.auth.currentSession == null) return const [];
+    final result = await _invokeFunction(
+      'get_place_photos',
+      body: {'place_id': placeId, 'limit': limit},
+      requireAuth: true,
+    );
+    final data = Map<String, dynamic>.from((result.data as Map?) ?? const {});
+    return ((data['photos'] as List?) ?? const [])
+        .map(
+          (e) => PlacePhotoModel.fromMap(Map<String, dynamic>.from(e as Map)),
+        )
+        .toList();
+  }
+
+  Future<PlacePhotoModel> uploadPlacePhoto({
+    required String placeId,
+    required File file,
+  }) async {
+    final bytes = await file.readAsBytes();
+    final ext = file.path.split('.').last.toLowerCase();
+    final contentType = ext == 'png' ? 'image/png' : 'image/jpeg';
+    final result = await _invokeFunction(
+      'upload_photo',
+      body: {
+        'place_id': placeId,
+        'file_name': file.uri.pathSegments.isEmpty
+            ? 'upload.$ext'
+            : file.uri.pathSegments.last,
+        'content_type': contentType,
+        'file_base64': base64Encode(bytes),
+      },
+      requireAuth: true,
+    );
+    final data = Map<String, dynamic>.from(result.data as Map);
+    return PlacePhotoModel.fromMap(
+      Map<String, dynamic>.from(data['photo'] as Map),
+    );
+  }
+
+  Future<void> addPlaceCheckin(String placeId) async {
+    await _invokeFunction(
+      'add_checkin',
+      body: {'place_id': placeId},
+      requireAuth: true,
+    );
   }
 
   Future<Map<String, dynamic>?> getProvinceBySlug(String provinceSlug) async {
@@ -737,6 +1431,7 @@ class RouteviaRepository {
     required String provinceSlug,
     String personaMode = 'relax',
     List<String> preferences = const [],
+    String? districtName,
   }) async {
     Map<String, dynamic>? province = await _client
         .from('provinces')
@@ -745,12 +1440,15 @@ class RouteviaRepository {
         .maybeSingle();
     if (province == null) return const [];
     final cityName = (province['name'] as String?) ?? '';
-    final rows = await _client
+    dynamic query = _client
         .from('pois')
         .select('id,name,category,lat,lng,city,district,tags,source')
         .eq('provenance_verified', true)
-        .ilike('city', cityName)
-        .limit(1000);
+        .ilike('city', cityName);
+    if (districtName != null && districtName.trim().isNotEmpty) {
+      query = query.ilike('district', districtName.trim());
+    }
+    final rows = await query.limit(1000);
     return (rows as List)
         .map((e) => Map<String, dynamic>.from(e as Map))
         .map(
@@ -779,6 +1477,7 @@ class RouteviaRepository {
 
   Future<List<PlaceModel>> listProvinceOrNationalTopPicks({
     required String provinceSlug,
+    String? districtName,
     int limit = 24,
   }) async {
     final province = await _client
@@ -788,12 +1487,15 @@ class RouteviaRepository {
         .maybeSingle();
     if (province != null) {
       final cityName = province['name'] as String;
-      final localRows = await _client
+      dynamic query = _client
           .from('pois')
           .select('id,name,category,lat,lng,city,district,tags,source')
           .eq('provenance_verified', true)
-          .ilike('city', cityName)
-          .limit(limit);
+          .ilike('city', cityName);
+      if (districtName != null && districtName.trim().isNotEmpty) {
+        query = query.ilike('district', districtName.trim());
+      }
+      final localRows = await query.limit(limit);
 
       final local = (localRows as List)
           .map((e) => Map<String, dynamic>.from(e as Map))
@@ -1012,7 +1714,7 @@ class RouteviaRepository {
       premium = false;
     }
 
-    final result = await _client.functions.invoke(
+    final result = await _invokeFunction(
       'optimize_trip_v2',
       body: {
         'days_plan': plan.toMap()['days_plan'],
@@ -1044,7 +1746,7 @@ class RouteviaRepository {
       districtStrict: plan.districtStrict,
     );
 
-    await _cache.saveLastTrip(updated.toMap());
+    await _persistTripArtifacts(updated);
     return {
       'plan': updated,
       'premium_used':
@@ -1055,13 +1757,16 @@ class RouteviaRepository {
 
   Future<List<Map<String, dynamic>>> getSmartSeasonSuggestions({
     String? provinceSlug,
+    String? districtName,
     int limit = 10,
   }) async {
-    final result = await _client.functions.invoke(
+    final result = await _invokeFunction(
       'smart_season_suggestions',
       body: {
         if (provinceSlug != null && provinceSlug.isNotEmpty)
           'province_slug': provinceSlug,
+        if (districtName != null && districtName.isNotEmpty)
+          'district_name': districtName,
         'limit': limit,
       },
     );
@@ -1075,7 +1780,7 @@ class RouteviaRepository {
     String? provinceSlug,
     int limit = 120,
   }) async {
-    final result = await _client.functions.invoke(
+    final result = await _invokeFunction(
       'trend_map',
       body: {
         if (provinceSlug != null && provinceSlug.isNotEmpty)
@@ -1215,7 +1920,7 @@ class RouteviaRepository {
     double? lat,
     double? lng,
   }) async {
-    final result = await _client.functions.invoke(
+    final result = await _invokeFunction(
       'resolve_saved_items',
       body: {
         'province_id': provinceId,
@@ -1238,7 +1943,7 @@ class RouteviaRepository {
     bool includeUnpublished = true,
     int limit = 200,
   }) async {
-    final result = await _client.functions.invoke(
+    final result = await _invokeFunction(
       'admin_place_query',
       body: {
         'mode': mode,
@@ -1248,6 +1953,7 @@ class RouteviaRepository {
         'include_unpublished': includeUnpublished,
         'limit': limit,
       },
+      requireAuth: true,
     );
     final data = Map<String, dynamic>.from(result.data as Map);
     return ((data['items'] as List?) ?? const [])
@@ -1256,9 +1962,10 @@ class RouteviaRepository {
   }
 
   Future<String> adminUpsertPlace(Map<String, dynamic> payload) async {
-    final result = await _client.functions.invoke(
+    final result = await _invokeFunction(
       'admin_place_upsert',
       body: payload,
+      requireAuth: true,
     );
     final data = Map<String, dynamic>.from(result.data as Map);
     return data['place_id'] as String;
@@ -1383,6 +2090,46 @@ class RouteviaRepository {
     };
   }
 
+  Future<List<Map<String, dynamic>>> adminSuggestions({
+    String status = 'pending',
+    String? provinceSlug,
+    int limit = 100,
+  }) async {
+    final result = await _invokeFunction(
+      'admin_suggestions',
+      body: {
+        'mode': 'list',
+        'status': status,
+        ...?provinceSlug == null ? null : {'province_slug': provinceSlug},
+        'limit': limit,
+      },
+      requireAuth: true,
+    );
+    final data = Map<String, dynamic>.from(result.data as Map);
+    return ((data['items'] as List?) ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  Future<void> adminReviewSuggestion({
+    required String suggestionId,
+    required String decision,
+    String? adminNote,
+  }) async {
+    await _invokeFunction(
+      'admin_suggestions',
+      body: {
+        'mode': 'review',
+        'suggestion_id': suggestionId,
+        'decision': decision,
+        ...?adminNote == null || adminNote.trim().isEmpty
+            ? null
+            : {'admin_note': adminNote.trim()},
+      },
+      requireAuth: true,
+    );
+  }
+
   Future<Map<String, dynamic>> submitPlaceSuggestion({
     required String provinceSlug,
     String? districtSlug,
@@ -1394,7 +2141,7 @@ class RouteviaRepository {
     double? lng,
     String? sourceUrl,
   }) async {
-    final result = await _client.functions.invoke(
+    final result = await _invokeFunction(
       'submit_place_suggestion',
       body: {
         'province_slug': provinceSlug,
@@ -1407,28 +2154,40 @@ class RouteviaRepository {
         ...?lng == null ? null : {'lng': lng},
         ...?sourceUrl == null ? null : {'source_url': sourceUrl},
       },
+      requireAuth: true,
     );
     return Map<String, dynamic>.from(result.data as Map);
   }
 
   Future<String> createReferralCode() async {
-    final result = await _client.functions.invoke('create_referral_code');
+    final result = await _invokeFunction(
+      'create_referral_code',
+      requireAuth: true,
+    );
     final data = Map<String, dynamic>.from(result.data as Map);
     return data['code'] as String;
   }
 
   Future<Map<String, dynamic>> redeemReferral(String code) async {
-    final result = await _client.functions.invoke(
+    final result = await _invokeFunction(
       'redeem_referral',
       body: {'code': code},
+      requireAuth: true,
     );
     return Map<String, dynamic>.from(result.data as Map);
   }
 
   Future<List<Map<String, dynamic>>> getEntitlements() async {
-    final result = await _client.functions.invoke('get_entitlements');
-    final data = Map<String, dynamic>.from(result.data as Map);
-    return ((data['items'] as List?) ?? const [])
+    await _ensureFreshSession();
+    final user = _client.auth.currentUser;
+    if (user == null) return const [];
+    final rows = await _client
+        .from('user_entitlements')
+        .select('entitlement_key,expires_at,created_at')
+        .eq('user_id', user.id)
+        .gte('expires_at', DateTime.now().toUtc().toIso8601String())
+        .order('expires_at', ascending: false);
+    return (rows as List)
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
   }
@@ -1444,9 +2203,10 @@ class RouteviaRepository {
   }
 
   Future<void> submitFeedback({required String message, double? rating}) async {
-    await _client.functions.invoke(
+    await _invokeFunction(
       'submit_feedback',
       body: {'message': message, 'rating': rating},
+      requireAuth: true,
     );
   }
 
@@ -1455,9 +2215,10 @@ class RouteviaRepository {
     required String type,
     double? rating,
   }) async {
-    final result = await _client.functions.invoke(
+    final result = await _invokeFunction(
       'submit_user_signal',
       body: {'place_id': placeId, 'type': type, 'rating': rating},
+      requireAuth: true,
     );
     return Map<String, dynamic>.from(result.data as Map);
   }
@@ -1466,10 +2227,21 @@ class RouteviaRepository {
     String eventName, {
     Map<String, dynamic> payload = const {},
   }) async {
-    await _client.functions.invoke(
+    final consent = await _cache.getConsentPreferences();
+    if (consent['analytics_enabled'] != true) return;
+    await _invokeFunction(
       'log_app_event',
       body: {'event_name': eventName, 'payload': payload},
     );
+  }
+
+  Future<Map<String, dynamic>> getUserStats() async {
+    final result = await _invokeFunction('get_user_stats', requireAuth: true);
+    return Map<String, dynamic>.from((result.data as Map?) ?? const {});
+  }
+
+  Future<void> deleteAccount() async {
+    await _invokeFunction('delete_account', requireAuth: true);
   }
 
   Future<Map<String, dynamic>?> getTripById(String tripId) async {
@@ -1485,6 +2257,83 @@ class RouteviaRepository {
         .maybeSingle();
     if (row == null) return null;
     return Map<String, dynamic>.from(row as Map);
+  }
+
+  // ── Admin: Photo Moderation ───────────────────────────────────────────────
+
+  Future<List<Map<String, dynamic>>> adminGetPendingPhotos({
+    int limit = 50,
+  }) async {
+    final rows = await _client
+        .from('place_photos')
+        .select(
+          'id,place_id,user_id,image_url,storage_path,status,moderation_note,created_at,'
+          'pois(name)',
+        )
+        .eq('status', 'pending')
+        .order('created_at', ascending: true)
+        .limit(limit);
+    return (rows as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  Future<void> adminReviewPhoto(
+    String photoId, {
+    required String status, // 'approved' | 'rejected' | 'hidden'
+    String? note,
+  }) async {
+    await _client
+        .from('place_photos')
+        .update({
+          'status': status,
+          'moderation_note': note,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', photoId);
+  }
+
+  Future<List<Map<String, dynamic>>> adminGetPendingReviews({
+    int limit = 50,
+  }) async {
+    final rows = await _client
+        .from('place_reviews')
+        .select('id,place_id,user_id,rating,comment,flags,status,created_at,pois(name)')
+        .eq('status', 'pending')
+        .order('created_at', ascending: true)
+        .limit(limit);
+    return (rows as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  Future<void> adminReviewReview(
+    String reviewId, {
+    required String status, // 'approved' | 'hidden'
+  }) async {
+    await _client
+        .from('place_reviews')
+        .update({
+          'status': status,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', reviewId);
+  }
+
+  /// Fetches a Pexels cover image for a city/province via the Edge Function proxy.
+  /// Returns null on any error (non-fatal — UI falls back gracefully).
+  Future<Map<String, dynamic>?> getDestinationImage(String cityName) async {
+    try {
+      final result = await _invokeFunction(
+        'get_destination_image',
+        body: {'city': cityName},
+      );
+      final data = result.data;
+      if (data is Map) return Map<String, dynamic>.from(data);
+      return null;
+    } catch (_) {
+      return null;
+    }
   }
 }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/error_utils.dart';
 import '../../data/providers.dart';
 import '../../models/trip_models.dart';
 import '../map/map_screen.dart';
@@ -41,7 +42,7 @@ class _ShareTokenRouteScreenState extends ConsumerState<ShareTokenRouteScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = '$e';
+        _error = friendlyError(e);
       });
     }
   }

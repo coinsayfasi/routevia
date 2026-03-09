@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../core/error_utils.dart';
 import '../../data/providers.dart';
 import '../../models/trip_models.dart';
 
@@ -99,7 +100,7 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Paylaşım başarısız: $e')));
+      ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     } finally {
       if (mounted) setState(() => _sharing = false);
     }
@@ -126,7 +127,7 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Optimizasyon başarısız: $e')),
+        SnackBar(content: Text(friendlyError(e))),
       );
     } finally {
       if (mounted) setState(() => _optimizing = false);

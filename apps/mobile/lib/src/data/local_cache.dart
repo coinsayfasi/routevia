@@ -28,6 +28,29 @@ class LocalCache {
     return null;
   }
 
+  Future<void> saveTripHistoryEntry(Map<String, dynamic> tripJson) async {
+    final box = await _openSafeBox();
+    final raw = box.get('trip_history');
+    final items = ((raw as List?) ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+
+    final tripId = tripJson['trip_id']?.toString() ?? '';
+    final nextItems = <Map<String, dynamic>>[
+      tripJson,
+      ...items.where((item) => item['trip_id']?.toString() != tripId),
+    ];
+    await box.put('trip_history', nextItems.take(20).toList());
+  }
+
+  Future<List<Map<String, dynamic>>> readTripHistory() async {
+    final box = await _openSafeBox();
+    final raw = box.get('trip_history');
+    return ((raw as List?) ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
   Future<int> bumpSessionCount() async {
     final box = await _openSafeBox();
     final current = (box.get('session_count') as int?) ?? 0;
@@ -144,5 +167,51 @@ class LocalCache {
     return Map<String, dynamic>.from(idxRaw).map(
       (k, v) => MapEntry(k, v.toString()),
     );
+  }
+
+  // ── Daily Plan Count ───────────────────────────────────────────────────
+
+  String get _todayKey {
+    final now = DateTime.now();
+    return 'plan_count_${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+  }
+
+  Future<int> getDailyPlanCount() async {
+    final box = await _openSafeBox();
+    return (box.get(_todayKey) as int?) ?? 0;
+  }
+
+  Future<int> incrementDailyPlanCount() async {
+    final box = await _openSafeBox();
+    final key = _todayKey;
+    final current = (box.get(key) as int?) ?? 0;
+    final next = current + 1;
+    await box.put(key, next);
+    return next;
+  }
+
+  Future<void> setConsentPreferences({
+    required bool analyticsEnabled,
+    required bool personalizedAdsEnabled,
+    required bool policyAccepted,
+  }) async {
+    final box = await _openSafeBox();
+    await box.put('consent_analytics_enabled', analyticsEnabled);
+    await box.put('consent_personalized_ads_enabled', personalizedAdsEnabled);
+    await box.put('consent_policy_accepted', policyAccepted);
+    await box.put('consent_updated_at', DateTime.now().toIso8601String());
+  }
+
+  Future<Map<String, dynamic>> getConsentPreferences() async {
+    final box = await _openSafeBox();
+    return {
+      'analytics_enabled':
+          (box.get('consent_analytics_enabled') as bool?) ?? false,
+      'personalized_ads_enabled':
+          (box.get('consent_personalized_ads_enabled') as bool?) ?? false,
+      'policy_accepted':
+          (box.get('consent_policy_accepted') as bool?) ?? false,
+      'updated_at': box.get('consent_updated_at') as String?,
+    };
   }
 }

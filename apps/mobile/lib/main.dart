@@ -109,6 +109,11 @@ class _BootstrapAppState extends State<_BootstrapApp>
       await Supabase.initialize(
         url: AppConstants.supabaseUrl,
         anonKey: AppConstants.supabaseAnonKey,
+        authOptions: const FlutterAuthClientOptions(
+          // Implicit flow: tokens arrive in URL fragment — no PKCE code
+          // verifier needed. Reliable for mobile deep links.
+          authFlowType: AuthFlowType.implicit,
+        ),
       ).timeout(const Duration(seconds: 15));
     } catch (e) {
       if (e.toString().toLowerCase().contains('already initialized')) {

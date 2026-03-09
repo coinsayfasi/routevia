@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/error_utils.dart';
 import '../../data/providers.dart';
 
 class SavedImportScreen extends ConsumerStatefulWidget {
@@ -74,7 +75,7 @@ class _SavedImportScreenState extends ConsumerState<SavedImportScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Resolve failed: $e')));
+      ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -112,7 +113,7 @@ class _SavedImportScreenState extends ConsumerState<SavedImportScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Trip build failed: $e')));
+      ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

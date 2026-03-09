@@ -10,6 +10,10 @@ class AppConstants {
   );
   static const cacheBox = 'routevia_cache';
   static const useLlm = bool.fromEnvironment('USE_LLM', defaultValue: false);
+  static const privacyPolicyUrl = 'https://legal.routevia.tabserve.com.tr/privacy';
+  static const termsUrl = 'https://legal.routevia.tabserve.com.tr/terms';
+  static const businessApplyUrl = 'https://legal.routevia.tabserve.com.tr/business';
+  static const supportEmail = 'routevia@tabserve.com.tr';
 
   static bool get hasSupabaseConfig =>
       supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty;

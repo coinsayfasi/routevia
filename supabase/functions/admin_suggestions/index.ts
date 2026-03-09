@@ -22,7 +22,7 @@ serve(async (req) => {
       const lim = Math.max(1, Math.min(body.limit ?? 100, 500));
       let q = service
         .from("place_suggestions")
-        .select("id,suggested_name,suggested_category,suggested_tags,short_note,status,created_at,province_id,district_id,source_url,lat,lng")
+        .select("id,user_id,suggested_name,suggested_category,suggested_tags,short_note,status,admin_note,created_at,reviewed_at,province_id,district_id,source_url,lat,lng")
         .order("created_at", { ascending: false })
         .limit(lim);
 
@@ -34,7 +34,43 @@ serve(async (req) => {
 
       const { data, error } = await q;
       if (error) return jsonResponse({ error: error.message }, 500);
-      return jsonResponse({ items: data ?? [] });
+
+      const rows = (data ?? []) as Array<Record<string, unknown>>;
+      const provinceIds = [...new Set(rows.map((row) => String(row.province_id ?? "")).filter(Boolean))];
+      const districtIds = [...new Set(rows.map((row) => String(row.district_id ?? "")).filter(Boolean))];
+      const userIds = [...new Set(rows.map((row) => String(row.user_id ?? "")).filter(Boolean))];
+
+      const [{ data: provinces }, { data: districts }, { data: profiles }] = await Promise.all([
+        provinceIds.length
+          ? service.from("provinces").select("id,name,slug").in("id", provinceIds)
+          : Promise.resolve({ data: [] as Array<Record<string, unknown>> }),
+        districtIds.length
+          ? service.from("districts").select("id,name,slug").in("id", districtIds)
+          : Promise.resolve({ data: [] as Array<Record<string, unknown>> }),
+        userIds.length
+          ? service.from("profiles").select("id,display_name").in("id", userIds)
+          : Promise.resolve({ data: [] as Array<Record<string, unknown>> }),
+      ]);
+
+      const provinceById = new Map((provinces ?? []).map((row) => [String(row.id), row]));
+      const districtById = new Map((districts ?? []).map((row) => [String(row.id), row]));
+      const profileById = new Map((profiles ?? []).map((row) => [String(row.id), row]));
+
+      const items = rows.map((row) => {
+        const province = provinceById.get(String(row.province_id ?? ""));
+        const district = districtById.get(String(row.district_id ?? ""));
+        const profile = profileById.get(String(row.user_id ?? ""));
+        return {
+          ...row,
+          province_name: province?.name ?? null,
+          province_slug: province?.slug ?? null,
+          district_name: district?.name ?? null,
+          district_slug: district?.slug ?? null,
+          submitter_name: profile?.display_name ?? null,
+        };
+      });
+
+      return jsonResponse({ items });
     }
 
     const { error } = await service

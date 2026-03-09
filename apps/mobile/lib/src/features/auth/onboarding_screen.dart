@@ -88,16 +88,29 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     try {
       final repo = ref.read(repositoryProvider);
       final refCode = _refController.text.trim();
+      Future<void> runFlow() async {
+        await repo.completeOnboarding(
+          prefTags: _prefTagsBackend(),
+          prefPace: _prefPaceBackend(),
+          allowLocation: _allowLocation,
+          allowNotifications: _allowNotifications,
+        );
 
-      await repo.completeOnboarding(
-        prefTags: _prefTagsBackend(),
-        prefPace: _prefPaceBackend(),
-        allowLocation: _allowLocation,
-        allowNotifications: _allowNotifications,
-      );
+        if (refCode.isNotEmpty) {
+          await repo.redeemReferral(refCode);
+        }
+      }
 
-      if (refCode.isNotEmpty) {
-        await repo.redeemReferral(refCode);
+      try {
+        await runFlow();
+      } catch (error) {
+        final raw = error.toString().toLowerCase();
+        if (raw.contains('invalid jwt') || raw.contains('unauthorized')) {
+          await repo.client.auth.refreshSession();
+          await runFlow();
+        } else {
+          rethrow;
+        }
       }
 
       if (!mounted) return;
@@ -110,7 +123,11 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Onboarding tamamlanamadı: $e')));
+      ).showSnackBar(
+        SnackBar(
+          content: Text('Onboarding tamamlanamadi: $e'),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _saving = false);
     }

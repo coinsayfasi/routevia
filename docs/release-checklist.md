@@ -12,6 +12,13 @@
   - provinces = 81
   - districts = 973
 - Run `supabase db push --include-all --yes` to remote.
+- Run `bash scripts/verify_google_compliance_db.sh` against remote.
+- Confirm `public.google_compliance_audit()` returns `0` for:
+  - `places_google_published`
+  - `places_non_google_with_google_place_id`
+  - `places_non_google_with_google_rating`
+  - `places_non_google_with_google_url`
+  - `place_media_non_google_google_refs`
 
 ## Edge Functions
 - Deploy all core/admin functions.

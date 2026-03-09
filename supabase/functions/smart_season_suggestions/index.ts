@@ -4,6 +4,7 @@ import { getServiceClient } from "../_shared/client.ts";
 
 type Payload = {
   province_slug?: string;
+  district_name?: string;
   limit?: number;
 };
 
@@ -59,6 +60,7 @@ serve(async (req) => {
       .limit(300);
 
     if (cityName) poiQ = poiQ.ilike("city", cityName);
+    if (body.district_name) poiQ = poiQ.ilike("district", body.district_name);
 
     const poiRes = await poiQ;
     if (poiRes.error) return jsonResponse({ error: poiRes.error.message }, 500);
@@ -185,6 +187,7 @@ serve(async (req) => {
         month,
         seasonal_categories: seasonalCats,
         province_slug: body.province_slug ?? null,
+        district_name: body.district_name ?? null,
         weather: weatherMeta,
         weekend_boost: weekendBoost,
       },

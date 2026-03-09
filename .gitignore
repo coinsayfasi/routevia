@@ -15,8 +15,14 @@
 .env.*
 !.env.example
 
+# Android signing — NEVER commit these
+**/android/key.properties
+**/android/*.jks
+**/android/*.keystore
+
 # Node worker
 tools/ingest_worker/node_modules/
 
 # Supabase local
 supabase/.temp/
+apps/mobile/coinsayfasi.github.io/

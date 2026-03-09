@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/ad_service.dart';
 import '../../core/theme.dart';
+import '../../data/providers.dart';
 import '../contribute/suggestion_screen.dart';
 import '../eco/eco_screen.dart';
 import '../home/home_screen.dart';
@@ -20,6 +22,7 @@ class MainTabsScreen extends ConsumerStatefulWidget {
 
 class _MainTabsScreenState extends ConsumerState<MainTabsScreen> {
   late int _currentIndex;
+  late final List<Widget?> _pages;
 
   static const _tabPaths = <String>[
     '/home?tab=0',
@@ -33,6 +36,13 @@ class _MainTabsScreenState extends ConsumerState<MainTabsScreen> {
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex.clamp(0, 4);
+    _pages = List<Widget?>.filled(5, null);
+    _pages[_currentIndex] = _buildPage(_currentIndex);
+    // Lazy-init AdService after 2s to avoid slowing first frame
+    Future.delayed(const Duration(seconds: 2), () {
+      if (!mounted) return;
+      AdService().init();
+    });
   }
 
   @override
@@ -40,28 +50,52 @@ class _MainTabsScreenState extends ConsumerState<MainTabsScreen> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.initialIndex != widget.initialIndex) {
       _currentIndex = widget.initialIndex.clamp(0, 4);
+      _pages[_currentIndex] ??= _buildPage(_currentIndex);
+    }
+  }
+
+  Widget _buildPage(int index) {
+    switch (index) {
+      case 0:
+        return const HomeScreen();
+      case 1:
+        return const TripsScreen();
+      case 2:
+        return const EcoScreen();
+      case 3:
+        return const SuggestionScreen();
+      case 4:
+        return const ProfileScreen();
+      default:
+        return const HomeScreen();
     }
   }
 
   void _onTap(int index) {
     if (_currentIndex == index) return;
-    setState(() => _currentIndex = index);
+    setState(() {
+      _currentIndex = index;
+      _pages[index] ??= _buildPage(index);
+    });
     context.go(_tabPaths[index]);
   }
 
   @override
   Widget build(BuildContext context) {
-    final pages = <Widget>[
-      const HomeScreen(),
-      const TripsScreen(),
-      const EcoScreen(),
-      const SuggestionScreen(),
-      const ProfileScreen(),
-    ];
+    // Sync premium state with AdService on every rebuild
+    final premiumAsync = ref.watch(premiumStateProvider);
+    final pro = premiumAsync.valueOrNull?.isPro ?? false;
+    AdService().setPremium(pro);
 
     return Scaffold(
       extendBody: true,
-      body: IndexedStack(index: _currentIndex, children: pages),
+      body: IndexedStack(
+        index: _currentIndex,
+        children: List<Widget>.generate(
+          _pages.length,
+          (index) => _pages[index] ?? const SizedBox.shrink(),
+        ),
+      ),
       bottomNavigationBar: SafeArea(
         minimum: const EdgeInsets.fromLTRB(12, 0, 12, 12),
         child: DecoratedBox(

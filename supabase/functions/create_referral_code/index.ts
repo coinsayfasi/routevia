@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { corsHeaders, jsonResponse } from "../_shared/http.ts";
+import { corsHeaders, errorResponse, jsonResponse } from "../_shared/http.ts";
 import { getServiceClient, requireUser } from "../_shared/client.ts";
 
 serve(async (req) => {
@@ -16,6 +16,6 @@ serve(async (req) => {
 
     return jsonResponse({ code: String(rpc.data ?? "") });
   } catch (error) {
-    return jsonResponse({ error: (error as Error).message }, 401);
+    return errorResponse(error);
   }
 });

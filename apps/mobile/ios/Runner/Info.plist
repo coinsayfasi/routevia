@@ -64,5 +64,16 @@
 		<true/>
 		<key>UIViewControllerBasedStatusBarAppearance</key>
 		<false/>
+		<key>GADApplicationIdentifier</key>
+		<string>ca-app-pub-7579691213276550~3433133762</string>
+		<key>NSUserTrackingUsageDescription</key>
+		<string>Routevia, sana daha uygun icerik ve oneriler sunmak icin reklam kimligini kullanmak ister.</string>
+		<key>SKAdNetworkItems</key>
+		<array>
+			<dict>
+				<key>SKAdNetworkIdentifier</key>
+				<string>cstr6suwn9.skadnetwork</string>
+			</dict>
+		</array>
 	</dict>
 </plist>

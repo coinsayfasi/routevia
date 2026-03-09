@@ -15,10 +15,16 @@ class AuthScreen extends ConsumerStatefulWidget {
 }
 
 class _AuthScreenState extends ConsumerState<AuthScreen> {
-  final _emailController = TextEditingController();
-  final _codeController = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
+  final _confirmCtrl = TextEditingController();
+
+  bool _createAccount = false;
+  bool _obscurePassword = true;
+  bool _obscureConfirm = true;
   bool _loading = false;
-  bool _otpSent = false;
+  bool _resetSent = false;
+
   StreamSubscription<AuthState>? _authSub;
 
   @override
@@ -27,9 +33,12 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
     _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((
       event,
     ) async {
+      if (event.event == AuthChangeEvent.passwordRecovery) return;
       if (event.session != null && mounted) {
         final repo = ref.read(repositoryProvider);
         await repo.ensureProfile();
+        // Refresh premium state so admin role is detected immediately
+        ref.read(premiumStateProvider.notifier).refresh();
         final pendingCode = await ref
             .read(localCacheProvider)
             .getPendingReferralCode();
@@ -56,72 +65,116 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   @override
   void dispose() {
     _authSub?.cancel();
-    _emailController.dispose();
-    _codeController.dispose();
+    _emailCtrl.dispose();
+    _passwordCtrl.dispose();
+    _confirmCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _sendOtp() async {
-    final email = _emailController.text.trim();
+  String _friendlyAuthError(Object error) {
+    final lower = error.toString().toLowerCase();
+    if (lower.contains('invalid login credentials')) {
+      return 'E-posta veya şifre hatalı.';
+    }
+    if (lower.contains('email rate limit') || lower.contains('security purposes')) {
+      return 'Çok sık deneme yapıldı. Biraz bekle.';
+    }
+    if (lower.contains('invalid email')) return 'Geçersiz e-posta adresi.';
+    if (lower.contains('email not confirmed')) {
+      return 'E-posta doğrulanmamış. Şifreni sıfırlamayı dene.';
+    }
+    if (lower.contains('password should be at least')) {
+      return 'Şifre en az 6 karakter olmalı.';
+    }
+    if (lower.contains('user already registered')) {
+      return 'Bu e-posta zaten kayıtlı. Giriş yapmayı dene.';
+    }
+    if (lower.contains('error sending')) {
+      return 'Mail gönderilemedi. Biraz sonra tekrar dene.';
+    }
+    return error.toString();
+  }
+
+  Future<void> _submit() async {
+    final email = _emailCtrl.text.trim();
+    final password = _passwordCtrl.text;
+    final confirm = _confirmCtrl.text;
+
     if (email.isEmpty || !email.contains('@')) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Gecerli bir e-posta gir.')));
+      _snack('Geçerli bir e-posta gir.');
       return;
     }
+    if (password.length < 6) {
+      _snack('Şifre en az 6 karakter olmalı.');
+      return;
+    }
+    if (_createAccount && password != confirm) {
+      _snack('Şifre tekrarı eşleşmiyor.');
+      return;
+    }
+
     setState(() => _loading = true);
     try {
-      await ref.read(repositoryProvider).signInWithOtp(email);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Giris e-postasi gonderildi. Baglantiya dokun veya kodu gir.',
-            ),
-          ),
-        );
-        setState(() => _otpSent = true);
+      if (_createAccount) {
+        await ref
+            .read(repositoryProvider)
+            .signUpWithPassword(email: email, password: password);
+        if (!mounted) return;
+        final session = Supabase.instance.client.auth.currentSession;
+        if (session == null) {
+          _snack(
+            '$email adresine doğrulama bağlantısı gönderildi. '
+            'Mailine gel, bağlantıya tıkla ve geri dön.',
+            duration: 8,
+          );
+          return;
+        }
+        _snack('Hesap oluşturuldu, oturum açılıyor...');
+      } else {
+        await ref
+            .read(repositoryProvider)
+            .signInWithPassword(email: email, password: password);
+        if (!mounted) return;
+        _snack('Giriş başarılı.');
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Hata: $e')));
-      }
+      if (!mounted) return;
+      _snack(_friendlyAuthError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  Future<void> _verifyOtp() async {
-    final email = _emailController.text.trim();
-    final code = _codeController.text.trim();
+  Future<void> _resetPassword() async {
+    final email = _emailCtrl.text.trim();
     if (email.isEmpty || !email.contains('@')) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Gecerli bir e-posta gir.')));
-      return;
-    }
-    if (code.length < 6) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('6 haneli kodu gir.')));
+      _snack('Önce e-posta adresini gir.');
       return;
     }
     setState(() => _loading = true);
     try {
-      await ref
-          .read(repositoryProvider)
-          .verifyEmailOtp(email: email, code: code);
+      await ref.read(repositoryProvider).resetPasswordForEmail(email);
+      if (!mounted) return;
+      setState(() => _resetSent = true);
+      _snack(
+        '$email adresine şifre sıfırlama bağlantısı gönderildi.',
+        duration: 6,
+      );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Kod dogrulanamadi: $e')));
-      }
+      if (!mounted) return;
+      _snack(_friendlyAuthError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  void _snack(String msg, {int duration = 4}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        duration: Duration(seconds: duration),
+      ),
+    );
   }
 
   @override
@@ -142,6 +195,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 8),
+                // Logo
                 Row(
                   children: [
                     Container(
@@ -169,9 +223,9 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                   ],
                 ),
                 const SizedBox(height: 20),
-                const Text(
-                  'Giris Yap',
-                  style: TextStyle(
+                Text(
+                  _createAccount ? 'Hesap Oluştur' : 'Giriş Yap',
+                  style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w900,
                     fontSize: 32,
@@ -180,17 +234,19 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  _otpSent
-                      ? 'E-postadaki giris baglantisina dokunabilir veya 6 haneli kodu girebilirsin.'
-                      : 'E-posta adresinle kod al, hizli ve guvenli sekilde giris yap.',
+                  _createAccount
+                      ? 'E-posta ve şifrenle hesap oluştur.'
+                      : 'Hoş geldin. E-posta ve şifrenle devam et.',
                   style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.78),
                     fontSize: 14,
                   ),
                 ),
                 const SizedBox(height: 22),
+
+                // Card
                 Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(18),
@@ -206,25 +262,11 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        children: [
-                          _StepBadge(index: 1, active: true, done: _otpSent),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'E-posta adresini gir',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                                color: Colors.blueGrey.shade800,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
+                      // Email
                       TextField(
-                        controller: _emailController,
+                        controller: _emailCtrl,
                         keyboardType: TextInputType.emailAddress,
+                        autocorrect: false,
                         decoration: InputDecoration(
                           labelText: 'E-posta',
                           prefixIcon: const Icon(Icons.alternate_email_rounded),
@@ -233,86 +275,135 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 14),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: _loading ? null : _sendOtp,
-                          icon: const Icon(Icons.mark_email_read_outlined),
-                          label: Text(
-                            _loading ? 'Gonderiliyor...' : 'Kodu Gonder',
+                      const SizedBox(height: 12),
+
+                      // Password
+                      TextField(
+                        controller: _passwordCtrl,
+                        obscureText: _obscurePassword,
+                        decoration: InputDecoration(
+                          labelText: 'Şifre',
+                          prefixIcon: const Icon(Icons.lock_outline_rounded),
+                          suffixIcon: IconButton(
+                            onPressed: () => setState(
+                              () => _obscurePassword = !_obscurePassword,
+                            ),
+                            icon: Icon(
+                              _obscurePassword
+                                  ? Icons.visibility_off_outlined
+                                  : Icons.visibility_outlined,
+                            ),
                           ),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF0F766E),
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 13),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
                           ),
                         ),
                       ),
-                      if (_otpSent) ...[
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            const _StepBadge(
-                              index: 2,
-                              active: true,
-                              done: false,
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                '6 haneli kodu dogrula',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.blueGrey.shade800,
-                                ),
+
+                      // Confirm password (signup only)
+                      if (_createAccount) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _confirmCtrl,
+                          obscureText: _obscureConfirm,
+                          decoration: InputDecoration(
+                            labelText: 'Şifre Tekrarı',
+                            prefixIcon:
+                                const Icon(Icons.lock_person_outlined),
+                            suffixIcon: IconButton(
+                              onPressed: () => setState(
+                                () => _obscureConfirm = !_obscureConfirm,
+                              ),
+                              icon: Icon(
+                                _obscureConfirm
+                                    ? Icons.visibility_off_outlined
+                                    : Icons.visibility_outlined,
                               ),
                             ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        TextField(
-                          controller: _codeController,
-                          keyboardType: TextInputType.number,
-                          maxLength: 6,
-                          decoration: InputDecoration(
-                            counterText: '',
-                            labelText: 'Kod',
-                            prefixIcon: const Icon(Icons.pin_outlined),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
                           ),
                         ),
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.icon(
-                            onPressed: _loading ? null : _verifyOtp,
-                            icon: const Icon(Icons.verified_user_outlined),
-                            label: Text(
-                              _loading ? 'Dogrulaniyor...' : 'Kodu Dogrula',
+                      ],
+
+                      // Forgot password (login mode only)
+                      if (!_createAccount) ...[
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: _loading ? null : _resetPassword,
+                            style: TextButton.styleFrom(
+                              foregroundColor: const Color(0xFF0B3B68),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                                vertical: 2,
+                              ),
                             ),
-                            style: FilledButton.styleFrom(
-                              backgroundColor: const Color(0xFF0B3B68),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 13),
+                            child: Text(
+                              _resetSent
+                                  ? 'Mail gönderildi ✓'
+                                  : 'Şifremi unuttum',
+                              style: const TextStyle(fontSize: 13),
                             ),
                           ),
                         ),
+                      ] else ...[
+                        const SizedBox(height: 14),
                       ],
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerLeft,
+
+                      // Submit button
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: _loading ? null : _submit,
+                          icon: Icon(
+                            _createAccount
+                                ? Icons.person_add_alt_1
+                                : Icons.login,
+                          ),
+                          label: Text(
+                            _loading
+                                ? 'İşleniyor...'
+                                : (_createAccount
+                                      ? 'Hesap Oluştur'
+                                      : 'Giriş Yap'),
+                          ),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFF0B3B68),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+
+                      // Toggle signup/login
+                      Center(
                         child: TextButton(
-                          onPressed: _loading ? null : _sendOtp,
-                          child: const Text('Kodu tekrar gonder'),
+                          onPressed: _loading
+                              ? null
+                              : () => setState(() {
+                                  _createAccount = !_createAccount;
+                                  _resetSent = false;
+                                }),
+                          child: Text(
+                            _createAccount
+                                ? 'Zaten hesabın var mı? Giriş yap'
+                                : 'Hesabın yok mu? Kayıt ol',
+                            style: const TextStyle(
+                              color: Color(0xFF0B3B68),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                         ),
                       ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 14),
+
+                // Guest button
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton(
@@ -324,51 +415,13 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                       ),
                       padding: const EdgeInsets.symmetric(vertical: 13),
                     ),
-                    child: const Text('Misafir devam et (sinirli)'),
+                    child: const Text('Misafir devam et (sınırlı)'),
                   ),
                 ),
               ],
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _StepBadge extends StatelessWidget {
-  const _StepBadge({
-    required this.index,
-    required this.active,
-    required this.done,
-  });
-
-  final int index;
-  final bool active;
-  final bool done;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 24,
-      height: 24,
-      decoration: BoxDecoration(
-        color: done
-            ? const Color(0xFF15803D)
-            : (active ? const Color(0xFF0EA5E9) : const Color(0xFFE2E8F0)),
-        shape: BoxShape.circle,
-      ),
-      child: Center(
-        child: done
-            ? const Icon(Icons.check, size: 14, color: Colors.white)
-            : Text(
-                '$index',
-                style: TextStyle(
-                  color: active ? Colors.white : const Color(0xFF334155),
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12,
-                ),
-              ),
       ),
     );
   }

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../core/error_utils.dart';
 import '../../data/providers.dart';
 import '../../models/trip_models.dart';
 
@@ -55,7 +56,7 @@ class _TrendMapScreenState extends ConsumerState<TrendMapScreen> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString());
+      setState(() => _error = friendlyError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

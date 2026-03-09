@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/error_utils.dart';
 import '../../data/providers.dart';
 
 class SuggestionScreen extends ConsumerStatefulWidget {
@@ -24,6 +27,20 @@ class _SuggestionScreenState extends ConsumerState<SuggestionScreen> {
   String _category = 'historical';
   bool _loading = false;
   Position? _position;
+
+  static const _categoryLabels = <String, String>{
+    'museum': 'Müze',
+    'historical': 'Tarihi',
+    'nature': 'Doğa',
+    'beach': 'Plaj',
+    'viewpoint': 'Manzara',
+    'market': 'Pazar / Çarşı',
+    'mall': 'AVM',
+    'cafe': 'Kafe',
+    'food': 'Yeme-İçme',
+    'activity': 'Aktivite',
+    'lodging': 'Konaklama',
+  };
 
   @override
   void initState() {
@@ -59,6 +76,12 @@ class _SuggestionScreenState extends ConsumerState<SuggestionScreen> {
   }
 
   Future<void> _submit() async {
+    final session = Supabase.instance.client.auth.currentSession;
+    if (session == null) {
+      _toast('Öneri göndermek için önce giriş yapmalısın.');
+      context.push('/auth');
+      return;
+    }
     if (_provinceSlug == null ||
         _name.text.trim().isEmpty ||
         _note.text.trim().isEmpty) {
@@ -68,7 +91,7 @@ class _SuggestionScreenState extends ConsumerState<SuggestionScreen> {
 
     setState(() => _loading = true);
     try {
-      final result = await ref
+      await ref
           .read(repositoryProvider)
           .submitPlaceSuggestion(
             provinceSlug: _provinceSlug!,
@@ -85,14 +108,14 @@ class _SuggestionScreenState extends ConsumerState<SuggestionScreen> {
             lng: _position?.longitude,
             sourceUrl: _source.text.trim().isEmpty ? null : _source.text.trim(),
           );
-      _toast('Gonderildi: ${result['suggestion']?['id'] ?? ''}');
+      _toast('Önerin alındı! İnceleme sürecine girdi.');
       _name.clear();
       _note.clear();
       _source.clear();
       _tags.clear();
       setState(() => _position = null);
     } catch (e) {
-      _toast('Gonderilemedi: $e');
+      _toast(friendlyError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -116,8 +139,38 @@ class _SuggestionScreenState extends ConsumerState<SuggestionScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Yer Oner')),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 140),
         children: [
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Oneri Akisi',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
+                ),
+                SizedBox(height: 6),
+                Text(
+                  'Buraya ekledigin yer once moderasyona duser. Dogrulanir, kategori ve konumu temizlenir, sonra yayina alinir.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF475569),
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             initialValue: _provinceSlug,
             decoration: const InputDecoration(labelText: 'Il'),
@@ -159,7 +212,10 @@ class _SuggestionScreenState extends ConsumerState<SuggestionScreen> {
           const SizedBox(height: 8),
           TextField(
             controller: _name,
-            decoration: const InputDecoration(labelText: 'Mekan adi'),
+            decoration: const InputDecoration(
+              labelText: 'Mekan adi',
+              hintText: 'Ornek: Kayakoy Panorama Noktasi',
+            ),
           ),
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
@@ -177,7 +233,14 @@ class _SuggestionScreenState extends ConsumerState<SuggestionScreen> {
               'food',
               'activity',
               'lodging',
-            ].map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+            ]
+                .map(
+                  (c) => DropdownMenuItem(
+                    value: c,
+                    child: Text(_categoryLabels[c] ?? c),
+                  ),
+                )
+                .toList(),
             onChanged: (v) => setState(() => _category = v ?? 'historical'),
           ),
           const SizedBox(height: 8),
@@ -187,6 +250,8 @@ class _SuggestionScreenState extends ConsumerState<SuggestionScreen> {
             maxLines: 3,
             decoration: const InputDecoration(
               labelText: 'Neden eklenmeli? (<=240)',
+              hintText:
+                  'Neyi ozel? Ne zaman gidilmeli? Kisa ve dogrulanabilir yaz.',
             ),
           ),
           const SizedBox(height: 8),
@@ -197,13 +262,28 @@ class _SuggestionScreenState extends ConsumerState<SuggestionScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          TextField(
-            controller: _source,
-            decoration: const InputDecoration(
-              labelText: 'Kaynak URL (opsiyonel)',
-            ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: ['sunset', 'family', 'local', 'hidden_gem', 'photo']
+                .map(
+                  (tag) => ActionChip(
+                    label: Text(tag),
+                    onPressed: () {
+                      final current = _tags.text
+                          .split(',')
+                          .map((e) => e.trim())
+                          .where((e) => e.isNotEmpty)
+                          .toList();
+                      if (current.contains(tag)) return;
+                      current.add(tag);
+                      _tags.text = current.join(', ');
+                    },
+                  ),
+                )
+                .toList(),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           OutlinedButton.icon(
             onPressed: _pickLocation,
             icon: const Icon(Icons.my_location),
@@ -213,11 +293,32 @@ class _SuggestionScreenState extends ConsumerState<SuggestionScreen> {
                   : 'Konum: ${_position!.latitude.toStringAsFixed(4)}, ${_position!.longitude.toStringAsFixed(4)}',
             ),
           ),
-          const SizedBox(height: 12),
-          FilledButton(
-            onPressed: _loading ? null : _submit,
-            child: Text(_loading ? 'Gonderiliyor...' : 'Oneriyi Gonder'),
+          if (_position != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Konum eklendi. Admin doğrularsa yayın akışına hızlı girer.',
+              style: TextStyle(
+                color: Colors.green.shade700,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          TextField(
+            controller: _source,
+            decoration: const InputDecoration(
+              labelText: 'Kaynak URL (opsiyonel)',
+              hintText: 'Resmi site, harita linki veya lisanslı kaynak',
+            ),
           ),
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            onPressed: _loading ? null : _submit,
+            icon: const Icon(Icons.send),
+            label: Text(_loading ? 'Gönderiliyor...' : 'Öneriyi Gönder'),
+          ),
+          const SizedBox(height: 8),
         ],
       ),
     );

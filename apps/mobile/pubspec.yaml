@@ -26,6 +26,9 @@ dependencies:
   url_launcher: ^6.3.2
   share_plus: ^11.1.0
   app_links: ^6.4.0
+  in_app_purchase: ^3.2.3
+  image_picker: ^1.2.0
+  google_mobile_ads: ^7.0.0
 
 dev_dependencies:
   flutter_test:

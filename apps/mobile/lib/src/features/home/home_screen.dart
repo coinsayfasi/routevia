@@ -9,10 +9,16 @@ import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/constants.dart';
+import '../../core/error_utils.dart';
+import '../../core/premium_gate.dart';
 import '../../core/theme.dart';
+import '../../core/widgets/ad_banner.dart';
 import '../../data/providers.dart';
 import '../../data/routevia_repository.dart';
 import '../../models/trip_models.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+
 import '../../core/widgets/safe_network_image.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -28,6 +34,10 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   static const String _allDistrictValue = '__all__';
+  StreamSubscription<AuthState>? _authSub;
+  String? _lastSessionUserId;
+  bool _initialLoadRunning = false;
+  bool _initialLoadQueued = false;
 
   // Plan state
   String? _provinceSlug;
@@ -41,7 +51,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   String? _districtId;
 
   // UI state
-  bool _loading = false;
   bool _dataLoading = true;
   bool _popularLoading = false;
   bool _popularServiceError = false;
@@ -56,6 +65,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   List<PlaceModel> _popularPlaces = const [];
   List<PlaceModel> _scenicPicks = const [];
   List<PlaceModel> _foodPicks = const [];
+  List<PlaceModel> _stayPicks = const [];
   List<Map<String, dynamic>> _smartSeason = const [];
   bool _smartSeasonLoading = false;
   Map<String, String> _offlinePacks = const {};
@@ -63,6 +73,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Map<String, Map<String, dynamic>> _liveStatusByPlaceId = const {};
   bool _liveLoading = false;
   Position? _position;
+
+  // Pexels destination cover
+  String? _coverImageUrl;
+  bool _coverLoading = false;
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -78,9 +92,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final c = 2 * atan2(sqrt(a), sqrt(1 - a));
     return r * c;
   }
-
-  String _effectiveTransportMode(String mode) =>
-      mode == 'scooter' ? 'bike' : mode;
 
   String _transportLabel(String v) => switch (v) {
     'walk' => 'Yürüyüş',
@@ -151,8 +162,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       'food' => _foodPicks,
       _ => _popularPlaces,
     };
-    List<PlaceModel> real(List<PlaceModel> list) =>
-        list.where((p) => !_isFakePlaceholder(p)).toList();
+    List<PlaceModel> real(List<PlaceModel> list) => list
+        .where((p) => !_isFakePlaceholder(p) && p.category != 'lodging')
+        .toList();
     final filtered = real(selected);
     if (filtered.isNotEmpty) return filtered;
     final pop = real(_popularPlaces);
@@ -169,19 +181,57 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return t.difference(now).inMinutes;
   }
 
-  // Approximate Turkish solar times by month
-  ({int riseH, int riseM, int setH, int setM}) _solar() =>
-      switch (DateTime.now().month) {
-        1 || 2 => (riseH: 7, riseM: 30, setH: 17, setM: 45),
-        3 => (riseH: 7, riseM: 0, setH: 18, setM: 30),
-        4 => (riseH: 6, riseM: 15, setH: 19, setM: 30),
-        5 || 6 => (riseH: 5, riseM: 30, setH: 20, setM: 30),
-        7 || 8 => (riseH: 5, riseM: 45, setH: 20, setM: 15),
-        9 => (riseH: 6, riseM: 30, setH: 19, setM: 15),
-        10 => (riseH: 7, riseM: 0, setH: 18, setM: 15),
-        11 => (riseH: 7, riseM: 30, setH: 17, setM: 30),
-        _ => (riseH: 7, riseM: 45, setH: 17, setM: 15),
-      };
+  // Astronomical sunrise/sunset for given lat/lng (Turkey = UTC+3).
+  // Accuracy: ±5 min — sufficient for UX display.
+  ({int riseH, int riseM, int setH, int setM}) _solarForCoords(
+    double lat,
+    double lng,
+  ) {
+    final now = DateTime.now();
+    final dayOfYear = now.difference(DateTime(now.year, 1, 1)).inDays + 1;
+    const deg2rad = pi / 180;
+
+    // Declination
+    final declination = -23.45 * cos(2 * pi * (dayOfYear + 10) / 365.0);
+    final decRad = declination * deg2rad;
+    final latRad = lat * deg2rad;
+
+    // Hour angle
+    final cosHA = -tan(latRad) * tan(decRad);
+    final ha = cosHA.clamp(-1.0, 1.0);
+    final haAngle = acos(ha) / deg2rad; // degrees
+
+    // Equation of time (minutes)
+    final b = 2 * pi * (dayOfYear - 81) / 364.0;
+    final eqTime = 9.87 * sin(2 * b) - 7.53 * cos(b) - 1.5 * sin(b);
+
+    // Solar noon in local time (UTC+3 → standard meridian 45°)
+    final solarNoonMin = 720 - eqTime - (lng - 45) * 4;
+
+    final sunriseMin = (solarNoonMin - haAngle * 4).round();
+    final sunsetMin = (solarNoonMin + haAngle * 4).round();
+
+    return (
+      riseH: (sunriseMin ~/ 60).clamp(0, 23),
+      riseM: sunriseMin % 60,
+      setH: (sunsetMin ~/ 60).clamp(0, 23),
+      setM: sunsetMin % 60,
+    );
+  }
+
+  ({int riseH, int riseM, int setH, int setM}) _solar() {
+    final prov = _provinces.firstWhere(
+      (p) => p['slug'] == _provinceSlug,
+      orElse: () => const {},
+    );
+    final lat = (prov['lat'] as num?)?.toDouble();
+    final lng = (prov['lng'] as num?)?.toDouble();
+    // Fallback to Ankara if no coords
+    return _solarForCoords(lat ?? 39.92, lng ?? 32.85);
+  }
+
+  String _timeStr(int h, int m) =>
+      '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
 
   // Radius (km) travellable by the selected transport in ~30–40min
   double _transportRadiusKm() => switch (_transportMode) {
@@ -221,10 +271,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _loadInitial();
+    _lastSessionUserId = Supabase.instance.client.auth.currentUser?.id;
+    _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((event) {
+      final nextUserId = event.session?.user.id;
+      if (nextUserId == _lastSessionUserId) return;
+      _lastSessionUserId = nextUserId;
+      _scheduleInitialReload();
+    });
+    _scheduleInitialReload();
+  }
+
+  @override
+  void dispose() {
+    _authSub?.cancel();
+    super.dispose();
+  }
+
+  void _scheduleInitialReload() {
+    if (_initialLoadRunning) {
+      _initialLoadQueued = true;
+      return;
+    }
+    unawaited(_loadInitial());
   }
 
   Future<void> _loadInitial() async {
+    _initialLoadRunning = true;
     setState(() => _dataLoading = true);
     final repo = ref.read(repositoryProvider);
     final cache = ref.read(localCacheProvider);
@@ -262,6 +334,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           _popularPlaces = const [];
           _scenicPicks = const [];
           _foodPicks = const [];
+          _stayPicks = const [];
         });
         _showSnack(startupWarning ?? 'Başlangıç verileri yüklenemedi.');
         return;
@@ -343,11 +416,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         }
       }
       DateTime? expiry;
+      bool isPro = false;
+      final now = DateTime.now().toUtc();
       for (final e in entitlements) {
-        if ((e['entitlement_key'] as String?) == 'pro_preview_7d') {
+        final key = e['entitlement_key'] as String?;
+        if (key == 'pro_preview_7d' || key == 'routevia_pro') {
           final ex = DateTime.tryParse((e['expires_at'] as String?) ?? '');
-          if (ex != null && (expiry == null || ex.isAfter(expiry))) {
-            expiry = ex;
+          if (ex != null && ex.isAfter(now)) {
+            isPro = true;
+            if (expiry == null || ex.isAfter(expiry)) {
+              expiry = ex;
+            }
           }
         }
       }
@@ -362,12 +441,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ? preferredDistrictId
             : null;
         _isAdmin = isAdmin;
-        _premiumPreviewActive =
-            expiry != null && expiry.isAfter(DateTime.now());
+        _premiumPreviewActive = isPro || isAdmin;
         _premiumPreviewExpiry = expiry;
       });
 
       await _loadPopularForProvince();
+      unawaited(_loadCoverImage().catchError((_) {}));
       await _loadOfflinePacks();
       if (startupWarning != null && mounted) {
         _showSnack(startupWarning);
@@ -388,10 +467,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         _showSnack('Başlangıç verileri yüklenemedi. Lütfen tekrar dene.');
       }
     } finally {
+      _initialLoadRunning = false;
       if (mounted && _dataLoading) {
         setState(() => _dataLoading = false);
       }
+      if (_initialLoadQueued) {
+        _initialLoadQueued = false;
+        _scheduleInitialReload();
+      }
     }
+  }
+
+  String? get _selectedDistrictNameOrNull {
+    if (_districtId == null) return null;
+    final d = _districts.firstWhere(
+      (d) => d['id'] == _districtId,
+      orElse: () => <String, dynamic>{},
+    );
+    return d['name'] as String?;
   }
 
   Future<void> _loadPopularForProvince() async {
@@ -399,12 +492,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (slug == null) return;
     setState(() => _popularLoading = true);
     final repo = ref.read(repositoryProvider);
+    final districtName = _selectedDistrictNameOrNull;
     var serviceError = false;
     try {
       var places = await repo.listProvinceHubPlaces(
         provinceSlug: slug,
         personaMode: _persona,
         preferences: _prefs.toList(),
+        districtName: districtName,
       );
       if (places.isEmpty) {
         final fallbackBundle = await repo.nearbyPlacesBundle(
@@ -418,6 +513,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               32.50,
           radiusKm: 40,
           provinceSlug: slug,
+          districtName: districtName,
           categories: const [],
           tags: const [],
           freeOnly: false,
@@ -435,6 +531,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       if (places.isEmpty) {
         places = await repo.listProvinceOrNationalTopPicks(
           provinceSlug: slug,
+          districtName: districtName,
           limit: 24,
         );
       }
@@ -468,15 +565,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             .where((p) => p.category == 'food' || p.category == 'cafe')
             .take(10)
             .toList();
+        _stayPicks = places
+            .where((p) => p.category == 'lodging')
+            .take(10)
+            .toList();
       });
       unawaited(_loadSmartSeason());
       unawaited(_loadLiveStatusForTopPicks());
     } catch (_) {
       serviceError = true;
-      var places = await _fallbackTopPicks(repo, slug);
+      var places = await _fallbackTopPicks(
+        repo,
+        slug,
+        districtName: districtName,
+      );
       if (places.isEmpty) {
         places = await repo.listProvinceOrNationalTopPicks(
           provinceSlug: slug,
+          districtName: districtName,
           limit: 24,
         );
       }
@@ -504,6 +610,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             .where((p) => p.category == 'food' || p.category == 'cafe')
             .take(10)
             .toList();
+        _stayPicks = places
+            .where((p) => p.category == 'lodging')
+            .take(10)
+            .toList();
       });
       unawaited(_loadSmartSeason());
       unawaited(_loadLiveStatusForTopPicks());
@@ -518,7 +628,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     try {
       final items = await ref
           .read(repositoryProvider)
-          .getSmartSeasonSuggestions(provinceSlug: _provinceSlug, limit: 8);
+          .getSmartSeasonSuggestions(
+            provinceSlug: _provinceSlug,
+            districtName: _selectedDistrictNameOrNull,
+            limit: 8,
+          );
       if (!mounted) return;
       setState(() => _smartSeason = items);
     } catch (_) {
@@ -551,7 +665,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _showSnack('Offline paket indirildi: $slug');
     } catch (e) {
       if (!mounted) return;
-      _showSnack('Offline paket indirilemedi: $e');
+      _showSnack(friendlyError(e));
     } finally {
       if (mounted) setState(() => _offlineBusy = false);
     }
@@ -607,10 +721,33 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
+  Future<void> _loadCoverImage() async {
+    final slug = _provinceSlug;
+    if (slug == null) return;
+    final name = _selectedProvinceName;
+    if (name == 'İl Seç') return;
+    setState(() {
+      _coverLoading = true;
+      _coverImageUrl = null;
+    });
+    try {
+      final result = await ref
+          .read(repositoryProvider)
+          .getDestinationImage(name);
+      if (!mounted) return;
+      setState(() {
+        _coverImageUrl = result?['image_url'] as String?;
+      });
+    } finally {
+      if (mounted) setState(() => _coverLoading = false);
+    }
+  }
+
   Future<List<PlaceModel>> _fallbackTopPicks(
     RouteviaRepository repo,
-    String provinceSlug,
-  ) async {
+    String provinceSlug, {
+    String? districtName,
+  }) async {
     final province = await repo.getProvinceBySlug(provinceSlug);
     final centerLat = (province?['lat'] as num?)?.toDouble();
     final centerLng = (province?['lng'] as num?)?.toDouble();
@@ -622,6 +759,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       lng: fallbackLng,
       radiusKm: 40,
       provinceSlug: provinceSlug,
+      districtName: districtName,
       categories: const [],
       tags: const [],
       freeOnly: false,
@@ -670,7 +808,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final foodPool = realSource
         .where((p) => {'food', 'cafe'}.contains(p.category))
         .toList();
-    final stayPool = realSource.where((p) => p.category == 'lodging').toList();
     final scenicPool = [...naturePool, ...historyPool, ...museumPool];
     final picks = <PlaceModel>[];
     final seen = <String>{};
@@ -726,13 +863,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       }
     }
 
+    // Fill remaining slots: prioritise scenic/nature/historical (3:1 over food).
+    int fillCycle = 0;
     while (picks.length < limit) {
       final before = picks.length;
       takeOne(scenicPool);
       if (picks.length >= limit) break;
-      takeOne(foodPool);
+      takeOne(scenicPool);
       if (picks.length >= limit) break;
-      takeOne(stayPool);
+      takeOne(scenicPool);
+      if (picks.length >= limit) break;
+      // Only add food every 4th pick to avoid restaurant dominance.
+      if (fillCycle % 4 == 3) takeOne(foodPool);
+      fillCycle++;
       if (picks.length >= limit) break;
       takeOne(realSource);
       if (picks.length == before) break;
@@ -755,16 +898,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Future<void> _openPromoApplication() async {
-    // Ad/promo application is explicitly separated from organic ranking.
-    const fallbackMail =
-        'mailto:routevia@tabserve.com.tr?subject=Routevia%20Tanitim%20Basvurusu';
-    final mailUri = Uri.parse(fallbackMail);
+    final mailUri = Uri.parse(
+      'mailto:${AppConstants.supportEmail}?subject=Routevia%20Tanitim%20Basvurusu&body=Merhaba%2C%20Routevia%20sponsorlu%20alani%20hakkinda%20bilgi%20almak%20istiyorum.',
+    );
     try {
       await launchUrl(mailUri, mode: LaunchMode.externalApplication);
     } catch (_) {
       if (!mounted) return;
       _showSnack(
-        'E-posta uygulamasi acilamadi. routevia@tabserve.com.tr adresine yazabilirsin.',
+        'Mail uygulaması açılamadı. ${AppConstants.supportEmail} adresine yazabilirsin.',
       );
     }
   }
@@ -812,6 +954,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _districtId = null;
     });
     await _loadPopularForProvince();
+    unawaited(_loadCoverImage().catchError((_) {}));
   }
 
   Future<void> _openDistrictPicker() async {
@@ -835,8 +978,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (!mounted) return;
     if (selected == _allDistrictValue) {
       setState(() => _districtId = null);
+      await _loadPopularForProvince();
     } else if (selected != null) {
       setState(() => _districtId = selected);
+      await _loadPopularForProvince();
     }
   }
 
@@ -880,99 +1025,34 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  Future<void> _createPlan() async {
-    if (_provinceSlug == null) {
-      if (_provinces.isNotEmpty) {
-        setState(() => _provinceSlug = _provinces.first['slug'] as String);
-      } else {
-        _showSnack('İl seçilmedi. Önce bir il seç.');
-        return;
-      }
-    }
-    setState(() => _loading = true);
-    try {
-      final repo = ref.read(repositoryProvider);
-      final isLoggedIn = Supabase.instance.client.auth.currentSession != null;
-      final trip = isLoggedIn
-          ? await repo.generateTripPlan(
-              provinceSlug: _provinceSlug!,
-              days: _days,
-              transportMode: _effectiveTransportMode(_transportMode),
-              pace: _pace,
-              personaMode: _persona,
-              preferences: _prefs.toList(),
-              districtId: _districtId,
-              maxRadiusKm: _planRadiusKm,
-              allowOutsideDistrict: _allowOutsideDistrict,
-              startLat: _position?.latitude,
-              startLng: _position?.longitude,
-            )
-          : await repo.generateDemoTripPlan(
-              provinceSlug: _provinceSlug!,
-              days: _days,
-              transportMode: _effectiveTransportMode(_transportMode),
-              pace: _pace,
-              personaMode: _persona,
-              preferences: _prefs.toList(),
-            );
-      // Log silently – don't block navigation on analytics failures (401 etc.)
-      unawaited(
-        repo
-            .logAppEvent(
-              'plan_generated',
-              payload: {
-                'days': _days,
-                'transport_mode': _transportMode,
-                'pace': _pace,
-                'province_slug': _provinceSlug,
-                'district_id': _districtId,
-                'stops_total': trip.daysPlan.fold<int>(
-                  0,
-                  (sum, d) => sum + d.stops.length,
-                ),
-              },
-            )
-            .catchError((_) {}),
-      );
-      unawaited(_maybeAskForRating(trip).catchError((_) {}));
+  Future<void> _openGrowthSheet() async {
+    final isLoggedIn = Supabase.instance.client.auth.currentSession != null;
+    if (!isLoggedIn) {
       if (!mounted) return;
-      context.push('/map', extra: trip);
-    } catch (e) {
-      if (!mounted) return;
-      _showSnack('Plan oluşturulamadı: $e');
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _maybeAskForRating(TripPlan trip) async {
-    final cache = ref.read(localCacheProvider);
-    final sessions = await cache.getSessionCount();
-    final totalStops = trip.daysPlan.fold<int>(
-      0,
-      (sum, d) => sum + d.stops.length,
-    );
-    if (sessions < 3 || totalStops < 3) return;
-    final lastPrompt = await cache.getLastRatingPromptAt();
-    if (lastPrompt != null &&
-        DateTime.now().difference(lastPrompt).inDays < 14) {
+      _showSnack('Davet kodu için önce giriş yapmalısın.');
+      context.push('/auth');
       return;
     }
-    unawaited(
-      ref
-          .read(repositoryProvider)
-          .logAppEvent('rating_prompt_skipped_ios_guard')
-          .catchError((_) {}),
-    );
-    await cache.setLastRatingPromptAt(DateTime.now());
-  }
 
-  Future<void> _openGrowthSheet() async {
     final repo = ref.read(repositoryProvider);
     String? referralCode;
+
+    // 1) Try to read existing code from profile first (no extra RPC)
     try {
-      referralCode = await repo.createReferralCode();
+      final profile = await repo.getMyProfile();
+      referralCode = (profile?['referral_code'] as String?)?.trim();
+      if (referralCode?.isEmpty ?? true) referralCode = null;
     } catch (_) {}
+
+    // 2) Only create if still null
+    if (referralCode == null) {
+      try {
+        referralCode = await repo.createReferralCode();
+      } catch (e) {
+        if (mounted) _showSnack(friendlyError(e));
+      }
+    }
+
     if (!mounted) return;
     showModalBottomSheet<void>(
       context: context,
@@ -1033,6 +1113,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 onTap: referralCode == null
                     ? null
                     : () async {
+                        Navigator.of(ctx).pop();
                         final text =
                             'Routevia ile gezi planını 1 tıkla yap. Davet kodum: $referralCode\n'
                             'routevia://ref/$referralCode';
@@ -1124,7 +1205,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   _showSnack('Teşekkürler! Geri bildirimin kaydedildi.');
                 } catch (e) {
                   if (!mounted) return;
-                  _showSnack('Gönderilemedi: $e');
+                  _showSnack(friendlyError(e));
                 }
               },
               child: const Text('Gönder'),
@@ -1154,8 +1235,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       _buildHeroCard(),
                       const SizedBox(height: 20),
                       _buildLocationSelector(),
+                      _buildDestinationCover(),
                       const SizedBox(height: 20),
                       _buildSmartContextSection(),
+                      const SizedBox(height: 24),
                       _buildSmartSeasonSection(),
                       _buildOfflinePackSection(),
                       _buildLiveStatusSection(),
@@ -1165,15 +1248,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ],
                       _buildQuickActions(),
                       const SizedBox(height: 24),
+                      const AdBannerWidget(),
+                      const SizedBox(height: 24),
                       _buildTopPicksSection(),
                       const SizedBox(height: 24),
                       if (_foodPicks.isNotEmpty && _pickMode != 'food') ...[
                         _buildFoodSection(),
                         const SizedBox(height: 24),
                       ],
+                      if (_stayPicks.isNotEmpty) ...[
+                        _buildStaySection(),
+                        const SizedBox(height: 24),
+                      ],
                       _buildPromoBanner(),
-                      const SizedBox(height: 24),
-                      _buildPlanButton(),
                       const SizedBox(height: 32),
                     ],
                   ),
@@ -1637,6 +1724,80 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
+  Widget _buildDestinationCover() {
+    if (_coverImageUrl == null && !_coverLoading) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: SizedBox(
+          height: 160,
+          width: double.infinity,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (_coverLoading)
+                Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1A2E50),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Center(
+                    child: SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                )
+              else if (_coverImageUrl != null)
+                CachedNetworkImage(
+                  imageUrl: _coverImageUrl!,
+                  fit: BoxFit.cover,
+                  placeholder: (ctx, url) =>
+                      Container(color: const Color(0xFF1A2E50)),
+                  errorWidget: (ctx, url, err) => const SizedBox.shrink(),
+                ),
+              // Gradient overlay for text legibility
+              if (_coverImageUrl != null)
+                Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.transparent,
+                          Colors.black.withValues(alpha: 0.55),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              // City name overlay
+              if (_provinceSlug != null && _coverImageUrl != null)
+                Positioned(
+                  bottom: 28,
+                  left: 14,
+                  child: Text(
+                    _selectedProvinceName,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      shadows: [Shadow(blurRadius: 8)],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildPremiumBadge() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -1702,6 +1863,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       _position?.longitude;
                   if (lat == null || lng == null) return;
                   final districtSlug = district['slug'] as String?;
+                  final districtName = district['name'] as String?;
                   context.push(
                     '/map-explore',
                     extra: {
@@ -1710,6 +1872,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       'province_slug': _provinceSlug,
                       'district_id': ?_districtId,
                       'district_slug': ?districtSlug,
+                      'district_name': ?districtName,
                     },
                   );
                 },
@@ -1848,61 +2011,76 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           accentColor: timeAccent,
           icon: timeIcon,
           eyebrow: eyebrow,
-          title: 'Rota oluştur',
-          chips: [_SmartChip('Şu an için özel')],
-          onTap: _createPlan,
+          title: 'Keşfet',
+          chips: [_SmartChip('Haritada gör')],
+          onTap: () => context.push(
+            '/local-hub',
+            extra: {'province_slug': _provinceSlug},
+          ),
         ),
       );
     }
 
-    // ── 2. Sunrise countdown ─────────────────────────────────────────────
+    // ── 2. Sunrise card (always visible before it rises) ─────────────────
     final sunriseMin = _minutesUntil(now, solar.riseH, solar.riseM);
-    if (sunriseMin >= 0 && sunriseMin <= 120) {
+    if (sunriseMin >= -30 && sunriseMin <= 180) {
       final vp = allPicks
           .where((p) => {'viewpoint', 'nature', 'beach'}.contains(p.category))
           .toList();
+      final sunriseTimeStr = _timeStr(solar.riseH, solar.riseM);
       cards.add(
         _SmartCard(
           accentColor: const Color(0xFFFF9800),
           icon: Icons.wb_twilight_rounded,
-          eyebrow: 'Gün Doğumuna',
-          title: '$sunriseMin dk kaldı!',
+          eyebrow: sunriseMin > 0
+              ? 'Gün Doğumuna $sunriseMin dk kaldı'
+              : 'Gün Doğuyor! 🌅',
+          title: vp.isNotEmpty
+              ? _cleanPlaceName(vp.first.name)
+              : 'Manzara noktaları',
           chips: [
-            _SmartChip(
-              vp.isNotEmpty
-                  ? _cleanPlaceName(vp.first.name)
-                  : 'Manzara noktaları',
-            ),
+            _SmartChip('$sunriseTimeStr gün doğumu · $_selectedProvinceName'),
           ],
           onTap: vp.isNotEmpty
               ? () => context.push('/place', extra: vp.first)
-              : _createPlan,
+              : () => context.push(
+                  '/local-hub',
+                  extra: {'province_slug': _provinceSlug},
+                ),
         ),
       );
     }
 
-    // ── 3. Sunset countdown ──────────────────────────────────────────────
+    // ── 3. Sunset card (always visible, even hours before) ───────────────
     final sunsetMin = _minutesUntil(now, solar.setH, solar.setM);
-    if (sunsetMin >= 0 && sunsetMin <= 120) {
+    if (sunsetMin >= -30 && sunsetMin <= 480) {
       final vp = allPicks
           .where((p) => {'viewpoint', 'beach', 'nature'}.contains(p.category))
           .toList();
+      final sunsetTimeStr = _timeStr(solar.setH, solar.setM);
+      final eyebrowSun = sunsetMin > 60
+          ? 'Bugün saat $sunsetTimeStr gün batımı'
+          : sunsetMin > 0
+          ? 'Gün Batımına $sunsetMin dk kaldı 🌇'
+          : 'Gün Batıyor! 🌅';
       cards.add(
         _SmartCard(
           accentColor: const Color(0xFFFF5722),
           icon: Icons.wb_sunny_rounded,
-          eyebrow: 'Gün Batımına',
-          title: '$sunsetMin dk kaldı!',
+          eyebrow: eyebrowSun,
+          title: vp.isNotEmpty
+              ? _cleanPlaceName(vp.first.name)
+              : 'Manzara noktaları',
           chips: [
-            _SmartChip(
-              vp.isNotEmpty
-                  ? _cleanPlaceName(vp.first.name)
-                  : 'Manzara noktaları',
-            ),
+            _SmartChip('$sunsetTimeStr · $_selectedProvinceName'),
+            if (vp.isNotEmpty) _SmartChip(_categoryLabels(vp.first.category)),
           ],
           onTap: vp.isNotEmpty
               ? () => context.push('/place', extra: vp.first)
-              : _createPlan,
+              : () => context.push(
+                  '/local-hub',
+                  extra: {'province_slug': _provinceSlug},
+                ),
         ),
       );
     }
@@ -2059,10 +2237,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   children: [
                     Text(
                       _pickMode == 'food'
-                          ? 'Yeme-İçme Picks'
+                          ? 'Bu Haftanin Yemek Stoplari'
                           : _pickMode == 'scenic'
-                          ? 'Gezilecek Yerler'
-                          : 'Top Picks',
+                          ? 'Bu Hafta Nereye Gidilir'
+                          : 'Bu Haftanin Kesif Rotasi',
                       style: const TextStyle(
                         fontWeight: FontWeight.w800,
                         fontSize: 18,
@@ -2072,7 +2250,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ),
                     if (_provinceSlug != null)
                       Text(
-                        _selectedProvinceName,
+                        _pickMode == 'food'
+                            ? 'Hizli yemek ve kafe secimleri • ${_districtId != null ? _selectedDistrictName : _selectedProvinceName}'
+                            : 'Editor secimi + topluluk sinyali • ${_districtId != null ? _selectedDistrictName : _selectedProvinceName}',
                         style: const TextStyle(
                           color: RouteviaColors.textSecondary,
                           fontSize: 13,
@@ -2155,6 +2335,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         Text(
                           _popularServiceError
                               ? 'Servis geçici kullanılamıyor.'
+                              : _districtId != null
+                              ? '$_selectedDistrictName için henüz yeterli veri yok.\n"Tüm İl" seçerek tüm ili görebilirsin.'
                               : 'Bu il için öneriler hazırlanıyor.',
                           textAlign: TextAlign.center,
                           style: const TextStyle(
@@ -2188,6 +2370,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                               orElse: () => <String, dynamic>{},
                             )['slug']
                             as String?;
+                    final districtName =
+                        _districts.firstWhere(
+                              (d) => d['id'] == _districtId,
+                              orElse: () => <String, dynamic>{},
+                            )['name']
+                            as String?;
                     return _TopPickCard(
                       place: p,
                       onTap: () => context.push(
@@ -2198,6 +2386,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           'province_slug': _provinceSlug,
                           'district_id': ?_districtId,
                           'district_slug': ?districtSlug,
+                          'district_name': ?districtName,
                         },
                       ),
                     );
@@ -2238,10 +2427,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           child: ListView.separated(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             scrollDirection: Axis.horizontal,
-            itemCount: _smartSeason.length,
+            itemCount: _smartSeason
+                .where((s) => s['category'] != 'lodging')
+                .toList()
+                .length,
             separatorBuilder: (_, _) => const SizedBox(width: 10),
             itemBuilder: (_, i) {
-              final s = _smartSeason[i];
+              final filtered = _smartSeason
+                  .where((s) => s['category'] != 'lodging')
+                  .toList();
+              final s = filtered[i];
               return GestureDetector(
                 onTap: () {
                   final place = PlaceModel.fromMap({
@@ -2286,12 +2481,44 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         ),
                       ),
                       const Spacer(),
-                      Text(
-                        'Sezon ${(s['season_score'] as num?)?.toStringAsFixed(1) ?? '0'}',
-                        style: const TextStyle(
-                          color: Color(0xFF0E7490),
-                          fontWeight: FontWeight.w700,
-                        ),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.star_rounded,
+                            size: 14,
+                            color: Color(0xFFF59E0B),
+                          ),
+                          const SizedBox(width: 3),
+                          Text(
+                            (s['season_score'] as num?)?.toStringAsFixed(1) ??
+                                '-',
+                            style: const TextStyle(
+                              color: Color(0xFF92400E),
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12,
+                            ),
+                          ),
+                          const Spacer(),
+                          if (s['category'] != null)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE0F2FE),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                _categoryLabels(s['category'] as String),
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  color: Color(0xFF0369A1),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ],
                   ),
@@ -2348,7 +2575,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               runSpacing: 8,
               children: [
                 FilledButton.tonal(
-                  onPressed: _offlineBusy ? null : _downloadOfflinePack,
+                  onPressed: _offlineBusy
+                      ? null
+                      : () {
+                          if (!_premiumPreviewActive) {
+                            showPremiumGate(
+                              context,
+                              feature: 'Offline paketler',
+                            );
+                            return;
+                          }
+                          _downloadOfflinePack();
+                        },
                   child: Text(_offlineBusy ? 'Indiriliyor...' : 'Paketi Indir'),
                 ),
                 OutlinedButton(
@@ -2360,10 +2598,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   child: const Text('Sil'),
                 ),
                 OutlinedButton.icon(
-                  onPressed: () => context.push(
-                    '/trend-map',
-                    extra: {'province_slug': _provinceSlug},
-                  ),
+                  onPressed: () {
+                    if (!_premiumPreviewActive) {
+                      showPremiumGate(context, feature: 'Trend harita');
+                      return;
+                    }
+                    context.push(
+                      '/trend-map',
+                      extra: {'province_slug': _provinceSlug},
+                    );
+                  },
                   icon: const Icon(Icons.local_fire_department),
                   label: const Text('Trend Harita'),
                 ),
@@ -2525,17 +2769,113 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ),
         const SizedBox(height: 10),
         SizedBox(
-          height: 44,
+          height: 140,
           child: ListView.separated(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             scrollDirection: Axis.horizontal,
             itemBuilder: (context, i) {
               final p = _foodPicks[i];
+              final isCafe = p.category == 'cafe';
+              final gradientColors = isCafe
+                  ? const [Color(0xFF6D4C41), Color(0xFFFF8F00)]
+                  : const [Color(0xFFE65100), Color(0xFFFF5722)];
+              final icon = isCafe
+                  ? Icons.local_cafe_rounded
+                  : Icons.restaurant_rounded;
+              return GestureDetector(
+                onTap: () => context.push('/place', extra: p),
+                child: Container(
+                  width: 200,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: gradientColors,
+                    ),
+                    borderRadius: BorderRadius.circular(14),
+                    boxShadow: [
+                      BoxShadow(
+                        color: gradientColors.first.withValues(alpha: 0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(icon, color: Colors.white, size: 20),
+                      ),
+                      const Spacer(),
+                      Text(
+                        _cleanPlaceName(p.name),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                          height: 1.2,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+            separatorBuilder: (_, _) => const SizedBox(width: 12),
+            itemCount: _foodPicks.length,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStaySection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16),
+          child: Text(
+            'Nerede Kalınır',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 18,
+              letterSpacing: -0.2,
+              color: RouteviaColors.textPrimary,
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16),
+          child: Text(
+            'Konaklama önerilerini gezi akışından ayrı gösteriyoruz.',
+            style: TextStyle(color: RouteviaColors.textSecondary, fontSize: 13),
+          ),
+        ),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 44,
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            scrollDirection: Axis.horizontal,
+            itemBuilder: (context, i) {
+              final p = _stayPicks[i];
               return ActionChip(
                 avatar: const Icon(
-                  Icons.restaurant_rounded,
+                  Icons.hotel_rounded,
                   size: 16,
-                  color: RouteviaColors.teal,
+                  color: Color(0xFF7B1FA2),
                 ),
                 label: Text(_cleanPlaceName(p.name)),
                 onPressed: () => context.push('/place', extra: p),
@@ -2548,7 +2888,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               );
             },
             separatorBuilder: (_, _) => const SizedBox(width: 8),
-            itemCount: _foodPicks.length,
+            itemCount: _stayPicks.length,
           ),
         ),
       ],
@@ -2630,90 +2970,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
           const SizedBox(width: 4),
           TextButton(
-            onPressed: () => _showSnack('Tanitim: routevia@tabserve.com.tr'),
+            onPressed: () => context.push('/legal?doc=ads'),
             child: const Text('Politika'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPlanButton() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
-        children: [
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: _loading ? null : _createPlan,
-              style: FilledButton.styleFrom(
-                backgroundColor: RouteviaColors.teal,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 18),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-              icon: _loading
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    )
-                  : const Icon(Icons.auto_awesome_rounded, size: 20),
-              label: Text(
-                _loading ? 'Plan hazırlanıyor...' : 'Akıllı Plan Oluştur',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 16,
-                  letterSpacing: 0.1,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          GestureDetector(
-            onTap: _openPlanSettings,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              decoration: BoxDecoration(
-                color: RouteviaColors.surfaceVariant,
-                borderRadius: BorderRadius.circular(12),
-                border: const Border.fromBorderSide(
-                  BorderSide(color: RouteviaColors.border),
-                ),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.tune_rounded,
-                    size: 15,
-                    color: RouteviaColors.textSecondary,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    '$_days gün • ${_transportLabel(_transportMode)} • ${_personaLabel(_persona)} • ${_paceLabel(_pace)}',
-                    style: const TextStyle(
-                      color: RouteviaColors.textSecondary,
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  const Icon(
-                    Icons.chevron_right,
-                    size: 15,
-                    color: RouteviaColors.textTertiary,
-                  ),
-                ],
-              ),
-            ),
           ),
         ],
       ),
@@ -3880,16 +4138,6 @@ class _TopPickCard extends StatelessWidget {
                           fontWeight: FontWeight.w800,
                           fontSize: 14,
                           height: 1.2,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        place.shortSummary,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.7),
-                          fontSize: 11.5,
                         ),
                       ),
                       if (rating > 0) ...[

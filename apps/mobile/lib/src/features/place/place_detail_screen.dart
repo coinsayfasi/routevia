@@ -1,12 +1,16 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/error_utils.dart';
 import '../../core/theme.dart';
+import '../../core/widgets/ad_banner.dart';
 import '../../data/providers.dart';
 import '../../models/trip_models.dart';
 import '../../core/widgets/safe_network_image.dart';
@@ -51,12 +55,18 @@ class PlaceDetailScreen extends ConsumerStatefulWidget {
 class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
   PlaceModel? _detail;
   PlaceStats? _stats;
+  List<PlacePhotoModel> _photos = const [];
   Map<String, dynamic>? _trustMetric;
   Map<String, dynamic>? _liveStatus;
   bool _posting = false;
+  bool _uploadingPhoto = false;
   int _rating = 5;
   final Set<String> _flags = {};
   final TextEditingController _commentController = TextEditingController();
+  final ImagePicker _picker = ImagePicker();
+
+  bool get _isLoggedIn =>
+      ref.read(repositoryProvider).client.auth.currentSession != null;
 
   @override
   void initState() {
@@ -68,8 +78,27 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
     final repo = ref.read(repositoryProvider);
     try {
       final detail = await repo.fetchPlaceDetail(widget.place.id);
+      List<PlacePhotoModel> photos = const [];
+      try {
+        photos = await repo.getPlacePhotos(widget.place.id);
+      } catch (_) {}
       if (!mounted) return;
-      setState(() => _detail = detail);
+      final approvedMedia = photos
+          .where((photo) => photo.isApproved)
+          .map(
+            (photo) => MediaModel(
+              storagePath: photo.storagePath,
+              publicUrl: photo.imageUrl,
+              sortOrder: 0,
+            ),
+          )
+          .toList();
+      setState(() {
+        _photos = photos;
+        _detail = approvedMedia.isNotEmpty
+            ? detail.copyWith(media: approvedMedia)
+            : detail;
+      });
     } catch (_) {
       setState(() => _detail = widget.place);
     }
@@ -92,6 +121,16 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
   }
 
   Future<void> _submitReview() async {
+    if (!_isLoggedIn) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Yorum ve puan icin once giris yapmalisin.'),
+        ),
+      );
+      context.push('/auth');
+      return;
+    }
     final comment = _commentController.text.trim();
     if (comment.length > 240) return;
     setState(() => _posting = true);
@@ -104,18 +143,75 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
             flags: _flags.toList(),
             commentShort: comment,
           );
+      await ref
+          .read(repositoryProvider)
+          .submitUserSignal(
+            placeId: widget.place.id,
+            type: 'rating',
+            rating: _rating.toDouble(),
+          );
       if (!mounted) return;
-      setState(() => _stats = stats);
+      setState(() {
+        _stats = stats;
+        _rating = 5;
+        _flags.clear();
+        _commentController.clear();
+      });
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Yorum kaydedildi.')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Yorum kaydedilemedi: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(friendlyError(e))),
+      );
     } finally {
       if (mounted) setState(() => _posting = false);
+    }
+  }
+
+  Future<void> _uploadPhoto() async {
+    if (!_isLoggedIn) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Fotoğraf yüklemek için önce giriş yapmalısın.'),
+        ),
+      );
+      context.push('/auth');
+      return;
+    }
+    setState(() => _uploadingPhoto = true);
+    try {
+      final picked = await _picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 2400,
+        maxHeight: 2400,
+        imageQuality: 88,
+      );
+      if (picked == null) {
+        if (mounted) setState(() => _uploadingPhoto = false);
+        return;
+      }
+      await ref
+          .read(repositoryProvider)
+          .uploadPlacePhoto(placeId: widget.place.id, file: File(picked.path));
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Fotoğrafın alındı! Moderasyon onayının ardından yayınlanacak.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(friendlyError(e))),
+      );
+    } finally {
+      if (mounted) setState(() => _uploadingPhoto = false);
     }
   }
 
@@ -123,25 +219,78 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
     final p = _detail ?? widget.place;
     final lat = p.lat ?? 0;
     final lng = p.lng ?? 0;
-    final apple = Uri.parse('https://maps.apple.com/?daddr=$lat,$lng');
-    final google = Uri.parse(
-      'https://www.google.com/maps/search/?api=1&query=$lat,$lng',
-    );
-    final geo = Uri.parse('geo:$lat,$lng');
+    final name = Uri.encodeComponent(p.name);
 
-    final targets = Platform.isIOS
-        ? [apple, google, geo]
-        : [geo, google, apple];
-    for (final t in targets) {
-      if (await canLaunchUrl(t)) {
-        await launchUrl(t, mode: LaunchMode.externalApplication);
-        return;
-      }
-    }
+    // Show bottom sheet with multiple options
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Yol tarifi acilamadi.')));
+    await showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                p.name,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '$lat, $lng',
+                style:
+                    const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              if (Platform.isIOS)
+                _NavOption(
+                  icon: Icons.map,
+                  label: 'Apple Maps',
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    await launchUrl(
+                      Uri.parse(
+                          'https://maps.apple.com/?daddr=$lat,$lng&q=$name'),
+                      mode: LaunchMode.externalApplication,
+                    );
+                  },
+                ),
+              _NavOption(
+                icon: Icons.map_outlined,
+                label: 'Google Maps',
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await launchUrl(
+                    Uri.parse(
+                        'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng'),
+                    mode: LaunchMode.externalApplication,
+                  );
+                },
+              ),
+              _NavOption(
+                icon: Icons.copy,
+                label: 'Koordinatları Kopyala',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Clipboard.setData(ClipboardData(text: '$lat, $lng'));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text('Koordinatlar kopyalandı.')),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _sharePlace() async {
@@ -172,13 +321,17 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
       return;
     }
     try {
-      await ref
-          .read(repositoryProvider)
-          .submitUserSignal(
-            placeId: widget.place.id,
-            type: type,
-            rating: rating,
-          );
+      if (type == 'checkin') {
+        await ref.read(repositoryProvider).addPlaceCheckin(widget.place.id);
+      } else {
+        await ref
+            .read(repositoryProvider)
+            .submitUserSignal(
+              placeId: widget.place.id,
+              type: type,
+              rating: rating,
+            );
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -194,7 +347,9 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
       await _load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(friendlyError(e))),
+      );
     }
   }
 
@@ -208,6 +363,30 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
       'sunset_worthy': 'Gün Batımı',
     };
     return map[f] ?? f;
+  }
+
+  String _summaryText(PlaceStats? stats) {
+    if (stats == null || stats.reviewCount == 0) {
+      return 'Bu yer icin ilk yorumu sen birak.';
+    }
+    return '${stats.reviewCount} topluluk yorumu, ${stats.checkinsCount} check-in ve ${stats.photoCount} fotoğraf var. Ortalama ${stats.avgRating.toStringAsFixed(1)} / 5.';
+  }
+
+  String _ratingLabel(int rating) {
+    switch (rating) {
+      case 1:
+        return 'Çok kötü';
+      case 2:
+        return 'Kötü';
+      case 3:
+        return 'Orta';
+      case 4:
+        return 'İyi';
+      case 5:
+        return 'Mükemmel!';
+      default:
+        return '';
+    }
   }
 
   @override
@@ -378,29 +557,159 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
-
-                // Summary
-                Container(
+                const SizedBox(height: 8),
+                SizedBox(
                   width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFFE8ECF0)),
-                  ),
-                  child: Text(
-                    place.shortSummary,
-                    style: const TextStyle(fontSize: 15, height: 1.5),
+                  child: OutlinedButton.icon(
+                    onPressed: _uploadingPhoto ? null : _uploadPhoto,
+                    icon: Icon(
+                      _uploadingPhoto ? Icons.hourglass_top : Icons.add_a_photo,
+                      size: 18,
+                    ),
+                    label: Text(
+                      _uploadingPhoto
+                          ? 'Fotoğraf işleniyor...'
+                          : 'Topluluk Fotoğrafı Yükle',
+                    ),
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
+
+                // Summary — sadece gerçek açıklama varsa göster (ilçe adı gibi kısa değerler atlanır)
+                if (place.shortSummary.length > 25) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFE8ECF0)),
+                    ),
+                    child: Text(
+                      place.shortSummary,
+                      style: const TextStyle(fontSize: 15, height: 1.5),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
 
                 // Source attribution
                 _SourceBadge(place: place),
                 const SizedBox(height: 12),
                 if (_trustMetric != null) ...[
                   _TrustCard(metric: _trustMetric!, live: _liveStatus),
+                  const SizedBox(height: 12),
+                ],
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 54,
+                        height: 54,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF7ED),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Center(
+                          child: Text(
+                            ((_stats?.avgRating ?? 0) > 0)
+                                ? _stats!.avgRating.toStringAsFixed(1)
+                                : '-',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 20,
+                              color: Color(0xFFD97706),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Routevia Topluluk Skoru',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 15,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _summaryText(_stats),
+                              style: const TextStyle(
+                                color: Color(0xFF475569),
+                                height: 1.4,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (_photos.isNotEmpty) ...[
+                  SizedBox(
+                    height: 96,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _photos.length,
+                      separatorBuilder: (_, _) => const SizedBox(width: 10),
+                      itemBuilder: (context, index) {
+                        final photo = _photos[index];
+                        return ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Stack(
+                            children: [
+                              SizedBox(
+                                width: 132,
+                                child: SafeNetworkImage(
+                                  url: photo.imageUrl,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                              if (!photo.isApproved)
+                                Positioned(
+                                  left: 8,
+                                  right: 8,
+                                  bottom: 8,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black87,
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Text(
+                                      photo.status == 'pending'
+                                          ? 'Onay bekliyor'
+                                          : 'Gizlendi',
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
                   const SizedBox(height: 12),
                 ],
 
@@ -500,18 +809,86 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
                   style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
                 ),
                 const SizedBox(height: 12),
-
-                // Rating dropdown
-                DropdownButtonFormField<int>(
-                  initialValue: _rating,
-                  decoration: const InputDecoration(labelText: 'Puan'),
-                  items: [5, 4, 3, 2, 1]
-                      .map(
-                        (r) =>
-                            DropdownMenuItem(value: r, child: Text('$r / 5')),
-                      )
-                      .toList(),
-                  onChanged: (v) => setState(() => _rating = v ?? 5),
+                if (!_isLoggedIn) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEEF6FF),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFFBFDBFE)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.lock_outline_rounded,
+                          color: Color(0xFF1D4ED8),
+                        ),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Text(
+                            'Yorum, puan, check-in ve favori icin giris gerekli.',
+                            style: TextStyle(
+                              color: Color(0xFF1E3A8A),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => context.push('/auth'),
+                          child: const Text('Giris Yap'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                const Text(
+                  'Puanın',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(5, (i) {
+                    final starValue = i + 1;
+                    return GestureDetector(
+                      onTap: () => setState(() => _rating = starValue),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: TweenAnimationBuilder<double>(
+                          tween: Tween(
+                            begin: 0.8,
+                            end: starValue <= _rating ? 1.15 : 1.0,
+                          ),
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.elasticOut,
+                          builder: (ctx, scale, child) =>
+                              Transform.scale(scale: scale, child: child),
+                          child: Icon(
+                            starValue <= _rating
+                                ? Icons.star_rounded
+                                : Icons.star_outline_rounded,
+                            size: 40,
+                            color: starValue <= _rating
+                                ? const Color(0xFFF59E0B)
+                                : const Color(0xFFCBD5E1),
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+                ),
+                const SizedBox(height: 6),
+                Center(
+                  child: Text(
+                    _ratingLabel(_rating),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF0B3B68),
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 10),
 
@@ -619,6 +996,19 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
                                 const SizedBox(height: 6),
                                 Text(r.commentShort),
                               ],
+                              if (r.status != 'approved') ...[
+                                const SizedBox(height: 6),
+                                Text(
+                                  r.status == 'pending'
+                                      ? 'Moderasyon bekliyor'
+                                      : 'Görünürlüğü kısıtlandı',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFFD97706),
+                                  ),
+                                ),
+                              ],
                               if (r.flags.isNotEmpty) ...[
                                 const SizedBox(height: 6),
                                 Wrap(
@@ -669,6 +1059,8 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
                     ),
                   ),
                 ],
+                const SizedBox(height: 24),
+                const AdBannerWidget(),
                 const SizedBox(height: 32),
               ]),
             ),
@@ -1040,6 +1432,29 @@ class _StatChip extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _NavOption extends StatelessWidget {
+  const _NavOption({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(icon, color: RouteviaColors.primary),
+      title: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: onTap,
     );
   }
 }

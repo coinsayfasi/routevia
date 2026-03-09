@@ -57,7 +57,8 @@ class _DeepLinkResolverScreenState
             ),
           ),
         );
-        context.go('/home');
+        ref.invalidate(premiumStateProvider);
+        context.go('/home?tab=0');
         return;
       }
 
@@ -90,7 +91,7 @@ class _DeepLinkResolverScreenState
               Text(_message, textAlign: TextAlign.center),
               const SizedBox(height: 16),
               FilledButton(
-                onPressed: () => context.go('/home'),
+                onPressed: () => context.go('/home?tab=0'),
                 child: const Text('Ana Sayfaya Dön'),
               ),
             ],

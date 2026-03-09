@@ -34,6 +34,56 @@ class MediaModel {
   }
 }
 
+class PlacePhotoModel {
+  PlacePhotoModel({
+    required this.id,
+    required this.placeId,
+    required this.userId,
+    required this.imageUrl,
+    required this.storagePath,
+    required this.status,
+    required this.likesCount,
+    required this.reportsCount,
+    this.createdAt,
+    this.updatedAt,
+    this.uploaderTrustScore = 0,
+  });
+
+  final String id;
+  final String placeId;
+  final String userId;
+  final String imageUrl;
+  final String storagePath;
+  final String status;
+  final int likesCount;
+  final int reportsCount;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
+  final int uploaderTrustScore;
+
+  bool get isApproved => status == 'approved';
+
+  factory PlacePhotoModel.fromMap(Map<String, dynamic> map) {
+    return PlacePhotoModel(
+      id: map['id'] as String? ?? '',
+      placeId: map['place_id'] as String? ?? '',
+      userId: map['user_id'] as String? ?? '',
+      imageUrl: map['image_url'] as String? ?? '',
+      storagePath: map['storage_path'] as String? ?? '',
+      status: map['status'] as String? ?? 'pending',
+      likesCount: (map['likes_count'] as num?)?.toInt() ?? 0,
+      reportsCount: (map['reports_count'] as num?)?.toInt() ?? 0,
+      createdAt: map['created_at'] == null
+          ? null
+          : DateTime.tryParse(map['created_at'] as String),
+      updatedAt: map['updated_at'] == null
+          ? null
+          : DateTime.tryParse(map['updated_at'] as String),
+      uploaderTrustScore: (map['uploader_trust_score'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
 class PlaceModel {
   PlaceModel({
     required this.id,
@@ -127,6 +177,58 @@ class PlaceModel {
       sourceWeight: (map['source_weight'] as num?)?.toDouble(),
     );
   }
+
+  PlaceModel copyWith({
+    String? id,
+    String? name,
+    String? slug,
+    String? category,
+    String? shortSummary,
+    String? bestTime,
+    int? durationMin,
+    double? lat,
+    double? lng,
+    List<MediaModel>? media,
+    List<String>? tipsBullets,
+    List<String>? historyBullets,
+    List<String>? eatDrinkBullets,
+    List<String>? tags,
+    PlaceStats? stats,
+    double? metersFromUser,
+    bool? isFree,
+    String? sourceKind,
+    String? sourceUrl,
+    double? appScore,
+    double? appRating,
+    int? ratingCount,
+    double? sourceWeight,
+  }) {
+    return PlaceModel(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      slug: slug ?? this.slug,
+      category: category ?? this.category,
+      shortSummary: shortSummary ?? this.shortSummary,
+      bestTime: bestTime ?? this.bestTime,
+      durationMin: durationMin ?? this.durationMin,
+      lat: lat ?? this.lat,
+      lng: lng ?? this.lng,
+      media: media ?? this.media,
+      tipsBullets: tipsBullets ?? this.tipsBullets,
+      historyBullets: historyBullets ?? this.historyBullets,
+      eatDrinkBullets: eatDrinkBullets ?? this.eatDrinkBullets,
+      tags: tags ?? this.tags,
+      stats: stats ?? this.stats,
+      metersFromUser: metersFromUser ?? this.metersFromUser,
+      isFree: isFree ?? this.isFree,
+      sourceKind: sourceKind ?? this.sourceKind,
+      sourceUrl: sourceUrl ?? this.sourceUrl,
+      appScore: appScore ?? this.appScore,
+      appRating: appRating ?? this.appRating,
+      ratingCount: ratingCount ?? this.ratingCount,
+      sourceWeight: sourceWeight ?? this.sourceWeight,
+    );
+  }
 }
 
 class PlaceStats {
@@ -138,6 +240,9 @@ class PlaceStats {
     required this.familyCount,
     required this.photoSpotCount,
     required this.sunsetWorthyCount,
+    this.routeviaScore = 0,
+    this.checkinsCount = 0,
+    this.photoCount = 0,
     this.recentReviews = const [],
   });
 
@@ -148,6 +253,9 @@ class PlaceStats {
   final int familyCount;
   final int photoSpotCount;
   final int sunsetWorthyCount;
+  final double routeviaScore;
+  final int checkinsCount;
+  final int photoCount;
   final List<PlaceReviewModel> recentReviews;
 
   factory PlaceStats.fromMap(Map<String, dynamic> map) {
@@ -159,6 +267,9 @@ class PlaceStats {
       familyCount: (map['family_count'] as num?)?.toInt() ?? 0,
       photoSpotCount: (map['photo_spot_count'] as num?)?.toInt() ?? 0,
       sunsetWorthyCount: (map['sunset_worthy_count'] as num?)?.toInt() ?? 0,
+      routeviaScore: (map['routevia_score'] as num?)?.toDouble() ?? 0,
+      checkinsCount: (map['checkins_count'] as num?)?.toInt() ?? 0,
+      photoCount: (map['photo_count'] as num?)?.toInt() ?? 0,
       recentReviews: ((map['recent_reviews'] as List?) ?? const [])
           .map(
             (e) =>
@@ -171,29 +282,36 @@ class PlaceStats {
 
 class PlaceReviewModel {
   PlaceReviewModel({
+    required this.id,
     required this.rating,
     required this.flags,
     required this.commentShort,
     required this.createdAt,
+    this.status = 'approved',
     this.trustLevel = 'new_user',
     this.reviewerScore = 40,
   });
 
+  final String id;
   final int rating;
   final List<String> flags;
   final String commentShort;
   final DateTime? createdAt;
+  final String status;
   final String trustLevel;
   final int reviewerScore;
 
   factory PlaceReviewModel.fromMap(Map<String, dynamic> map) {
     return PlaceReviewModel(
+      id: map['id'] as String? ?? '',
       rating: (map['rating'] as num?)?.toInt() ?? 0,
       flags: ((map['flags'] as List?) ?? const []).cast<String>(),
-      commentShort: map['comment_short'] as String? ?? '',
+      commentShort:
+          map['comment_short'] as String? ?? map['comment'] as String? ?? '',
       createdAt: map['created_at'] == null
           ? null
           : DateTime.tryParse(map['created_at'] as String),
+      status: map['status'] as String? ?? 'approved',
       trustLevel: map['trust_level'] as String? ?? 'new_user',
       reviewerScore: (map['reviewer_score'] as num?)?.toInt() ?? 40,
     );

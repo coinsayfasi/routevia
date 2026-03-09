@@ -9,7 +9,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme.dart';
 import '../../core/widgets/glass_panel.dart';
@@ -56,6 +55,7 @@ class MapScreen extends ConsumerStatefulWidget {
     this.initialProvinceSlug,
     this.initialDistrictId,
     this.initialDistrictSlug,
+    this.initialDistrictName,
   });
 
   final TripPlan? plan;
@@ -65,6 +65,7 @@ class MapScreen extends ConsumerStatefulWidget {
   final String? initialProvinceSlug;
   final String? initialDistrictId;
   final String? initialDistrictSlug;
+  final String? initialDistrictName;
 
   @override
   ConsumerState<MapScreen> createState() => _MapScreenState();
@@ -88,9 +89,11 @@ class _MapScreenState extends ConsumerState<MapScreen>
   bool _showLegend = false;
   bool _showFilters = true;
   bool _offline = false;
+  bool _districtFallbackActive = false;
   String _searchQuery = '';
   String _allPlacesSignature = '';
   String? _effectiveCityName;
+  String? _effectiveDistrictName;
   LatLngBounds? _lastFetchedBounds;
   double _lastFetchedZoom = -1;
   Timer? _viewportDebounce;
@@ -98,7 +101,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
   final _bboxCache = _LruBBoxCache(maxEntries: 24);
 
   LatLng _center = const LatLng(39.9255, 32.8663);
-  double _zoom = 8.0;
+  late double _zoom = widget.initialDistrictName != null ? 10.8 : 8.0;
 
   bool get _exploreMode => widget.plan == null;
 
@@ -182,6 +185,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
     }
 
     _effectiveProvinceSlug = widget.initialProvinceSlug;
+    _effectiveDistrictName = widget.initialDistrictName;
     if (_effectiveProvinceSlug == null) {
       try {
         final provinces = await ref.read(repositoryProvider).listProvinces();
@@ -254,7 +258,8 @@ class _MapScreenState extends ConsumerState<MapScreen>
     final zoomBucket = (zoom * 2).round() / 2.0;
     final cats = (_categoryFilters.toList()..sort()).join(',');
     final city = (_effectiveCityName ?? '').toLowerCase();
-    return '$minLat|$maxLat|$minLng|$maxLng|$zoomBucket|$cats|$city|${_searchQuery.toLowerCase()}';
+    final district = (_effectiveDistrictName ?? '').toLowerCase();
+    return '$minLat|$maxLat|$minLng|$maxLng|$zoomBucket|$cats|$city|$district|${_searchQuery.toLowerCase()}';
   }
 
   String _signatureOf(List<PlaceModel> places) {
@@ -275,6 +280,35 @@ class _MapScreenState extends ConsumerState<MapScreen>
     _viewportDebounce = Timer(const Duration(milliseconds: 400), () {
       _loadViewportPlaces(force: force);
     });
+  }
+
+  LatLngBounds _expandedBounds(LatLngBounds bounds, {double factor = 1.9}) {
+    final latSpan = (bounds.north - bounds.south).abs();
+    final lngSpan = (bounds.east - bounds.west).abs();
+    final latPad = ((latSpan > 0 ? latSpan : 0.12) * (factor - 1)) / 2;
+    final lngPad = ((lngSpan > 0 ? lngSpan : 0.12) * (factor - 1)) / 2;
+    return LatLngBounds(
+      LatLng(bounds.south - latPad, bounds.west - lngPad),
+      LatLng(bounds.north + latPad, bounds.east + lngPad),
+    );
+  }
+
+  Future<List<PlaceModel>> _fetchPlacesForBounds(
+    LatLngBounds bounds, {
+    bool ignoreDistrict = false,
+  }) {
+    final repo = ref.read(repositoryProvider);
+    return repo.fetchPoisByViewport(
+      minLat: bounds.south,
+      maxLat: bounds.north,
+      minLng: bounds.west,
+      maxLng: bounds.east,
+      categories: _categoryFilters.toList(),
+      searchQuery: _searchQuery,
+      cityName: _effectiveCityName,
+      districtName: ignoreDistrict ? null : _effectiveDistrictName,
+      limit: 1000,
+    );
   }
 
   Future<void> _loadViewportPlaces({bool force = false}) async {
@@ -301,6 +335,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
       setState(() {
         _offline = false;
         _error = null;
+        _districtFallbackActive = false;
         _applyPlaces(cached);
       });
       _lastFetchedBounds = bounds;
@@ -315,17 +350,20 @@ class _MapScreenState extends ConsumerState<MapScreen>
       });
     }
     try {
-      final repo = ref.read(repositoryProvider);
-      final places = await repo.fetchPoisByViewport(
-        minLat: bounds.south,
-        maxLat: bounds.north,
-        minLng: bounds.west,
-        maxLng: bounds.east,
-        categories: _categoryFilters.toList(),
-        searchQuery: _searchQuery,
-        cityName: _effectiveCityName,
-        limit: 1000,
-      );
+      var places = await _fetchPlacesForBounds(bounds);
+      bool usedFallback = false;
+
+      // If district-level query returned nothing, fall back to province level.
+      if (places.isEmpty &&
+          _effectiveDistrictName != null &&
+          _effectiveDistrictName!.trim().isNotEmpty) {
+        places = await _fetchPlacesForBounds(
+          _expandedBounds(bounds),
+          ignoreDistrict: true,
+        );
+        usedFallback = true;
+      }
+
       _bboxCache.put(cacheKey, places);
       _lastFetchedBounds = bounds;
       _lastFetchedZoom = _zoom;
@@ -334,6 +372,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
       setState(() {
         _offline = false;
         _error = null;
+        _districtFallbackActive = usedFallback && places.isNotEmpty;
         _applyPlaces(places);
       });
     } catch (_) {
@@ -341,6 +380,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
       setState(() {
         _offline = true;
         _error = 'Ağ bağlantısı yok veya veriler alınamadı.';
+        _districtFallbackActive = false;
       });
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -612,8 +652,11 @@ class _MapScreenState extends ConsumerState<MapScreen>
                       children: [
                         Text(
                           _exploreMode
-                              ? _effectiveProvinceSlug?.toUpperCase() ??
-                                  'TÜRKİYE'
+                              ? _effectiveDistrictName != null &&
+                                      _effectiveDistrictName!.isNotEmpty
+                                  ? '${_effectiveProvinceSlug?.toUpperCase() ?? 'TÜRKİYE'} • $_effectiveDistrictName'
+                                  : _effectiveProvinceSlug?.toUpperCase() ??
+                                      'TÜRKİYE'
                               : 'Gün $_selectedDay',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -916,6 +959,32 @@ class _MapScreenState extends ConsumerState<MapScreen>
               ),
             ),
 
+          // ── District fallback info banner ─────────────────────────
+          if (_exploreMode && _districtFallbackActive)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 250,
+              child: GlassPanel(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 10),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline,
+                        size: 18, color: Color(0xFF0B5394)),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Bu ilçede veri az — yakın çevredeki yerler gösteriliyor.',
+                        style: TextStyle(
+                            fontSize: 12.5, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
           // ── Empty state ───────────────────────────────────────────
           if (_exploreMode && !_loading && _allPlaces.isEmpty && _error == null)
             Positioned(
@@ -928,8 +997,14 @@ class _MapScreenState extends ConsumerState<MapScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Bu bölgede henüz yeterli veri yok.',
+                      'Bu bölgede henüz içerik bulunmuyor.',
                       style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Haritayı kaydırarak yakın il veya ilçeleri keşfedebilirsin.',
+                      style: TextStyle(
+                          fontSize: 12.5, color: Color(0xFF64748B)),
                     ),
                     const SizedBox(height: 10),
                     Row(
@@ -1121,13 +1196,10 @@ class _MapScreenState extends ConsumerState<MapScreen>
   }
 
   Future<void> _openDayNavigation() async {
-    final points = _polylinePoints;
-    if (points.isEmpty) return;
-    final destination = points.first;
-    final uri = Uri.parse(
-      'geo:${destination.latitude},${destination.longitude}',
-    );
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    final plan = widget.plan;
+    if (plan == null) return;
+    if (!mounted) return;
+    context.push('/day-plan', extra: plan);
   }
 
   @override
@@ -1221,17 +1293,6 @@ class _PlaceCard extends StatelessWidget {
                         style: const TextStyle(
                           fontWeight: FontWeight.w800,
                           fontSize: 14,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        place.shortSummary,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey.shade600,
-                          height: 1.3,
                         ),
                       ),
                       const Spacer(),
