@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Routevia — Yönlendiriliyor</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(135deg, #061126 0%, #0B1F3A 50%, #133E75 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 20px;
+      padding: 36px 28px;
+      max-width: 400px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(6,17,38,0.4);
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 28px;
+    }
+    .logo-icon {
+      width: 40px; height: 40px;
+      background: #0B3B68;
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .logo-icon svg { width: 22px; height: 22px; fill: #7DD3FC; }
+    .logo-text { font-size: 18px; font-weight: 800; color: #0B3B68; }
+    .spinner {
+      width: 48px; height: 48px;
+      border: 4px solid #E2EBF5;
+      border-top-color: #0B3B68;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .icon-success { font-size: 48px; margin-bottom: 16px; }
+    .icon-error   { font-size: 48px; margin-bottom: 16px; }
+    h2 { font-size: 20px; font-weight: 700; color: #0B3B68; margin-bottom: 10px; }
+    p  { font-size: 14px; color: #555; line-height: 1.6; margin-bottom: 24px; }
+    .btn {
+      display: inline-block;
+      background: #0B3B68;
+      color: #fff;
+      text-decoration: none;
+      border: none;
+      border-radius: 12px;
+      padding: 13px 28px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+    }
+    .btn:hover { background: #0d4a82; }
+    .btn-outline {
+      background: transparent;
+      border: 2px solid #0B3B68;
+      color: #0B3B68;
+      margin-top: 10px;
+    }
+    .btn-outline:hover { background: #E8F0F9; }
+    .note { font-size: 12px; color: #999; margin-top: 16px; }
+    #state-loading  { display: block; }
+    #state-success  { display: none; }
+    #state-error    { display: none; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 6.5 12 6.5s2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+      </svg>
+    </div>
+    <span class="logo-text">Routevia</span>
+  </div>
+
+  <!-- Loading state -->
+  <div id="state-loading">
+    <div class="spinner"></div>
+    <h2>Yönlendiriliyor…</h2>
+    <p>Uygulama açılıyor, lütfen bekleyin.</p>
+  </div>
+
+  <!-- Success state -->
+  <div id="state-success">
+    <div class="icon-success">✅</div>
+    <h2>Hazır!</h2>
+    <p>Uygulama açılmıyorsa aşağıdaki butona dokun.</p>
+    <a id="deep-link-btn" href="#" class="btn">Uygulamayı Aç</a>
+    <p class="note">Routevia uygulamasının yüklü olması gerekir.</p>
+  </div>
+
+  <!-- Error state -->
+  <div id="state-error">
+    <div class="icon-error">⚠️</div>
+    <h2 id="error-title">Bağlantı Süresi Doldu</h2>
+    <p id="error-msg">Şifre sıfırlama bağlantısı süresi dolmuş. Lütfen uygulamaya dön ve tekrar "Şifremi unuttum" seçeneğini kullan.</p>
+    <a href="routevia://home" class="btn">Uygulamayı Aç</a>
+    <a href="https://legal.routevia.tabserve.com.tr/" class="btn btn-outline">Ana Sayfaya Dön</a>
+  </div>
+</div>
+
+<script>
+(function () {
+  // Parse both hash fragment and query params
+  var hash   = window.location.hash.replace(/^#/, '');
+  var search = window.location.search.replace(/^\?/, '');
+  var combined = hash || search;
+
+  function parseParams(str) {
+    var p = {};
+    if (!str) return p;
+    str.split('&').forEach(function (part) {
+      var eq = part.indexOf('=');
+      if (eq === -1) { p[part] = ''; return; }
+      p[decodeURIComponent(part.slice(0, eq))] = decodeURIComponent(part.slice(eq + 1));
+    });
+    return p;
+  }
+
+  var params = parseParams(combined);
+
+  function show(id) {
+    ['state-loading','state-success','state-error'].forEach(function(s){
+      document.getElementById(s).style.display = (s === id) ? 'block' : 'none';
+    });
+  }
+
+  // Error case
+  if (params['error']) {
+    var code = params['error_code'] || params['error'];
+    var title = 'Bir sorun oluştu';
+    var msg   = params['error_description']
+      ? decodeURIComponent(params['error_description'].replace(/\+/g,' '))
+      : 'Bilinmeyen hata.';
+
+    if (code === 'otp_expired') {
+      title = 'Bağlantı Süresi Doldu';
+      msg   = 'Şifre sıfırlama bağlantısının süresi dolmuş. Lütfen uygulamaya dön ve tekrar "Şifremi unuttum" seçeneğini kullan.';
+    } else if (code === 'access_denied') {
+      title = 'Erişim Reddedildi';
+      msg   = 'Bu bağlantı artık geçerli değil. Lütfen tekrar şifre sıfırlama isteği gönder.';
+    }
+
+    document.getElementById('error-title').textContent = title;
+    document.getElementById('error-msg').textContent   = msg;
+    show('state-error');
+    return;
+  }
+
+  // Success case: has access_token
+  if (params['access_token']) {
+    // Build deep link: routevia://auth-callback#<original-hash>
+    var deepLink = 'routevia://auth-callback#' + hash;
+    document.getElementById('deep-link-btn').href = deepLink;
+    show('state-success');
+
+    // Auto-redirect
+    window.location.href = deepLink;
+
+    // Fallback: if still on page after 2s, keep showing success button
+    setTimeout(function () {
+      show('state-success');
+    }, 2000);
+    return;
+  }
+
+  // No params at all — just show a minimal "open app" card
+  show('state-error');
+  document.getElementById('error-title').textContent = 'Bağlantı Tanınamadı';
+  document.getElementById('error-msg').textContent   = 'Bu sayfa yalnızca Routevia uygulaması üzerinden gelen bağlantıları işler.';
+})();
+</script>
+</body>
+</html>

@@ -37,10 +37,12 @@ file_size_limit = "50MiB"
 
 [auth]
 enabled = true
-site_url = "routevia://auth-callback"
+site_url = "https://legal.routevia.tabserve.com.tr/auth-callback"
 additional_redirect_urls = [
   "routevia://auth-callback",
-  "https://auth.routevia.tabserve.com.tr/*",
+  "routevia://auth-callback/*",
+  "https://legal.routevia.tabserve.com.tr/auth-callback",
+  "https://legal.routevia.tabserve.com.tr/*",
   "http://127.0.0.1:3000",
 ]
 jwt_expiry = 3600
@@ -49,7 +51,8 @@ enable_anonymous_sign_ins = false
 
 [auth.email]
 enable_signup = true
-enable_confirmations = true
+enable_confirmations = false
+double_confirm_changes = false
 max_frequency = "1m0s"
 otp_length = 6
 
@@ -155,4 +158,22 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.trend_map]
+verify_jwt = false
+
+[functions.add_review]
+verify_jwt = true
+
+[functions.get_place_reviews]
+verify_jwt = true
+
+[functions.get_place_photos]
+verify_jwt = true
+
+[functions.add_checkin]
+verify_jwt = true
+
+[functions.upload_photo]
+verify_jwt = true
+
+[functions.get_destination_image]
 verify_jwt = false
