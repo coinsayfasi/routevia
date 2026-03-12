@@ -1,12 +1,19 @@
 # Legal Site Deploy Runbook
 
 ## Amac
-`legal.routevia.tabserve.com.tr` alaninda gizlilik, kullanim sartlari ve isletme basvurusu sayfalarini canli yayinlamak.
+`legal.routevia.tabserve.com.tr` alaninda Routevia'nin public policy ve legal sayfalarini canli yayinlamak.
 
 ## Repo tarafinda hazir olanlar
 - Statik site kaynagi: `site/`
 - GitHub Pages workflow: `.github/workflows/legal-site-pages.yml`
 - Custom domain kaydi: `site/CNAME`
+- Public sayfalar:
+  - `/privacy`
+  - `/terms`
+  - `/ads`
+  - `/community`
+  - `/account-deletion`
+  - `/business`
 
 ## GitHub tarafinda
 1. Repo Settings > Pages ac.
@@ -25,9 +32,15 @@
 - `https://legal.routevia.tabserve.com.tr/`
 - `https://legal.routevia.tabserve.com.tr/privacy`
 - `https://legal.routevia.tabserve.com.tr/terms`
+- `https://legal.routevia.tabserve.com.tr/ads`
+- `https://legal.routevia.tabserve.com.tr/community`
+- `https://legal.routevia.tabserve.com.tr/account-deletion`
 - `https://legal.routevia.tabserve.com.tr/business`
 
 ## Uygulama eslesmesi
 - Privacy URL: `https://legal.routevia.tabserve.com.tr/privacy`
 - Terms URL: `https://legal.routevia.tabserve.com.tr/terms`
+- Ads URL: `https://legal.routevia.tabserve.com.tr/ads`
+- Community URL: `https://legal.routevia.tabserve.com.tr/community`
+- Account deletion URL: `https://legal.routevia.tabserve.com.tr/account-deletion`
 - Business URL: `https://legal.routevia.tabserve.com.tr/business`
