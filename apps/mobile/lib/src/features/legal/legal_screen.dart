@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
-
 import '../../core/constants.dart';
+import '../../core/i18n.dart';
+import '../../core/legal_url_launcher.dart';
 
 class LegalScreen extends StatelessWidget {
   const LegalScreen({super.key, required this.documentId});
@@ -11,7 +12,8 @@ class LegalScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final doc = _docs[documentId] ?? _docs['privacy']!;
+    final docs = context.isEnglish ? _docsEn : _docs;
+    final doc = docs[documentId] ?? docs['privacy']!;
     return Scaffold(
       appBar: AppBar(title: Text(doc.title)),
       body: ListView(
@@ -20,15 +22,18 @@ class LegalScreen extends StatelessWidget {
           // Version / date badge
           Row(
             children: [
-              const Icon(Icons.calendar_today_outlined,
-                  size: 14, color: Color(0xFF64748B)),
+              const Icon(
+                Icons.calendar_today_outlined,
+                size: 14,
+                color: Color(0xFF64748B),
+              ),
               const SizedBox(width: 6),
               Text(
-                'Son güncelleme: ${doc.updatedAt}',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Color(0xFF64748B),
+                context.tr(
+                  'Son güncelleme: ${doc.updatedAt}',
+                  'Last updated: ${doc.updatedAt}',
                 ),
+                style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
               ),
             ],
           ),
@@ -78,8 +83,10 @@ class LegalScreen extends StatelessWidget {
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('• ',
-                                style: TextStyle(fontWeight: FontWeight.w700)),
+                            const Text(
+                              '• ',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
                             Expanded(
                               child: Text(
                                 item,
@@ -99,15 +106,46 @@ class LegalScreen extends StatelessWidget {
               ),
             ),
           ),
-          // Web link
           const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: () => launchUrl(
-              Uri.parse(doc.webUrl),
-              mode: LaunchMode.externalApplication,
+          if (doc.webUrl.isNotEmpty) ...[
+            OutlinedButton.icon(
+              onPressed: () => launchLegalUrl(doc.webUrl),
+              icon: const Icon(Icons.open_in_new, size: 18),
+              label: Text(context.tr('Web sürümünü aç', 'Open web version')),
             ),
-            icon: const Icon(Icons.open_in_browser, size: 18),
-            label: const Text('Tam metni tarayıcıda aç'),
+            const SizedBox(height: 8),
+          ],
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(
+                  Icons.info_outline,
+                  size: 18,
+                  color: Color(0xFF475569),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    context.tr(
+                      'Guncel hukuki metin uygulama icinde gosteriliyor. Web yayini gecici olarak kullanima kapali olabilir.',
+                      'The current legal text is shown inside the app. Web publication may be temporarily unavailable.',
+                    ),
+                    style: const TextStyle(
+                      color: Color(0xFF475569),
+                      height: 1.45,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 8),
           // Contact
@@ -115,7 +153,7 @@ class LegalScreen extends StatelessWidget {
             onPressed: () => launchUrl(
               Uri.parse(
                 'mailto:${AppConstants.supportEmail}'
-                '?subject=Routevia%20Hukuki%20Soru',
+                '?subject=${context.isEnglish ? 'Routevia%20Legal%20Question' : 'Routevia%20Hukuki%20Soru'}',
               ),
             ),
             icon: const Icon(Icons.mail_outline, size: 18),
@@ -126,7 +164,12 @@ class LegalScreen extends StatelessWidget {
             OutlinedButton.icon(
               onPressed: () => context.push('/consent'),
               icon: const Icon(Icons.shield_outlined, size: 18),
-              label: const Text('Gizlilik ve Consent Ayarlarım'),
+              label: Text(
+                context.tr(
+                  'Gizlilik ve Consent Ayarlarım',
+                  'My Privacy and Consent Settings',
+                ),
+              ),
             ),
           ],
         ],
@@ -170,7 +213,7 @@ const _docs = <String, _LegalDoc>{
         title: 'Toplanan Veriler',
         items: [
           'Hesap verisi: e-posta adresi ve kullanıcı kimliği (Supabase Auth üzerinden).',
-          'İçerik verisi: favoriler, yorumlar, puanlar, gezi planları ve kullanıcı önerileri.',
+          'İçerik verisi: favoriler, yorumlar, puanlar, gezi planları, kullanıcı önerileri ve kullanıcı tarafından yüklenen fotoğraflar.',
           'Konum verisi: yalnızca uygulama açıkken, yakın yer önerileri için anlık olarak kullanılır; cihazda saklanmaz.',
           'Kullanım verisi: uygulama içi etkinlikler (sayfa görüntüleme, plan oluşturma) — yalnızca analitik onayı verilmişse.',
         ],
@@ -180,6 +223,8 @@ const _docs = <String, _LegalDoc>{
         items: [
           'Kişiselleştirilmiş gezi önerileri ve plan oluşturma.',
           'Topluluk değerlendirme ve yorum sisteminin işletilmesi.',
+          'Trend Harita ve benzeri topluluk trend skorlarının; check-in, yorum, fotoğraf ve uygulama içi kullanıcı sinyallerinden türetilmesi.',
+          'Kullanıcı tarafından yüklenen fotoğrafların moderasyonu, topluluk galerisine alınması ve uygun bulunursa ilgili yerin ana görseli olarak seçilmesi.',
           'Hesap güvenliği ve kötüye kullanım tespiti.',
           'Hizmet kalitesini iyileştirmek için anonim kullanım analizi (izin verilmişse).',
         ],
@@ -200,6 +245,7 @@ const _docs = <String, _LegalDoc>{
           'OpenStreetMap — açık lisanslı harita verisi.',
           'OSRM — self-hosted rota hesaplama, kullanıcı konumu iletilmez.',
           'App Store / Google Play — abonelik ve satın alma doğrulama.',
+          'Rexxel — operasyon, destek ve iş ortaklığı süreçlerinde kullanılan hizmet altyapısı.',
           'Açık lisanslı ve editoryal veri kaynakları — yalnızca ürün içinde izinli içerik gösterilir.',
         ],
       ),
@@ -218,7 +264,16 @@ const _docs = <String, _LegalDoc>{
         items: [
           'Hesabınızı sildiğinizde profil, yorumlar, favoriler ve planlar kalıcı olarak silinir.',
           'Anonim analitik veriler en fazla 24 ay saklanır.',
-          'Yüklenen fotoğraflar moderasyon sonrası en geç 30 gün içinde depodan temizlenir (reddedilmişse).',
+          'Reddedilen yüklenmiş fotoğraflar moderasyon sonrası en geç 30 gün içinde depodan temizlenir.',
+          'Yayına alınan topluluk fotoğrafları, kullanıcı silme talebi veya içerik kaldırma kararı gelene kadar ürün içinde tutulabilir.',
+        ],
+      ),
+      _LegalSection(
+        title: 'Trend ve Yoğunluk Açıklaması',
+        items: [
+          'Trend Harita, topluluk trendi, hareketlilik veya kalabalık benzeri etiketler; Routevia kullanıcı etkileşimlerinden türetilen tahmini sinyallerdir.',
+          'Bu skorlar resmi kurum verisi, sensör verisi veya birebir gerçek zamanlı fiziksel insan yoğunluğu ölçümü değildir.',
+          'Uygulamayı kullanmayan kişilerin bulunduğu fiziksel yoğunluk bu skorlara doğrudan yansımayabilir.',
         ],
       ),
     ],
@@ -236,6 +291,7 @@ const _docs = <String, _LegalDoc>{
           'Yanıltıcı, telif hakkı ihlali içeren veya zarar verici içerik gönderilemez.',
           'Sahte yorum, spam puanlama ve manipülatif öneri girişleri yasaktır.',
           'Kullanıcı önerileri ve fotoğraflar moderasyondan geçmeden yayınlanmaz.',
+          'Yüklediğiniz görselin size ait olduğunu veya gerekli kullanım iznine sahip olduğunuzu beyan etmiş olursunuz.',
           'Başka kullanıcıları taciz etmek veya platformu kötüye kullanmak hesap askıya alınmasına yol açar.',
         ],
       ),
@@ -253,7 +309,9 @@ const _docs = <String, _LegalDoc>{
         title: 'İçerik ve Lisans',
         items: [
           'Açıkça lisanslanmamış görseller ve yetkisiz kaynaklardan içerik yayınlanmaz.',
-          'Kullanıcının yüklediği içerikler Routevia\'ya hizmet sunumu amacıyla sınırlı lisans verir.',
+          'Kullanıcının yüklediği içerikler, içerik kaldırılana kadar Routevia\'ya barındırma, moderasyon ve uygulama içinde gösterim için sınırlı lisans verir.',
+          'Kullanıcının yüklediği ve moderasyondan geçen fotoğraflar, seçilmesi halinde ilgili yerin topluluk galerisi ve ana kart görseli olarak kullanılabilir.',
+          'Telif bildirimi veya hak ihlali şüphesinde içerik ön inceleme beklenmeden yayından kaldırılabilir.',
           'Sponsorlu içerikler organik sıralamadan ayrılır ve "Reklam" / "Sponsorlu" etiketiyle gösterilir.',
         ],
       ),
@@ -278,7 +336,7 @@ const _docs = <String, _LegalDoc>{
   'ads': _LegalDoc(
     title: 'Reklam ve Sponsorlu İçerik',
     updatedAt: 'Mart 2026',
-    webUrl: AppConstants.businessApplyUrl,
+    webUrl: AppConstants.adsPolicyUrl,
     summary:
         'Routevia sponsorlu içerikleri organik önerilerden net biçimde ayırır. Her sponsorlu alan açıkça etiketlenir ve kullanıcı güveni korunur.',
     sections: [
@@ -289,6 +347,7 @@ const _docs = <String, _LegalDoc>{
           'Sponsorlu içerik ana keşif sıralamasına gizli şekilde karıştırılmaz.',
           'Yaş kısıtlı veya hassas kategoriler platforma kabul edilmez.',
           'Haftanın keşif rotasında organik ve sponsorlu öneriler birbirinden ayrı bölümlerde yer alır.',
+          'İş ortaklığı ve reklam operasyonlarında Rexxel destek süreçleri kullanılabilir; kullanıcı verisi bu amaçla satılmaz.',
         ],
       ),
       _LegalSection(
@@ -305,6 +364,277 @@ const _docs = <String, _LegalDoc>{
           'Routevia\'da yer almak isteyen işletmeler ${AppConstants.supportEmail} adresine başvurabilir.',
           'Başvurular editoryal incelemeden geçer; kalite ve doğruluk standartlarını karşılamayan içerikler reddedilir.',
           'Ücretlendirme ve paketler doğrudan iletişim yoluyla belirlenir.',
+          'Sponsorlu iş birlikleri kullanıcı güveni, editoryal denge ve yasal uygunluk kontrolünden geçmeden yayına alınmaz.',
+        ],
+      ),
+    ],
+  ),
+  'community': _LegalDoc(
+    title: 'Topluluk Kuralları',
+    updatedAt: 'Mart 2026',
+    webUrl: AppConstants.communityGuidelinesUrl,
+    summary:
+        'Routevia içindeki gezi hikâyeleri, mini rehberler, yorumlar, fotoğraflar ve yer hikâyeleri güvenli, telifsiz ve moderasyonlu bir topluluk alanı olarak yönetilir.',
+    sections: [
+      _LegalSection(
+        title: 'İzinli İçerik',
+        items: [
+          'Gezi hikâyeleri, mini rehberler, kişisel deneyimler ve yerle ilgili özgün notlar paylaşılabilir.',
+          'Yüklenen içerik kullanıcıya ait olmalı veya kullanıcı paylaşım hakkına sahip olmalıdır.',
+          'Kopya metin, otomatik spam, telif ihlali içeren görsel veya metin yayınlanmaz.',
+        ],
+      ),
+      _LegalSection(
+        title: 'Güvenlik ve Moderasyon',
+        items: [
+          'Topluluk yazıları ve yer hikâyeleri önce moderasyon kuyruğuna düşer, onay sonrası görünür.',
+          'Kullanıcılar yayınlanmış topluluk içeriğini uygulama içinden bildirebilir.',
+          'Kullanıcılar istemedikleri yazarları engelleyebilir; engellenen yazarın içerikleri akışta gizlenir.',
+          'Hak ihlali, nefret söylemi, spam veya aldatıcı içerik tespit edilirse içerik kaldırılır.',
+        ],
+      ),
+    ],
+  ),
+  'account-deletion': _LegalDoc(
+    title: 'Hesap Silme',
+    updatedAt: 'Mart 2026',
+    webUrl: AppConstants.accountDeletionUrl,
+    summary:
+        'Routevia hesabınızı uygulama içinden silebilirsiniz. Bu sayfa aynı zamanda mağaza gereksinimleri için public bilgilendirme adresidir.',
+    sections: [
+      _LegalSection(
+        title: 'Uygulama İçinden Silme',
+        items: [
+          'Profil > Hesabımı Sil adımıyla hesabınızı kalıcı olarak silebilirsiniz.',
+          'Silme sonrası profil, favoriler, check-in\'ler, yorumlar ve ilişkili hesap verileri kaldırılır.',
+          'Aktif aboneliğiniz varsa yenileme öncesi mağaza ayarlarından iptal etmeniz önerilir.',
+        ],
+      ),
+      _LegalSection(
+        title: 'Manuel Talep',
+        items: [
+          'Uygulamaya erişemiyorsanız ${AppConstants.supportEmail} adresine hesap silme talebi gönderebilirsiniz.',
+          'Gerekirse doğrulama amacıyla kayıtlı e-posta adresiniz istenir.',
+        ],
+      ),
+    ],
+  ),
+};
+
+const _docsEn = <String, _LegalDoc>{
+  'privacy': _LegalDoc(
+    title: 'Privacy Policy',
+    updatedAt: 'March 2026',
+    webUrl: AppConstants.privacyPolicyUrl,
+    summary:
+        'Routevia uses your personal data only to provide and improve the travel experience. Your data is not sold to third parties.',
+    sections: [
+      _LegalSection(
+        title: 'Collected Data',
+        items: [
+          'Account data: email address and user identity through Supabase Auth.',
+          'Content data: favorites, reviews, ratings, trip plans, user suggestions, and user-uploaded photos.',
+          'Location data: used only while the app is open for nearby suggestions and is not stored on the device.',
+          'Usage data: in-app events such as screen views and plan generation, only if analytics consent is given.',
+        ],
+      ),
+      _LegalSection(
+        title: 'Purpose of Use',
+        items: [
+          'Personalized travel suggestions and plan generation.',
+          'Operating community review and comment systems.',
+          'Generating Trend Map and similar community trend scores from check-ins, reviews, photos, and in-app user signals.',
+          'Moderating user-uploaded photos and, when appropriate, using them in the community gallery or as the place cover image.',
+          'Account security and abuse detection.',
+          'Anonymous usage analytics to improve service quality, if permitted.',
+        ],
+      ),
+      _LegalSection(
+        title: 'Legal Basis',
+        items: [
+          'Account and content data: performance of a contract.',
+          'Analytics data: explicit consent.',
+          'Location data: legitimate interest, only during active use and for service functionality.',
+          'For EU/EEA users, the same legal basis applies under GDPR Article 6.',
+        ],
+      ),
+      _LegalSection(
+        title: 'Third Parties',
+        items: [
+          'Supabase for database and authentication.',
+          'OpenStreetMap for open-license map data.',
+          'OSRM for self-hosted route computation without sending user location.',
+          'App Store / Google Play for subscription and purchase verification.',
+          'Rexxel for operational, support, and business-partnership workflows.',
+          'Open-license and editorial data sources for permitted in-product content.',
+        ],
+      ),
+      _LegalSection(
+        title: 'Your Rights',
+        items: [
+          'Access: you may request your stored data.',
+          'Deletion: you can delete your account and all data from Profile > Delete Account.',
+          'Portability: you can send data requests to ${AppConstants.supportEmail}.',
+          'Objection: you may object to processing for marketing and profiling.',
+          'Complaint: you may apply to the relevant data protection authority.',
+        ],
+      ),
+      _LegalSection(
+        title: 'Retention and Deletion',
+        items: [
+          'When you delete your account, your profile, reviews, favorites, and plans are permanently removed.',
+          'Anonymous analytics data is stored for up to 24 months.',
+          'Rejected uploaded photos are removed from storage within 30 days after moderation.',
+          'Approved community photos may remain in product surfaces until deleted by the user or removed due to moderation or legal review.',
+        ],
+      ),
+      _LegalSection(
+        title: 'Trend and Density Disclaimer',
+        items: [
+          'Trend Map, movement, and crowd-like labels in Routevia are estimated community signals derived from Routevia user interactions.',
+          'They are not official occupancy data and do not represent exact real-time physical foot traffic measurements.',
+          'Physical density created by people who do not use the app may not be reflected in these scores.',
+        ],
+      ),
+    ],
+  ),
+  'terms': _LegalDoc(
+    title: 'Terms of Use',
+    updatedAt: 'March 2026',
+    webUrl: AppConstants.termsUrl,
+    summary:
+        'Routevia is a travel discovery and planning application. By using the app, you agree to the following terms.',
+    sections: [
+      _LegalSection(
+        title: 'User Responsibilities',
+        items: [
+          'Misleading, copyright-infringing, or harmful content may not be submitted.',
+          'Fake reviews, spam ratings, and manipulative suggestions are prohibited.',
+          'User suggestions and photos are not published before moderation.',
+          'By uploading an image, you confirm that you own it or have the right to share it.',
+          'Harassing other users or abusing the platform may lead to suspension.',
+        ],
+      ),
+      _LegalSection(
+        title: 'Premium and Payments',
+        items: [
+          'Subscriptions are managed through the App Store or Google Play, and pricing is shown on the purchase screen.',
+          'Subscriptions renew automatically unless canceled.',
+          'Cancellations must be completed through App Store or Google Play settings before renewal.',
+          'Trial and preview periods such as 7-day Pro access are valid only once.',
+          'Benefits gained through referral codes are non-refundable; paid subscriptions follow platform refund rules.',
+        ],
+      ),
+      _LegalSection(
+        title: 'Content and License',
+        items: [
+          'Images without clear licensing and content from unauthorized sources are not published.',
+          'Content uploaded by the user grants Routevia a limited license to host, moderate, and display that content inside the service until it is removed.',
+          'User-uploaded photos that pass moderation may be used in the place community gallery and as the main card image if selected.',
+          'Content may be removed immediately in response to a copyright notice or suspected rights violation.',
+          'Sponsored content is separated from organic ranking and labeled as Ads / Sponsored.',
+        ],
+      ),
+      _LegalSection(
+        title: 'Limitation of Liability',
+        items: [
+          'Routevia is not responsible for errors in third-party map or navigation services.',
+          'Accuracy of user-generated content is not guaranteed.',
+          'The app targets 99% availability except force majeure and maintenance windows.',
+        ],
+      ),
+      _LegalSection(
+        title: 'Account Deletion',
+        items: [
+          'You can permanently delete your account from Profile > Delete Account.',
+          'Deletion cannot be reversed; data is removed from systems within 30 days.',
+          'If you have an active subscription, cancel it through the store first.',
+        ],
+      ),
+    ],
+  ),
+  'ads': _LegalDoc(
+    title: 'Ads and Sponsored Content',
+    updatedAt: 'March 2026',
+    webUrl: AppConstants.adsPolicyUrl,
+    summary:
+        'Routevia clearly separates sponsored content from organic recommendations. Every sponsored surface is labeled to protect user trust.',
+    sections: [
+      _LegalSection(
+        title: 'Sponsored Content Rules',
+        items: [
+          'All sponsored cards are shown with an Ad or Sponsored badge.',
+          'Sponsored content is not secretly mixed into the main discovery ranking.',
+          'Age-restricted or sensitive categories are not accepted.',
+          'In the weekly discovery route, organic and sponsored suggestions are shown in separate sections.',
+          'Rexxel-supported partnership operations may be used for campaign workflow, but user data is not sold for advertising.',
+        ],
+      ),
+      _LegalSection(
+        title: 'Personalization and Consent',
+        items: [
+          'Personalized advertising is enabled only with explicit user consent.',
+          'Without consent, only contextual sponsor content based on location or category is used.',
+          'You can change consent settings any time from Profile > Consent and Privacy Settings.',
+        ],
+      ),
+      _LegalSection(
+        title: 'Business Applications',
+        items: [
+          'Businesses that want to appear on Routevia can apply via ${AppConstants.supportEmail}.',
+          'Applications go through editorial review; content that does not meet quality and accuracy standards is rejected.',
+          'Pricing and packages are determined through direct contact.',
+          'No sponsored collaboration is published before legal, editorial, and trust review.',
+        ],
+      ),
+    ],
+  ),
+  'community': _LegalDoc(
+    title: 'Community Rules',
+    updatedAt: 'March 2026',
+    webUrl: AppConstants.communityGuidelinesUrl,
+    summary:
+        'Travel stories, mini guides, photos, and place notes inside Routevia are managed as a moderated, copyright-safe community layer.',
+    sections: [
+      _LegalSection(
+        title: 'Allowed Content',
+        items: [
+          'Travel stories, mini guides, personal experiences, and original place notes are allowed.',
+          'Uploaded content must belong to the user or be shared with permission.',
+          'Copied text, automated spam, and copyright-infringing content are rejected.',
+        ],
+      ),
+      _LegalSection(
+        title: 'Safety and Moderation',
+        items: [
+          'Community posts and place stories go through moderation before publication.',
+          'Users can report published community content in-app.',
+          'Users can block authors; blocked authors are hidden from their feed.',
+          'Content may be removed for abuse, hate, spam, deception, or rights violations.',
+        ],
+      ),
+    ],
+  ),
+  'account-deletion': _LegalDoc(
+    title: 'Account Deletion',
+    updatedAt: 'March 2026',
+    webUrl: AppConstants.accountDeletionUrl,
+    summary:
+        'You can delete your Routevia account inside the app. This page also serves as the public deletion information URL for store compliance.',
+    sections: [
+      _LegalSection(
+        title: 'Delete in App',
+        items: [
+          'Use Profile > Delete Account to permanently remove your account.',
+          'After deletion, your profile, favorites, check-ins, reviews, and linked account data are removed.',
+          'If you have an active subscription, cancel it in the store settings before renewal.',
+        ],
+      ),
+      _LegalSection(
+        title: 'Manual Request',
+        items: [
+          'If you cannot access the app, send an account deletion request to ${AppConstants.supportEmail}.',
+          'We may request your registered email for verification.',
         ],
       ),
     ],

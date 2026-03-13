@@ -164,10 +164,14 @@
     return;
   }
 
+  function buildDeepLink(paramString) {
+    return 'routevia://auth-callback' + (paramString ? ('?' + paramString) : '');
+  }
+
   // Success case: has access_token
   if (params['access_token']) {
-    // Build deep link: routevia://auth-callback#<original-hash>
-    var deepLink = 'routevia://auth-callback#' + hash;
+    // Supabase may return tokens either in the hash or in the query string.
+    var deepLink = buildDeepLink(combined);
     document.getElementById('deep-link-btn').href = deepLink;
     show('state-success');
 
