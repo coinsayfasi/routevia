@@ -11,10 +11,12 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/constants.dart';
 import '../../core/error_utils.dart';
+import '../../core/i18n.dart';
 import '../../core/premium_gate.dart';
 import '../../core/theme.dart';
 import '../../core/widgets/ad_banner.dart';
 import '../../data/providers.dart';
+import '../../data/must_see_places.dart';
 import '../../data/routevia_repository.dart';
 import '../../models/trip_models.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -65,7 +67,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   List<PlaceModel> _popularPlaces = const [];
   List<PlaceModel> _scenicPicks = const [];
   List<PlaceModel> _foodPicks = const [];
-  List<PlaceModel> _stayPicks = const [];
   List<Map<String, dynamic>> _smartSeason = const [];
   bool _smartSeasonLoading = false;
   Map<String, String> _offlinePacks = const {};
@@ -94,45 +95,45 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   String _transportLabel(String v) => switch (v) {
-    'walk' => 'Yürüyüş',
-    'transit' => 'Toplu Taşıma',
-    'car' => 'Araç',
-    'bike' => 'Bisiklet',
+    'walk' => context.tr('Yürüyüş', 'Walking'),
+    'transit' => context.tr('Toplu Taşıma', 'Transit'),
+    'car' => context.tr('Araç', 'Car'),
+    'bike' => context.tr('Bisiklet', 'Bike'),
     'scooter' => 'Scooter',
     _ => v,
   };
 
   String _paceLabel(String v) => switch (v) {
-    'slow' => 'Yavaş',
-    'medium' => 'Orta',
-    'fast' => 'Hızlı',
+    'slow' => context.tr('Yavaş', 'Slow'),
+    'medium' => context.tr('Orta', 'Medium'),
+    'fast' => context.tr('Hızlı', 'Fast'),
     _ => v,
   };
 
   String _personaLabel(String v) => switch (v) {
-    'relax' => 'Rahat',
-    'romantic' => 'Romantik',
-    'family' => 'Aile',
-    'budget' => 'Bütçe',
-    'photo' => 'Fotoğraf',
-    'foodie' => 'Yeme-İçme',
+    'relax' => context.tr('Rahat', 'Relaxed'),
+    'romantic' => context.tr('Romantik', 'Romantic'),
+    'family' => context.tr('Aile', 'Family'),
+    'budget' => context.tr('Bütçe', 'Budget'),
+    'photo' => context.tr('Fotoğraf', 'Photo'),
+    'foodie' => context.tr('Yeme-İçme', 'Food'),
     _ => v,
   };
 
   String _prefLabel(String v) =>
-      const {
-        'sunset': 'Gün Batımı',
-        'sunrise': 'Gün Doğumu',
-        'museum': 'Müze',
-        'history': 'Tarih',
-        'nature': 'Doğa',
-        'food': 'Yemek',
-        'cafe': 'Kafe',
-        'beach': 'Plaj',
-        'market': 'Pazar',
-        'mall': 'AVM',
-        'free': 'Ücretsiz',
-        'lodging': 'Konaklama',
+      {
+        'sunset': context.tr('Gün Batımı', 'Sunset'),
+        'sunrise': context.tr('Gün Doğumu', 'Sunrise'),
+        'museum': context.tr('Müze', 'Museum'),
+        'history': context.tr('Tarih', 'History'),
+        'nature': context.tr('Doğa', 'Nature'),
+        'food': context.tr('Yemek', 'Food'),
+        'cafe': context.tr('Kafe', 'Cafe'),
+        'beach': context.tr('Plaj', 'Beach'),
+        'market': context.tr('Pazar', 'Market'),
+        'mall': 'Mall',
+        'free': context.tr('Ücretsiz', 'Free'),
+        'lodging': context.tr('Konaklama', 'Lodging'),
       }[v] ??
       v;
 
@@ -156,6 +157,199 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         _districtId!;
   }
 
+  String _normalizeLookupText(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll('ç', 'c')
+        .replaceAll('ğ', 'g')
+        .replaceAll('ı', 'i')
+        .replaceAll('ö', 'o')
+        .replaceAll('ş', 's')
+        .replaceAll('ü', 'u')
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  }
+
+  bool _isLodgingLikePlace(PlaceModel place) {
+    final values = <String>[
+      _normalizeLookupText(place.name),
+      _normalizeLookupText(place.category),
+      ...place.tags.map(_normalizeLookupText),
+    ];
+    const needles = <String>[
+      'lodging',
+      'hotel',
+      'bungalow',
+      'bungalov',
+      'villa',
+      'resort',
+      'glamping',
+      'campingcabin',
+      'extendedstayhotel',
+      'boutiquehotel',
+      'butikotel',
+      'thermalhotel',
+      'spahotel',
+      'suitehotel',
+      'suitotel',
+      'konaklama',
+    ];
+    return values.any((value) => needles.any(value.contains));
+  }
+
+  bool _hasLodgingSignal({
+    required String name,
+    required String category,
+    required Iterable<Object?> tags,
+  }) {
+    final values = <String>[
+      _normalizeLookupText(name),
+      _normalizeLookupText(category),
+      ...tags.map((tag) => _normalizeLookupText(tag?.toString() ?? '')),
+    ];
+    const needles = <String>[
+      'lodging',
+      'hotel',
+      'otel',
+      'bungalow',
+      'bungalov',
+      'villa',
+      'suit',
+      'suite',
+      'resort',
+      'konaklama',
+      'glamping',
+      'pansiyon',
+      'apart',
+    ];
+    return values.any((value) => needles.any(value.contains));
+  }
+
+  bool _hasFoodSignal({
+    required String name,
+    required String category,
+    required Iterable<Object?> tags,
+  }) {
+    final values = <String>[
+      _normalizeLookupText(name),
+      _normalizeLookupText(category),
+      ...tags.map((tag) => _normalizeLookupText(tag?.toString() ?? '')),
+    ];
+    const needles = <String>[
+      'restaurant',
+      'restoran',
+      'lokanta',
+      'sofrasi',
+      'sofrasi',
+      'sofra',
+      'mangal',
+      'kebap',
+      'doner',
+      'burger',
+      'kahvalti',
+      'kahvalti',
+      'cafe',
+      'kahve',
+      'coffee',
+      'patisserie',
+      'pastane',
+      'meyhane',
+      'bistro',
+      'food',
+    ];
+    return values.any((value) => needles.any(value.contains));
+  }
+
+  bool _hasMallSignal({
+    required String name,
+    required String category,
+    required Iterable<Object?> tags,
+  }) {
+    final values = <String>[
+      _normalizeLookupText(name),
+      _normalizeLookupText(category),
+      ...tags.map((tag) => _normalizeLookupText(tag?.toString() ?? '')),
+    ];
+    const needles = <String>[
+      'avm',
+      'alisveris',
+      'shopping',
+      'mall',
+      'outlet',
+      'carsi',
+      'çarşı',
+      'shoppingcenter',
+      'shoppingmall',
+      'lifestylecenter',
+    ];
+    return values.any((value) => needles.any(value.contains));
+  }
+
+  bool _isFoodLikePlace(PlaceModel place) {
+    return {'food', 'cafe'}.contains(place.category) ||
+        _hasFoodSignal(
+          name: place.name,
+          category: place.category,
+          tags: place.tags,
+        );
+  }
+
+  bool _isMallLikePlace(PlaceModel place) {
+    return place.category == 'mall' ||
+        _hasMallSignal(
+          name: place.name,
+          category: place.category,
+          tags: place.tags,
+        );
+  }
+
+  bool _matchesSmartSlot(PlaceModel place, List<String> slotCategories) {
+    final wantsFood = slotCategories.any((c) => c == 'food' || c == 'cafe');
+    final wantsMall = slotCategories.contains('mall');
+    final category = place.category;
+    if (wantsFood) {
+      return _isFoodLikePlace(place);
+    }
+    if (wantsMall) {
+      return _isMallLikePlace(place);
+    }
+    if (_isFoodLikePlace(place)) return false;
+    if (_isMallLikePlace(place)) return false;
+    final whitelist = <String>{
+      ...slotCategories.where((c) => c != 'food' && c != 'cafe'),
+    };
+    if (whitelist.contains(category)) return true;
+    if (slotCategories.contains('activity') &&
+        {'historical', 'museum', 'viewpoint', 'nature'}.contains(category)) {
+      return true;
+    }
+    return false;
+  }
+
+  String _displayCategoryForPlace(PlaceModel place) {
+    if (_isFoodLikePlace(place)) {
+      return place.category == 'cafe' ? 'cafe' : 'food';
+    }
+    if (_isMallLikePlace(place)) return 'mall';
+    if (_isLodgingLikePlace(place)) return 'lodging';
+    return place.category;
+  }
+
+  String _displayCategoryForSmartItem(Map<String, dynamic> item) {
+    final category = item['category']?.toString() ?? 'activity';
+    final name = item['name']?.toString() ?? '';
+    final tags = ((item['tags'] as List?) ?? const []).cast<Object?>();
+    if (_hasFoodSignal(name: name, category: category, tags: tags)) {
+      return category == 'cafe' ? 'cafe' : 'food';
+    }
+    if (_hasMallSignal(name: name, category: category, tags: tags)) {
+      return 'mall';
+    }
+    if (_hasLodgingSignal(name: name, category: category, tags: tags)) {
+      return 'lodging';
+    }
+    return category;
+  }
+
   List<PlaceModel> _activeTopPicks() {
     final selected = switch (_pickMode) {
       'scenic' => _scenicPicks,
@@ -163,7 +357,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _ => _popularPlaces,
     };
     List<PlaceModel> real(List<PlaceModel> list) => list
-        .where((p) => !_isFakePlaceholder(p) && p.category != 'lodging')
+        .where((p) => !_isFakePlaceholder(p) && !_isLodgingLikePlace(p))
         .toList();
     final filtered = real(selected);
     if (filtered.isNotEmpty) return filtered;
@@ -172,6 +366,293 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final sc = real(_scenicPicks);
     if (sc.isNotEmpty) return sc;
     return real(_foodPicks);
+  }
+
+  List<PlaceModel> _allDiscoveryCandidates() {
+    final seen = <String>{};
+    return [..._popularPlaces, ..._scenicPicks, ..._foodPicks]
+        .where((p) => !_isFakePlaceholder(p) && !_isLodgingLikePlace(p))
+        .where((p) => seen.add(p.id))
+        .toList(growable: false);
+  }
+
+  List<PlaceModel> _displayTopPicks() {
+    final picks = _activeTopPicks();
+    final limit = _pickMode == 'all' ? 18 : 12;
+    return picks.take(limit).toList(growable: false);
+  }
+
+  List<Map<String, dynamic>> _filteredSmartSeasonItems({int limit = 12}) {
+    final deduped = <String>{};
+    final filtered = _smartSeason
+        .where((item) {
+          final category = item['category']?.toString() ?? '';
+          final name = item['name']?.toString() ?? '';
+          final tags = ((item['tags'] as List?) ?? const []).cast<Object?>();
+          if (_hasLodgingSignal(name: name, category: category, tags: tags)) {
+            return false;
+          }
+          final lat = (item['lat'] as num?)?.toDouble();
+          final lng = (item['lng'] as num?)?.toDouble();
+          if (lat == null || lng == null) return false;
+          final key =
+              '${_normalizeLookupText(name)}:${lat.toStringAsFixed(3)}:${lng.toStringAsFixed(3)}';
+          return deduped.add(key);
+        })
+        .toList(growable: false);
+    filtered.sort((a, b) {
+      final boostA = _mustSeeBoostForSmartItem(a);
+      final boostB = _mustSeeBoostForSmartItem(b);
+      if (boostA != boostB) return boostB.compareTo(boostA);
+      final scoreA =
+          ((a['trust_score'] as num?)?.toDouble() ?? 0) * 0.6 +
+          ((a['season_score'] as num?)?.toDouble() ?? 0) * 0.4;
+      final scoreB =
+          ((b['trust_score'] as num?)?.toDouble() ?? 0) * 0.6 +
+          ((b['season_score'] as num?)?.toDouble() ?? 0) * 0.4;
+      return scoreB.compareTo(scoreA);
+    });
+    return filtered.take(limit).toList(growable: false);
+  }
+
+  int _mustSeeBoostForSmartItem(Map<String, dynamic> item) {
+    final provinceSlug = _provinceSlug ?? '';
+    if (provinceSlug.isEmpty) return 0;
+    final name = _normalizeLookupText(item['name']?.toString() ?? '');
+    final district = _normalizeLookupText(
+      item['district']?.toString() ?? _selectedDistrictNameOrNull ?? '',
+    );
+    var best = 0;
+    final provinceKeywords = kMustSeePlaceKeywordsByProvince[provinceSlug];
+    if (provinceKeywords != null) {
+      for (final keyword in provinceKeywords) {
+        final normalized = _normalizeLookupText(keyword);
+        if (normalized.isEmpty) continue;
+        if (name == normalized) {
+          best = max(best, 60);
+        } else if (name.contains(normalized) || normalized.contains(name)) {
+          best = max(best, 42);
+        }
+      }
+    }
+    final districtRules = kMustSeePlaceKeywordsByDistrict[provinceSlug];
+    if (districtRules != null && district.isNotEmpty) {
+      for (final entry in districtRules.entries) {
+        final districtKeyword = _normalizeLookupText(entry.key);
+        if (!district.contains(districtKeyword) &&
+            !districtKeyword.contains(district)) {
+          continue;
+        }
+        for (final keyword in entry.value) {
+          final normalized = _normalizeLookupText(keyword);
+          if (normalized.isEmpty) continue;
+          if (name == normalized) {
+            best = max(best, 90);
+          } else if (name.contains(normalized) || normalized.contains(name)) {
+            best = max(best, 70);
+          }
+        }
+      }
+    }
+    return best;
+  }
+
+  int _mustSeeBoostForContextPlace(PlaceModel place) {
+    final provinceSlug = _provinceSlug ?? '';
+    if (provinceSlug.isEmpty) return 0;
+    final name = _normalizeLookupText(place.name);
+    final summary = _normalizeLookupText(place.shortSummary);
+    final district = _normalizeLookupText(_selectedDistrictNameOrNull ?? '');
+    var best = 0;
+    final provinceKeywords = kMustSeePlaceKeywordsByProvince[provinceSlug];
+    if (provinceKeywords != null) {
+      for (final keyword in provinceKeywords) {
+        final normalized = _normalizeLookupText(keyword);
+        if (normalized.isEmpty) continue;
+        if (name == normalized) {
+          best = max(best, 48);
+        } else if (name.contains(normalized) || normalized.contains(name)) {
+          best = max(best, 34);
+        }
+      }
+    }
+    final districtRules = kMustSeePlaceKeywordsByDistrict[provinceSlug];
+    if (districtRules != null && district.isNotEmpty) {
+      for (final entry in districtRules.entries) {
+        final districtKeyword = _normalizeLookupText(entry.key);
+        if (!district.contains(districtKeyword) &&
+            !summary.contains(districtKeyword) &&
+            !districtKeyword.contains(district)) {
+          continue;
+        }
+        for (final keyword in entry.value) {
+          final normalized = _normalizeLookupText(keyword);
+          if (normalized.isEmpty) continue;
+          if (name == normalized) {
+            best = max(best, 72);
+          } else if (name.contains(normalized) || normalized.contains(name)) {
+            best = max(best, 52);
+          }
+        }
+      }
+    }
+    return best;
+  }
+
+  bool _isLikelyOpenNow(PlaceModel place, DateTime now) {
+    final hour = now.hour;
+    return switch (place.category) {
+      'cafe' => hour >= 7 && hour <= 23,
+      'food' => hour >= 11 && hour <= 23,
+      'museum' => hour >= 9 && hour <= 18,
+      'historical' => hour >= 8 && hour <= 19,
+      'nature' ||
+      'viewpoint' ||
+      'waterfall' ||
+      'canyon' ||
+      'beach' => hour >= 6 && hour <= 21,
+      'activity' || 'tour' => hour >= 9 && hour <= 20,
+      _ => hour >= 8 && hour <= 21,
+    };
+  }
+
+  bool _isWeatherFitCategory(PlaceModel place, DateTime now) {
+    final month = now.month;
+    final hour = now.hour;
+    if (month <= 2 || month == 12) {
+      return {'museum', 'historical', 'food', 'cafe'}.contains(place.category);
+    }
+    if (month >= 6 && month <= 8) {
+      if (hour >= 17) {
+        return {
+          'viewpoint',
+          'nature',
+          'beach',
+          'waterfall',
+          'canyon',
+          'food',
+          'cafe',
+        }.contains(place.category);
+      }
+      return {
+        'museum',
+        'historical',
+        'cafe',
+        'waterfall',
+      }.contains(place.category);
+    }
+    return {
+      'nature',
+      'historical',
+      'museum',
+      'viewpoint',
+      'food',
+      'cafe',
+      'activity',
+    }.contains(place.category);
+  }
+
+  int _preferenceMatchScore(PlaceModel place) {
+    var score = 0;
+    final category = place.category;
+    final tags = place.tags.map(_normalizeLookupText).toSet();
+    if (_prefs.contains('museum') && category == 'museum') score += 3;
+    if (_prefs.contains('history') && category == 'historical') score += 3;
+    if (_prefs.contains('nature') &&
+        {
+          'nature',
+          'viewpoint',
+          'waterfall',
+          'canyon',
+          'beach',
+        }.contains(category)) {
+      score += 3;
+    }
+    if (_prefs.contains('food') && category == 'food') score += 3;
+    if (_prefs.contains('cafe') && category == 'cafe') score += 3;
+    if (_prefs.contains('sunset') &&
+        ({'viewpoint', 'beach', 'nature'}.contains(category) ||
+            tags.contains('sunset'))) {
+      score += 2;
+    }
+    if (_prefs.contains('sunrise') &&
+        ({'viewpoint', 'beach', 'nature'}.contains(category) ||
+            tags.contains('sunrise'))) {
+      score += 2;
+    }
+    if (_prefs.contains('free') && place.isFree) score += 1;
+    return score;
+  }
+
+  int _mustSeeBoostForPersonal(PlaceModel place) {
+    final provinceSlug = _provinceSlug ?? '';
+    if (provinceSlug.isEmpty) return 0;
+    final name = _normalizeLookupText(place.name);
+    final district = _normalizeLookupText(_selectedDistrictNameOrNull ?? '');
+    var best = 0;
+    final provinceKeywords = kMustSeePlaceKeywordsByProvince[provinceSlug];
+    if (provinceKeywords != null) {
+      for (final keyword in provinceKeywords) {
+        final normalized = _normalizeLookupText(keyword);
+        if (normalized.isEmpty) continue;
+        if (name == normalized) {
+          best = max(best, 42);
+        } else if (name.contains(normalized) || normalized.contains(name)) {
+          best = max(best, 28);
+        }
+      }
+    }
+    final districtRules = kMustSeePlaceKeywordsByDistrict[provinceSlug];
+    if (districtRules != null && district.isNotEmpty) {
+      for (final entry in districtRules.entries) {
+        final districtKeyword = _normalizeLookupText(entry.key);
+        if (!district.contains(districtKeyword) &&
+            !districtKeyword.contains(district)) {
+          continue;
+        }
+        for (final keyword in entry.value) {
+          final normalized = _normalizeLookupText(keyword);
+          if (normalized.isEmpty) continue;
+          if (name == normalized) {
+            best = max(best, 58);
+          } else if (name.contains(normalized) || normalized.contains(name)) {
+            best = max(best, 40);
+          }
+        }
+      }
+    }
+    return best;
+  }
+
+  List<PlaceModel> _personalizedDailyPicks() {
+    final now = DateTime.now();
+    final candidates = _allDiscoveryCandidates()
+        .where((p) => !_isLodgingLikePlace(p))
+        .toList();
+    if (candidates.isEmpty) return const [];
+    final ranked = candidates.map((place) {
+      var score = (place.routeviaScore).toDouble();
+      score += _mustSeeBoostForPersonal(place);
+      if (place.media.isNotEmpty) score += 60;
+      score += _preferenceMatchScore(place) * 8;
+      if (_isLikelyOpenNow(place, now)) score += 18;
+      if (_isWeatherFitCategory(place, now)) score += 14;
+      final confidence =
+          (_liveStatusByPlaceId[place.id]?['confidence'] as num?)?.toDouble() ??
+          0;
+      score += confidence * 0.15;
+      if (_position != null && place.lat != null && place.lng != null) {
+        final distKm = _distanceKm(
+          _position!.latitude,
+          _position!.longitude,
+          place.lat!,
+          place.lng!,
+        );
+        score += (60 - distKm.clamp(0, 60)) * 0.9;
+      }
+      return (place: place, score: score);
+    }).toList()..sort((a, b) => b.score.compareTo(a.score));
+    return ranked.take(3).map((row) => row.place).toList(growable: false);
   }
 
   // ── Smart Context Helpers ────────────────────────────────────────────────
@@ -334,7 +815,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           _popularPlaces = const [];
           _scenicPicks = const [];
           _foodPicks = const [];
-          _stayPicks = const [];
         });
         _showSnack(startupWarning ?? 'Başlangıç verileri yüklenemedi.');
         return;
@@ -358,6 +838,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       if (!mounted) return;
       final preferredProvince = await cache.getPreferredProvinceSlug();
       final preferredDistrictId = await cache.getPreferredDistrictId();
+      final locationSetupSkipped = await cache.getLocationSetupSkipped();
       String? initialProvince = preferredProvince;
 
       if (position != null) {
@@ -395,8 +876,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       }
 
       if (!mounted) return;
+      // Check local cache as fallback: if the user completed onboarding locally
+      // (even if the remote profile read returned stale/false), don't redirect.
+      final localOnboardingCompleted = await ref
+          .read(localCacheProvider)
+          .getOnboardingCompleted();
       if (Supabase.instance.client.auth.currentSession != null &&
-          !onboardingCompleted) {
+          !onboardingCompleted &&
+          !localOnboardingCompleted) {
         final pendingCode = await ref
             .read(localCacheProvider)
             .getPendingReferralCode();
@@ -456,6 +943,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       if ((permission == LocationPermission.denied ||
               permission == LocationPermission.deniedForever) &&
           preferredProvince == null &&
+          !locationSetupSkipped &&
           Supabase.instance.client.auth.currentSession != null) {
         context.go('/location-setup');
         return;
@@ -511,7 +999,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               (await repo.getProvinceBySlug(slug))?['lng']?.toDouble() ??
               _position?.longitude ??
               32.50,
-          radiusKm: 40,
+          radiusKm: _planRadiusKm,
           provinceSlug: slug,
           districtName: districtName,
           categories: const [],
@@ -565,10 +1053,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             .where((p) => p.category == 'food' || p.category == 'cafe')
             .take(10)
             .toList();
-        _stayPicks = places
-            .where((p) => p.category == 'lodging')
-            .take(10)
-            .toList();
       });
       unawaited(_loadSmartSeason());
       unawaited(_loadLiveStatusForTopPicks());
@@ -610,10 +1094,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             .where((p) => p.category == 'food' || p.category == 'cafe')
             .take(10)
             .toList();
-        _stayPicks = places
-            .where((p) => p.category == 'lodging')
-            .take(10)
-            .toList();
       });
       unawaited(_loadSmartSeason());
       unawaited(_loadLiveStatusForTopPicks());
@@ -631,7 +1111,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           .getSmartSeasonSuggestions(
             provinceSlug: _provinceSlug,
             districtName: _selectedDistrictNameOrNull,
-            limit: 8,
+            limit: 12,
           );
       if (!mounted) return;
       setState(() => _smartSeason = items);
@@ -757,7 +1237,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final bundle = await repo.nearbyPlacesBundle(
       lat: fallbackLat,
       lng: fallbackLng,
-      radiusKm: 40,
+      radiusKm: _planRadiusKm,
       provinceSlug: provinceSlug,
       districtName: districtName,
       categories: const [],
@@ -788,7 +1268,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final isAnkara = _provinceSlug == 'ankara';
     final likesMuseum = _prefs.contains('museum');
 
-    final naturePool = realSource
+    final scenicEligible = realSource
+        .where((p) => !_isFoodLikePlace(p))
+        .toList();
+    final naturePool = scenicEligible
         .where(
           (p) => {
             'nature',
@@ -801,13 +1284,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           }.contains(p.category),
         )
         .toList();
-    final historyPool = realSource
+    final historyPool = scenicEligible
         .where((p) => {'historical', 'market'}.contains(p.category))
         .toList();
-    final museumPool = realSource.where((p) => p.category == 'museum').toList();
-    final foodPool = realSource
-        .where((p) => {'food', 'cafe'}.contains(p.category))
+    final museumPool = scenicEligible
+        .where((p) => p.category == 'museum')
         .toList();
+    final foodPool = realSource.where((p) => _isFoodLikePlace(p)).toList();
     final scenicPool = [...naturePool, ...historyPool, ...museumPool];
     final picks = <PlaceModel>[];
     final seen = <String>{};
@@ -1008,6 +1491,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         personaLabel: _personaLabel,
         prefLabel: _prefLabel,
         onApply: (settings) {
+          final newPrefs = settings['prefs'] as Set<String>;
           setState(() {
             _days = settings['days'] as int;
             _transportMode = settings['transportMode'] as String;
@@ -1015,11 +1499,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             _persona = settings['persona'] as String;
             _planRadiusKm = settings['radiusKm'] as int;
             _allowOutsideDistrict = settings['allowOutside'] as bool;
-            final newPrefs = settings['prefs'] as Set<String>;
             _prefs
               ..clear()
               ..addAll(newPrefs);
           });
+          unawaited(
+            ref
+                .read(localCacheProvider)
+                .savePlanSettings(
+                  days: settings['days'] as int,
+                  transportMode: settings['transportMode'] as String,
+                  pace: settings['pace'] as String,
+                  persona: settings['persona'] as String,
+                  radiusKm: settings['radiusKm'] as int,
+                  allowOutside: settings['allowOutside'] as bool,
+                  prefs: newPrefs,
+                ),
+          );
         },
       ),
     );
@@ -1066,8 +1562,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Büyüme Merkezi',
+              Text(
+                context.tr('Büyüme Merkezi', 'Growth Center'),
                 style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20),
               ),
               const SizedBox(height: 16),
@@ -1091,7 +1587,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          'Premium Önizleme aktif${_premiumPreviewExpiry == null ? '' : ' • ${_premiumPreviewExpiry!.day}.${_premiumPreviewExpiry!.month}.${_premiumPreviewExpiry!.year}'}',
+                          context.tr(
+                            '7 günlük Pro davet erişimi aktif${_premiumPreviewExpiry == null ? '' : ' • ${_premiumPreviewExpiry!.day}.${_premiumPreviewExpiry!.month}.${_premiumPreviewExpiry!.year}'}',
+                            '7-day Pro invite access is active${_premiumPreviewExpiry == null ? '' : ' • ${_premiumPreviewExpiry!.day}.${_premiumPreviewExpiry!.month}.${_premiumPreviewExpiry!.year}'}',
+                          ),
                           style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.w600,
@@ -1105,17 +1604,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ],
               _GrowthTile(
                 icon: Icons.group_add_outlined,
-                title: 'Arkadaşını Davet Et',
+                title: context.tr('Arkadaşını Davet Et', 'Invite a Friend'),
                 subtitle: referralCode == null
-                    ? 'Kod hazırlanamadı'
-                    : 'Kodun: $referralCode',
+                    ? context.tr(
+                        'Kod hazırlanamadı',
+                        'Code could not be prepared',
+                      )
+                    : context.tr(
+                        'Kodun: $referralCode',
+                        'Your code: $referralCode',
+                      ),
                 trailing: const Icon(Icons.share_outlined),
                 onTap: referralCode == null
                     ? null
                     : () async {
                         Navigator.of(ctx).pop();
                         final text =
-                            'Routevia ile gezi planını 1 tıkla yap. Davet kodum: $referralCode\n'
+                            '${context.tr('Routevia ile gezi planını 1 tıkla yap. Davet kodum:', 'Plan your trip with Routevia in one tap. My invite code:')} $referralCode\n'
                             'routevia://ref/$referralCode';
                         await SharePlus.instance.share(ShareParams(text: text));
                         await repo.logAppEvent(
@@ -1127,8 +1632,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               const SizedBox(height: 8),
               _GrowthTile(
                 icon: Icons.feedback_outlined,
-                title: 'Geri Bildirim Gönder',
-                subtitle: 'Seni dinliyoruz',
+                title: context.tr('Geri Bildirim Gönder', 'Send Feedback'),
+                subtitle: context.tr('Seni dinliyoruz', 'We are listening'),
                 onTap: () async {
                   Navigator.of(ctx).pop();
                   await _openFeedbackDialog();
@@ -1151,12 +1656,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
-          title: const Text('Geri Bildirim'),
+          title: Text(context.tr('Geri Bildirim', 'Feedback')),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               InputDecorator(
-                decoration: const InputDecoration(labelText: 'Puan'),
+                decoration: InputDecoration(
+                  labelText: context.tr('Puan', 'Rating'),
+                ),
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<double>(
                     value: rating,
@@ -1179,9 +1686,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 minLines: 3,
                 maxLines: 5,
                 maxLength: 600,
-                decoration: const InputDecoration(
-                  labelText: 'Mesaj',
-                  hintText: 'Ne geliştirelim?',
+                decoration: InputDecoration(
+                  labelText: context.tr('Mesaj', 'Message'),
+                  hintText: context.tr(
+                    'Ne geliştirelim?',
+                    'What should we improve?',
+                  ),
                 ),
               ),
             ],
@@ -1189,7 +1699,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Vazgeç'),
+              child: Text(context.tr('Vazgeç', 'Cancel')),
             ),
             FilledButton(
               onPressed: () async {
@@ -1202,13 +1712,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       );
                   if (!mounted || !ctx.mounted) return;
                   Navigator.of(ctx).pop();
-                  _showSnack('Teşekkürler! Geri bildirimin kaydedildi.');
+                  _showSnack(
+                    context.tr(
+                      'Teşekkürler! Geri bildirimin kaydedildi.',
+                      'Thanks! Your feedback was saved.',
+                    ),
+                  );
                 } catch (e) {
                   if (!mounted) return;
                   _showSnack(friendlyError(e));
                 }
               },
-              child: const Text('Gönder'),
+              child: Text(context.tr('Gönder', 'Send')),
             ),
           ],
         ),
@@ -1238,7 +1753,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       _buildDestinationCover(),
                       const SizedBox(height: 20),
                       _buildSmartContextSection(),
-                      const SizedBox(height: 24),
+                      _buildPersonalSuggestionsSection(),
                       _buildSmartSeasonSection(),
                       _buildOfflinePackSection(),
                       _buildLiveStatusSection(),
@@ -1254,10 +1769,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       const SizedBox(height: 24),
                       if (_foodPicks.isNotEmpty && _pickMode != 'food') ...[
                         _buildFoodSection(),
-                        const SizedBox(height: 24),
-                      ],
-                      if (_stayPicks.isNotEmpty) ...[
-                        _buildStaySection(),
                         const SizedBox(height: 24),
                       ],
                       _buildPromoBanner(),
@@ -1357,7 +1868,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         IconButton(
           onPressed: () => context.push('/trips'),
           icon: const Icon(Icons.route_outlined),
-          tooltip: 'Gezilerim',
+          tooltip: context.tr('Gezilerim', 'My Trips'),
           style: IconButton.styleFrom(
             foregroundColor: RouteviaColors.textSecondary,
           ),
@@ -1373,7 +1884,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         IconButton(
           onPressed: () => context.push('/suggest'),
           icon: const Icon(Icons.add_location_alt_outlined),
-          tooltip: 'Yer Ekle',
+          tooltip: context.tr('Yer Ekle', 'Add Place'),
           style: IconButton.styleFrom(
             foregroundColor: RouteviaColors.textSecondary,
           ),
@@ -1515,15 +2026,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(20),
                             ),
-                            title: const Text('Öneri Kriterleri'),
-                            content: const Text(
-                              'Yeme-içme ve konaklama için yüksek puan/yorum eşiği uygulanır. '
-                              'Tarihi/doğa noktaları kaynak kalitesi ve rota yakınlığına göre dengelenir.',
+                            title: Text(
+                              context.tr(
+                                'Öneri Kriterleri',
+                                'Suggestion Criteria',
+                              ),
+                            ),
+                            content: Text(
+                              context.tr(
+                                'Yeme-içme ve konaklama için yüksek puan/yorum eşiği uygulanır. Tarihi/doğa noktaları kaynak kalitesi ve rota yakınlığına göre dengelenir.',
+                                'For food, drink, and lodging we apply a higher rating and review threshold. Historical and nature spots are balanced by source quality and route proximity.',
+                              ),
                             ),
                             actions: [
                               FilledButton(
                                 onPressed: () => Navigator.of(ctx).pop(),
-                                child: const Text('Tamam'),
+                                child: Text(context.tr('Tamam', 'OK')),
                               ),
                             ],
                           ),
@@ -1607,10 +2125,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         letterSpacing: -0.8,
                       ),
                       children: [
-                        const TextSpan(text: 'Şehri Aç,\n'),
-                        const TextSpan(text: 'Rota '),
                         TextSpan(
-                          text: 'Akmaya',
+                          text: context.tr('Şehri Aç,\n', 'Unlock the City,\n'),
+                        ),
+                        TextSpan(text: context.tr('Rota ', 'Let the Route ')),
+                        TextSpan(
+                          text: context.tr('Akmaya', 'Flow'),
                           style: TextStyle(
                             foreground: Paint()
                               ..shader =
@@ -1624,7 +2144,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                   ),
                           ),
                         ),
-                        const TextSpan(text: '\nBaşlasın.'),
+                        TextSpan(text: context.tr('\nBaşlasın.', '\nBegin.')),
                       ],
                     ),
                   ),
@@ -1633,7 +2153,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
                   // Subtitle
                   Text(
-                    'Canlı keşif • Premium noktalar • Saatlik plan',
+                    context.tr(
+                      'Canlı keşif • Premium noktalar • Saatlik plan',
+                      'Live discovery • Premium spots • Hourly planning',
+                    ),
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.55),
                       height: 1.4,
@@ -1649,13 +2172,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     children: [
                       _HeroBadge(
                         icon: Icons.explore_outlined,
-                        label: '${_activeTopPicks().length} top pick',
+                        label: context.tr(
+                          '${_activeTopPicks().length} top pick',
+                          '${_activeTopPicks().length} top picks',
+                        ),
                         color: const Color(0xFF00C2A8),
                       ),
                       const SizedBox(width: 8),
                       _HeroBadge(
                         icon: Icons.schedule_outlined,
-                        label: '1–7 gün plan',
+                        label: context.tr('1–7 gün plan', '1–7 day plans'),
                         color: Colors.white.withValues(alpha: 0.0),
                       ),
                     ],
@@ -1668,7 +2194,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     children: [
                       Expanded(
                         child: _HeroButton(
-                          label: 'İl Hub',
+                          label: context.tr('İl Hub', 'City Hub'),
                           icon: Icons.hub_outlined,
                           onTap: () => context.push(
                             '/local-hub',
@@ -1679,7 +2205,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       const SizedBox(width: 10),
                       Expanded(
                         child: _HeroButton(
-                          label: 'Plan Ayarları',
+                          label: context.tr('Plan Ayarları', 'Plan Settings'),
                           icon: Icons.tune_rounded,
                           onTap: _openPlanSettings,
                           accent: true,
@@ -1814,7 +2340,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              '7 gün Premium Önizleme aktif${_premiumPreviewExpiry == null ? '' : ' • ${_premiumPreviewExpiry!.day}.${_premiumPreviewExpiry!.month}.${_premiumPreviewExpiry!.year}'}',
+              context.tr(
+                '7 günlük Pro davet erişimi aktif${_premiumPreviewExpiry == null ? '' : ' • ${_premiumPreviewExpiry!.day}.${_premiumPreviewExpiry!.month}.${_premiumPreviewExpiry!.year}'}',
+                '7-day Pro invite access is active${_premiumPreviewExpiry == null ? '' : ' • ${_premiumPreviewExpiry!.day}.${_premiumPreviewExpiry!.month}.${_premiumPreviewExpiry!.year}'}',
+              ),
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w600,
@@ -1870,9 +2399,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       'lat': lat,
                       'lng': lng,
                       'province_slug': _provinceSlug,
-                      'district_id': ?_districtId,
-                      'district_slug': ?districtSlug,
-                      'district_name': ?districtName,
+                      'district_id': _districtId,
+                      'district_slug': districtSlug,
+                      'district_name': districtName,
                     },
                   );
                 },
@@ -1883,8 +2412,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             child: _QuickActionCard(
               icon: Icons.login_rounded,
               label: Supabase.instance.client.auth.currentSession == null
-                  ? 'Giriş Yap'
-                  : 'Gezilerim',
+                  ? context.tr('Giriş Yap', 'Sign In')
+                  : context.tr('Gezilerim', 'My Trips'),
               gradient: const LinearGradient(
                 colors: [Color(0xFF0B1F3A), Color(0xFF133E75)],
                 begin: Alignment.topLeft,
@@ -1903,7 +2432,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           Expanded(
             child: _QuickActionCard(
               icon: Icons.add_location_alt_rounded,
-              label: 'Yer Ekle',
+              label: context.tr('Yer Ekle', 'Add Place'),
               gradient: const LinearGradient(
                 colors: [Color(0xFFFFB703), Color(0xFFEA8C00)],
                 begin: Alignment.topLeft,
@@ -1932,67 +2461,66 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       List<String> timeCats,
     ) = switch (hour) {
       5 || 6 => (
-        'Gün Doğumu 🌅',
+        context.tr('Gün Doğumu 🌅', 'Sunrise 🌅'),
         Icons.wb_twilight_rounded,
         const Color(0xFFFF9800),
         ['viewpoint', 'nature', 'beach'],
       ),
       7 || 8 || 9 => (
-        'Kahvaltı Vakti ☕',
+        context.tr('Kahvaltı Vakti ☕', 'Breakfast Time ☕'),
         Icons.free_breakfast_rounded,
         const Color(0xFFD97706),
         ['cafe', 'food'],
       ),
       10 || 11 => (
-        'Sabah Gezisi 🏛',
+        context.tr('Sabah Gezisi 🏛', 'Morning Walk 🏛'),
         Icons.explore_rounded,
         const Color(0xFF0096A8),
         ['historical', 'museum', 'activity'],
       ),
       12 || 13 => (
-        'Öğle Molası 🍽',
+        context.tr('Öğle Molası 🍽', 'Lunch Break 🍽'),
         Icons.restaurant_rounded,
         const Color(0xFFEA580C),
         ['food', 'cafe'],
       ),
       14 || 15 || 16 => (
-        'Öğleden Sonra 🎒',
+        context.tr('Öğleden Sonra 🎒', 'Afternoon 🎒'),
         Icons.backpack_rounded,
         const Color(0xFF0096A8),
         ['museum', 'viewpoint', 'nature', 'historical'],
       ),
       17 || 18 => (
-        'Gün Batımı 🌇',
+        context.tr('Gün Batımı 🌇', 'Sunset 🌇'),
         Icons.wb_sunny_rounded,
         const Color(0xFFFF5722),
         ['viewpoint', 'beach', 'nature'],
       ),
       19 || 20 || 21 => (
-        'Akşam Yemeği 🍜',
+        context.tr('Akşam Yemeği 🍜', 'Dinner Time 🍜'),
         Icons.dinner_dining_rounded,
         const Color(0xFF7C3AED),
         ['food', 'cafe'],
       ),
       _ => (
-        'Gece Gezisi 🌙',
+        context.tr('Gece Gezisi 🌙', 'Night Out 🌙'),
         Icons.nightlife_rounded,
         const Color(0xFF0B1F3A),
         ['food', 'cafe', 'viewpoint'],
       ),
     };
 
-    final allPicks = [
-      ..._popularPlaces,
-      ..._scenicPicks,
-      ..._foodPicks,
-    ].where((p) => !_isFakePlaceholder(p)).toSet().toList();
+    final allPicks = _allDiscoveryCandidates();
 
     final cards = <_SmartCard>[];
 
     // ── 1. Time-of-day best place ────────────────────────────────────────
-    final timePicks = allPicks
-        .where((p) => timeCats.contains(p.category))
-        .toList();
+    final timePicks =
+        allPicks.where((p) => _matchesSmartSlot(p, timeCats)).toList()..sort(
+          (a, b) => _mustSeeBoostForContextPlace(
+            b,
+          ).compareTo(_mustSeeBoostForContextPlace(a)),
+        );
     if (timePicks.isNotEmpty) {
       final top = timePicks.first;
       cards.add(
@@ -2001,7 +2529,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           icon: timeIcon,
           eyebrow: eyebrow,
           title: _cleanPlaceName(top.name),
-          chips: [_SmartChip(_categoryLabels(top.category))],
+          chips: [_SmartChip(_categoryLabels(_displayCategoryForPlace(top)))],
           onTap: () => context.push('/place', extra: top),
         ),
       );
@@ -2011,8 +2539,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           accentColor: timeAccent,
           icon: timeIcon,
           eyebrow: eyebrow,
-          title: 'Keşfet',
-          chips: [_SmartChip('Haritada gör')],
+          title: context.tr('Keşfet', 'Explore'),
+          chips: [_SmartChip(context.tr('Haritada gör', 'View on map'))],
           onTap: () => context.push(
             '/local-hub',
             extra: {'province_slug': _provinceSlug},
@@ -2024,17 +2552,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // ── 2. Sunrise card (always visible before it rises) ─────────────────
     final sunriseMin = _minutesUntil(now, solar.riseH, solar.riseM);
     if (sunriseMin >= -30 && sunriseMin <= 180) {
-      final vp = allPicks
-          .where((p) => {'viewpoint', 'nature', 'beach'}.contains(p.category))
-          .toList();
+      final vp =
+          allPicks
+              .where(
+                (p) => {'viewpoint', 'nature', 'beach'}.contains(p.category),
+              )
+              .where((p) => !_isFoodLikePlace(p))
+              .toList()
+            ..sort(
+              (a, b) => _mustSeeBoostForContextPlace(
+                b,
+              ).compareTo(_mustSeeBoostForContextPlace(a)),
+            );
       final sunriseTimeStr = _timeStr(solar.riseH, solar.riseM);
       cards.add(
         _SmartCard(
           accentColor: const Color(0xFFFF9800),
           icon: Icons.wb_twilight_rounded,
           eyebrow: sunriseMin > 0
-              ? 'Gün Doğumuna $sunriseMin dk kaldı'
-              : 'Gün Doğuyor! 🌅',
+              ? context.tr(
+                  'Gün Doğumuna $sunriseMin dk kaldı',
+                  '$sunriseMin min to sunrise',
+                )
+              : context.tr('Gün Doğuyor! 🌅', 'Sunrise now! 🌅'),
           title: vp.isNotEmpty
               ? _cleanPlaceName(vp.first.name)
               : 'Manzara noktaları',
@@ -2054,15 +2594,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // ── 3. Sunset card (always visible, even hours before) ───────────────
     final sunsetMin = _minutesUntil(now, solar.setH, solar.setM);
     if (sunsetMin >= -30 && sunsetMin <= 480) {
-      final vp = allPicks
-          .where((p) => {'viewpoint', 'beach', 'nature'}.contains(p.category))
-          .toList();
+      final vp =
+          allPicks
+              .where(
+                (p) => {'viewpoint', 'beach', 'nature'}.contains(p.category),
+              )
+              .where((p) => !_isFoodLikePlace(p))
+              .toList()
+            ..sort(
+              (a, b) => _mustSeeBoostForContextPlace(
+                b,
+              ).compareTo(_mustSeeBoostForContextPlace(a)),
+            );
       final sunsetTimeStr = _timeStr(solar.setH, solar.setM);
       final eyebrowSun = sunsetMin > 60
-          ? 'Bugün saat $sunsetTimeStr gün batımı'
+          ? context.tr(
+              'Bugün saat $sunsetTimeStr gün batımı',
+              'Sunset today at $sunsetTimeStr',
+            )
           : sunsetMin > 0
-          ? 'Gün Batımına $sunsetMin dk kaldı 🌇'
-          : 'Gün Batıyor! 🌅';
+          ? context.tr(
+              'Gün Batımına $sunsetMin dk kaldı 🌇',
+              '$sunsetMin min to sunset 🌇',
+            )
+          : context.tr('Gün Batıyor! 🌅', 'Sunset now! 🌅');
       cards.add(
         _SmartCard(
           accentColor: const Color(0xFFFF5722),
@@ -2073,7 +2628,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               : 'Manzara noktaları',
           chips: [
             _SmartChip('$sunsetTimeStr · $_selectedProvinceName'),
-            if (vp.isNotEmpty) _SmartChip(_categoryLabels(vp.first.category)),
+            if (vp.isNotEmpty)
+              _SmartChip(_categoryLabels(_displayCategoryForPlace(vp.first))),
           ],
           onTap: vp.isNotEmpty
               ? () => context.push('/place', extra: vp.first)
@@ -2122,6 +2678,125 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         );
 
+        final openCandidates =
+            withDist
+                .where((row) => _isLikelyOpenNow(row.$1, now))
+                .where((row) => _matchesSmartSlot(row.$1, timeCats))
+                .toList()
+              ..sort((a, b) {
+                final boostA = _mustSeeBoostForContextPlace(a.$1);
+                final boostB = _mustSeeBoostForContextPlace(b.$1);
+                if (boostA != boostB) return boostB.compareTo(boostA);
+                return a.$2.compareTo(b.$2);
+              });
+        if (openCandidates.isNotEmpty) {
+          final (openPlace, openDist) = openCandidates.first;
+          cards.add(
+            _SmartCard(
+              accentColor: const Color(0xFF0EA5E9),
+              icon: Icons.schedule_rounded,
+              eyebrow: context.tr('Su an icin uygun', 'Good to go now'),
+              title: _cleanPlaceName(openPlace.name),
+              subtitle: context.tr(
+                'Yakinda ve su an icin mantikli gorunuyor',
+                'Nearby and a good fit for right now',
+              ),
+              chips: [
+                _SmartChip(_kmLabel(openDist)),
+                _SmartChip(
+                  _categoryLabels(_displayCategoryForPlace(openPlace)),
+                ),
+              ],
+              onTap: () => context.push('/place', extra: openPlace),
+            ),
+          );
+        }
+
+        final weatherCandidates =
+            withDist
+                .where((row) => _isWeatherFitCategory(row.$1, now))
+                .where((row) => !_isFoodLikePlace(row.$1))
+                .toList()
+              ..sort((a, b) {
+                final boostA = _mustSeeBoostForContextPlace(a.$1);
+                final boostB = _mustSeeBoostForContextPlace(b.$1);
+                if (boostA != boostB) return boostB.compareTo(boostA);
+                return a.$2.compareTo(b.$2);
+              });
+        if (weatherCandidates.isNotEmpty) {
+          final (weatherPlace, weatherDist) = weatherCandidates.first;
+          cards.add(
+            _SmartCard(
+              accentColor: const Color(0xFF8B5CF6),
+              icon: Icons.wb_cloudy_rounded,
+              eyebrow: context.tr(
+                'Hava ve mevsime uyumlu',
+                'Weather and season fit',
+              ),
+              title: _cleanPlaceName(weatherPlace.name),
+              subtitle: context.tr(
+                'Bugunun temposuna ve mevsime daha uygun',
+                'A better fit for today and the season',
+              ),
+              chips: [
+                _SmartChip(_kmLabel(weatherDist)),
+                _SmartChip(
+                  _categoryLabels(_displayCategoryForPlace(weatherPlace)),
+                ),
+              ],
+              onTap: () => context.push('/place', extra: weatherPlace),
+            ),
+          );
+        }
+
+        final interestCandidates =
+            withDist.where((row) => _preferenceMatchScore(row.$1) > 0).where((
+              row,
+            ) {
+              if (_prefs.contains('food') || _prefs.contains('cafe')) {
+                return true;
+              }
+              return !_isFoodLikePlace(row.$1);
+            }).toList()..sort(
+              (a, b) => _preferenceMatchScore(
+                b.$1,
+              ).compareTo(_preferenceMatchScore(a.$1)),
+            );
+        interestCandidates.sort((a, b) {
+          final prefDelta =
+              _preferenceMatchScore(b.$1) - _preferenceMatchScore(a.$1);
+          if (prefDelta != 0) return prefDelta;
+          final boostA = _mustSeeBoostForContextPlace(a.$1);
+          final boostB = _mustSeeBoostForContextPlace(b.$1);
+          if (boostA != boostB) return boostB.compareTo(boostA);
+          return a.$2.compareTo(b.$2);
+        });
+        if (interestCandidates.isNotEmpty) {
+          final (interestPlace, interestDist) = interestCandidates.first;
+          cards.add(
+            _SmartCard(
+              accentColor: RouteviaColors.primary,
+              icon: Icons.favorite_border_rounded,
+              eyebrow: context.tr(
+                'Ilgi alanlarina gore secildi',
+                'Picked for your interests',
+              ),
+              title: _cleanPlaceName(interestPlace.name),
+              subtitle: context.tr(
+                'Tercihlerinle daha iyi eslesiyor',
+                'A stronger match for your profile',
+              ),
+              chips: [
+                _SmartChip(_kmLabel(interestDist)),
+                _SmartChip(
+                  _categoryLabels(_displayCategoryForPlace(interestPlace)),
+                ),
+              ],
+              onTap: () => context.push('/place', extra: interestPlace),
+            ),
+          );
+        }
+
         // ── 5. Accessible places count ────────────────────────────────
         if (withDist.length > 1) {
           final catCounts = <String, int>{};
@@ -2146,6 +2821,40 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           );
         }
       }
+    }
+
+    final seasonalSmart = _filteredSmartSeasonItems(limit: 3);
+    for (final item in seasonalSmart) {
+      final lat = (item['lat'] as num?)?.toDouble();
+      final lng = (item['lng'] as num?)?.toDouble();
+      if (lat == null || lng == null) continue;
+      cards.add(
+        _SmartCard(
+          accentColor: const Color(0xFF2563EB),
+          icon: Icons.auto_awesome_rounded,
+          eyebrow: context.tr('Senin icin secildi', 'Picked for you'),
+          title: (item['name'] as String?) ?? 'Keşif',
+          subtitle: (item['why'] as String?) ?? 'Yakın çevre + trust dengesi',
+          imageUrl: item['cover_photo'] as String?,
+          chips: [
+            _SmartChip(_categoryLabels(_displayCategoryForSmartItem(item))),
+            _SmartChip(
+              'Routevia ${((((item['trust_score'] as num?)?.toDouble() ?? 0) * 0.6) + (((item['season_score'] as num?)?.toDouble() ?? 0) * 0.4)).clamp(0, 100).toStringAsFixed(0)}/100',
+            ),
+          ],
+          onTap: () => context.push(
+            '/map-explore',
+            extra: {
+              'lat': lat,
+              'lng': lng,
+              'place_id': item['id'] as String?,
+              'province_slug': _provinceSlug,
+              'district_id': _districtId,
+              'district_name': _selectedDistrictNameOrNull,
+            },
+          ),
+        ),
+      );
     }
 
     if (cards.isEmpty) return const SizedBox.shrink();
@@ -2191,11 +2900,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ),
         const SizedBox(height: 12),
         SizedBox(
-          height: 136,
+          height: 172,
           child: ListView.separated(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             scrollDirection: Axis.horizontal,
-            itemCount: cards.length,
+            itemCount: cards.take(8).length,
             separatorBuilder: (_, _) => const SizedBox(width: 12),
             itemBuilder: (_, i) => _SmartSuggestionCard(card: cards[i]),
           ),
@@ -2205,21 +2914,92 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
+  Widget _buildPersonalSuggestionsSection() {
+    final picks = _personalizedDailyPicks();
+    if (picks.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                context.tr(
+                  'Bugünün 3 kişisel önerisi',
+                  "Today's 3 Personal Picks",
+                ),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 18,
+                  color: RouteviaColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                context.tr(
+                  'Konumun, ilgi alanlarin ve gunun akisina gore secildi.',
+                  'Picked from your location, interests and today\'s flow.',
+                ),
+                style: const TextStyle(
+                  color: RouteviaColors.textSecondary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 200,
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            scrollDirection: Axis.horizontal,
+            itemCount: picks.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 12),
+            itemBuilder: (_, i) {
+              final place = picks[i];
+              return _TopPickCard(
+                place: place,
+                locationLabel: _selectedProvinceName,
+                onTap: () => context.push(
+                  '/map-explore',
+                  extra: {
+                    'lat': place.lat ?? _position?.latitude,
+                    'lng': place.lng ?? _position?.longitude,
+                    'place_id': place.id,
+                    'province_slug': _provinceSlug,
+                    'district_id': _districtId,
+                    'district_name': _selectedDistrictNameOrNull,
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
   // Helper to translate category key to Turkish label
-  static String _categoryLabels(String cat) =>
-      const {
-        'nature': 'Doğa',
-        'historical': 'Tarihi',
-        'museum': 'Müze',
-        'viewpoint': 'Manzara',
-        'beach': 'Plaj',
-        'waterfall': 'Şelale',
-        'canyon': 'Kanyon',
-        'food': 'Restoran',
-        'cafe': 'Kafe',
-        'lodging': 'Konaklama',
-        'activity': 'Aktivite',
-        'tour': 'Tur',
+  String _categoryLabels(String cat) =>
+      {
+        'nature': context.tr('Doğa', 'Nature'),
+        'historical': context.tr('Tarihi', 'Historical'),
+        'museum': context.tr('Müze', 'Museum'),
+        'viewpoint': context.tr('Manzara', 'Viewpoint'),
+        'beach': context.tr('Plaj', 'Beach'),
+        'waterfall': context.tr('Şelale', 'Waterfall'),
+        'canyon': context.tr('Kanyon', 'Canyon'),
+        'food': context.tr('Restoran', 'Restaurant'),
+        'cafe': context.tr('Kafe', 'Cafe'),
+        'mall': context.tr('Alışveriş', 'Shopping'),
+        'lodging': context.tr('Konaklama', 'Lodging'),
+        'activity': context.tr('Aktivite', 'Activity'),
+        'tour': context.tr('Tur', 'Tour'),
       }[cat] ??
       cat;
 
@@ -2251,8 +3031,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     if (_provinceSlug != null)
                       Text(
                         _pickMode == 'food'
-                            ? 'Hizli yemek ve kafe secimleri • ${_districtId != null ? _selectedDistrictName : _selectedProvinceName}'
-                            : 'Editor secimi + topluluk sinyali • ${_districtId != null ? _selectedDistrictName : _selectedProvinceName}',
+                            ? 'Hizli yemek ve kafe secimleri • $_selectedProvinceName'
+                            : _pickMode == 'scenic'
+                            ? 'Bu hafta yakinindan secilen 12 onerilik liste • $_selectedProvinceName'
+                            : 'Editor secimi + topluluk sinyali • $_selectedProvinceName',
                         style: const TextStyle(
                           color: RouteviaColors.textSecondary,
                           fontSize: 13,
@@ -2265,7 +3047,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               TextButton.icon(
                 onPressed: _loadPopularForProvince,
                 icon: const Icon(Icons.refresh_rounded, size: 16),
-                label: const Text('Yenile'),
+                label: Text(context.tr('Yenile', 'Refresh')),
                 style: TextButton.styleFrom(
                   foregroundColor: RouteviaColors.teal,
                   padding: const EdgeInsets.symmetric(
@@ -2317,7 +3099,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     strokeWidth: 2.5,
                   ),
                 )
-              : _activeTopPicks().isEmpty
+              : _displayTopPicks().isEmpty
               ? Center(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -2347,7 +3129,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         const SizedBox(height: 10),
                         TextButton(
                           onPressed: _loadPopularForProvince,
-                          child: const Text('Tekrar Dene'),
+                          child: Text(context.tr('Tekrar Dene', 'Retry')),
                         ),
                       ],
                     ),
@@ -2357,7 +3139,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   scrollDirection: Axis.horizontal,
                   itemBuilder: (context, i) {
-                    final p = _activeTopPicks()[i];
+                    final p = _displayTopPicks()[i];
                     final province = _provinces.firstWhere(
                       (pr) => pr['slug'] == _provinceSlug,
                       orElse: () => <String, dynamic>{},
@@ -2378,21 +3160,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             as String?;
                     return _TopPickCard(
                       place: p,
+                      locationLabel: _selectedProvinceName,
                       onTap: () => context.push(
                         '/map-explore',
                         extra: {
                           'lat': p.lat ?? provinceLat ?? _position?.latitude,
                           'lng': p.lng ?? provinceLng ?? _position?.longitude,
+                          'place_id': p.id,
                           'province_slug': _provinceSlug,
-                          'district_id': ?_districtId,
-                          'district_slug': ?districtSlug,
-                          'district_name': ?districtName,
+                          'district_id': _districtId,
+                          'district_slug': districtSlug,
+                          'district_name': districtName,
                         },
                       ),
                     );
                   },
                   separatorBuilder: (_, _) => const SizedBox(width: 12),
-                  itemCount: _activeTopPicks().length,
+                  itemCount: _displayTopPicks().length,
                 ),
         ),
       ],
@@ -2406,119 +3190,232 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         child: LinearProgressIndicator(minHeight: 2),
       );
     }
-    if (_smartSeason.isEmpty) return const SizedBox.shrink();
+    final filtered = _filteredSmartSeasonItems(limit: 12);
+    if (filtered.isEmpty) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 16),
-          child: Text(
-            'Bu Hafta Nereye Gidilir?',
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 18,
-              color: RouteviaColors.textPrimary,
-            ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                context.tr(
+                  'Bu Hafta Nereye Gidilir?',
+                  'Where to Go This Week?',
+                ),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 18,
+                  color: RouteviaColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                context.tr(
+                  '12 onerilik yakin, mevsim uyumlu ve otelsiz secim listesi.',
+                  'A 12-pick list tuned for proximity, season fit and no lodging.',
+                ),
+                style: const TextStyle(
+                  color: RouteviaColors.textSecondary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 10),
         SizedBox(
-          height: 126,
+          height: 214,
           child: ListView.separated(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             scrollDirection: Axis.horizontal,
-            itemCount: _smartSeason
-                .where((s) => s['category'] != 'lodging')
-                .toList()
-                .length,
+            itemCount: filtered.length,
             separatorBuilder: (_, _) => const SizedBox(width: 10),
             itemBuilder: (_, i) {
-              final filtered = _smartSeason
-                  .where((s) => s['category'] != 'lodging')
-                  .toList();
               final s = filtered[i];
+              final trustScore = (s['trust_score'] as num?)?.toDouble() ?? 0;
+              final seasonScore = (s['season_score'] as num?)?.toDouble() ?? 0;
+              final routeviaScore = ((trustScore * 0.6) + (seasonScore * 0.4))
+                  .clamp(0, 100)
+                  .toStringAsFixed(0);
               return GestureDetector(
-                onTap: () {
-                  final place = PlaceModel.fromMap({
-                    'id': s['id'],
-                    'name': s['name'],
-                    'slug': s['id'],
-                    'category': s['category'] ?? 'activity',
-                    'short_summary': s['why'] ?? '',
-                    'best_time': 'day',
-                    'duration_min': 60,
-                    'lat': s['lat'],
-                    'lng': s['lng'],
-                    'tags': ((s['tags'] as List?) ?? const []),
-                  });
-                  context.push('/place', extra: place);
-                },
+                onTap: () => context.push(
+                  '/map-explore',
+                  extra: {
+                    'lat': (s['lat'] as num?)?.toDouble(),
+                    'lng': (s['lng'] as num?)?.toDouble(),
+                    'place_id': s['id'] as String?,
+                    'province_slug': _provinceSlug,
+                    'district_id': _districtId,
+                    'district_name': _selectedDistrictNameOrNull,
+                  },
+                ),
                 child: Container(
-                  width: 230,
-                  padding: const EdgeInsets.all(12),
+                  width: 276,
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(18),
                     border: Border.all(color: RouteviaColors.border),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x120F172A),
+                        blurRadius: 20,
+                        offset: Offset(0, 10),
+                      ),
+                    ],
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        (s['name'] as String?) ?? '-',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        (s['why'] as String?) ?? '',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: RouteviaColors.textSecondary,
+                      ClipRRect(
+                        borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(18),
                         ),
-                      ),
-                      const Spacer(),
-                      Row(
-                        children: [
-                          const Icon(
-                            Icons.star_rounded,
-                            size: 14,
-                            color: Color(0xFFF59E0B),
-                          ),
-                          const SizedBox(width: 3),
-                          Text(
-                            (s['season_score'] as num?)?.toStringAsFixed(1) ??
-                                '-',
-                            style: const TextStyle(
-                              color: Color(0xFF92400E),
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12,
+                        child: Stack(
+                          children: [
+                            SizedBox(
+                              height: 116,
+                              width: double.infinity,
+                              child:
+                                  (s['cover_photo'] as String?)?.isNotEmpty ==
+                                      true
+                                  ? SafeNetworkImage(
+                                      url: s['cover_photo'] as String?,
+                                      fit: BoxFit.cover,
+                                    )
+                                  : Container(
+                                      decoration: const BoxDecoration(
+                                        gradient: LinearGradient(
+                                          colors: [
+                                            Color(0xFF0B1F3A),
+                                            Color(0xFF164E63),
+                                          ],
+                                          begin: Alignment.topLeft,
+                                          end: Alignment.bottomRight,
+                                        ),
+                                      ),
+                                      child: const Center(
+                                        child: Icon(
+                                          Icons.travel_explore_rounded,
+                                          color: Colors.white70,
+                                          size: 34,
+                                        ),
+                                      ),
+                                    ),
                             ),
-                          ),
-                          const Spacer(),
-                          if (s['category'] != null)
                             Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFE0F2FE),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                _categoryLabels(s['category'] as String),
-                                style: const TextStyle(
-                                  fontSize: 10,
-                                  color: Color(0xFF0369A1),
-                                  fontWeight: FontWeight.w600,
+                              height: 116,
+                              decoration: const BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [
+                                    Colors.transparent,
+                                    Color(0xB30F172A),
+                                  ],
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
                                 ),
                               ),
                             ),
-                        ],
+                            Positioned(
+                              left: 12,
+                              top: 12,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.92),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  _categoryLabels(
+                                    s['category'] as String? ?? 'activity',
+                                  ),
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF0F172A),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Positioned(
+                              left: 12,
+                              right: 12,
+                              bottom: 12,
+                              child: Text(
+                                (s['name'] as String?) ?? '-',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 17,
+                                  height: 1.2,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                (s['why'] as String?) ?? '',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 12.5,
+                                  color: RouteviaColors.textSecondary,
+                                  height: 1.35,
+                                ),
+                              ),
+                              const Spacer(),
+                              _ScorePill(
+                                icon: Icons.auto_awesome_rounded,
+                                color: const Color(0xFF0F766E),
+                                label: 'Routevia $routeviaScore / 100',
+                              ),
+                              const SizedBox(height: 10),
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.map_outlined,
+                                    size: 14,
+                                    color: RouteviaColors.textSecondary,
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Expanded(
+                                    child: Text(
+                                      (s['city'] as String?)?.isNotEmpty == true
+                                          ? s['city'] as String
+                                          : _selectedProvinceName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: RouteviaColors.textSecondary,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                  const Icon(
+                                    Icons.arrow_forward_rounded,
+                                    size: 16,
+                                    color: RouteviaColors.primary,
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -2552,14 +3449,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               children: [
                 const Icon(Icons.offline_pin, color: Color(0xFF0369A1)),
                 const SizedBox(width: 8),
-                const Expanded(
+                Expanded(
                   child: Text(
-                    'Offline Sehir Paketi (MVP)',
-                    style: TextStyle(fontWeight: FontWeight.w700),
+                    context.tr(
+                      'Offline Sehir Paketi (MVP)',
+                      'Offline City Pack (MVP)',
+                    ),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
                 Text(
-                  hasPack ? 'Hazir' : 'Yok',
+                  hasPack
+                      ? context.tr('Hazir', 'Ready')
+                      : context.tr('Yok', 'Unavailable'),
                   style: TextStyle(
                     color: hasPack
                         ? const Color(0xFF166534)
@@ -2587,15 +3489,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           }
                           _downloadOfflinePack();
                         },
-                  child: Text(_offlineBusy ? 'Indiriliyor...' : 'Paketi Indir'),
+                  child: Text(
+                    _offlineBusy
+                        ? context.tr('Indiriliyor...', 'Downloading...')
+                        : context.tr('Paketi Indir', 'Download Pack'),
+                  ),
                 ),
                 OutlinedButton(
                   onPressed: hasPack ? _openOfflinePack : null,
-                  child: const Text('Offline Ac'),
+                  child: Text(context.tr('Offline Ac', 'Open Offline')),
                 ),
                 OutlinedButton(
                   onPressed: hasPack ? _removeOfflinePack : null,
-                  child: const Text('Sil'),
+                  child: Text(context.tr('Sil', 'Delete')),
                 ),
                 OutlinedButton.icon(
                   onPressed: () {
@@ -2609,7 +3515,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     );
                   },
                   icon: const Icon(Icons.local_fire_department),
-                  label: const Text('Trend Harita'),
+                  label: Text(context.tr('Trend Harita', 'Trend Map')),
                 ),
               ],
             ),
@@ -2642,9 +3548,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
             children: [
-              const Text(
-                'Canli Durum',
-                style: TextStyle(
+              Text(
+                context.tr('Canli Durum', 'Live Status'),
+                style: const TextStyle(
                   fontWeight: FontWeight.w800,
                   fontSize: 18,
                   color: RouteviaColors.textPrimary,
@@ -2662,11 +3568,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ),
         const SizedBox(height: 10),
         if (available.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text(
-              'Canli sinyal geldikce burada gorunecek.',
-              style: TextStyle(color: RouteviaColors.textSecondary),
+              context.tr(
+                'Canli sinyal geldikce burada gorunecek.',
+                'This area fills as live signals arrive.',
+              ),
+              style: const TextStyle(color: RouteviaColors.textSecondary),
             ),
           )
         else
@@ -2839,62 +3748,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  Widget _buildStaySection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 16),
-          child: Text(
-            'Nerede Kalınır',
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 18,
-              letterSpacing: -0.2,
-              color: RouteviaColors.textPrimary,
-            ),
-          ),
-        ),
-        const SizedBox(height: 6),
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 16),
-          child: Text(
-            'Konaklama önerilerini gezi akışından ayrı gösteriyoruz.',
-            style: TextStyle(color: RouteviaColors.textSecondary, fontSize: 13),
-          ),
-        ),
-        const SizedBox(height: 10),
-        SizedBox(
-          height: 44,
-          child: ListView.separated(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            scrollDirection: Axis.horizontal,
-            itemBuilder: (context, i) {
-              final p = _stayPicks[i];
-              return ActionChip(
-                avatar: const Icon(
-                  Icons.hotel_rounded,
-                  size: 16,
-                  color: Color(0xFF7B1FA2),
-                ),
-                label: Text(_cleanPlaceName(p.name)),
-                onPressed: () => context.push('/place', extra: p),
-                backgroundColor: RouteviaColors.surface,
-                side: const BorderSide(color: RouteviaColors.border),
-                labelStyle: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
-              );
-            },
-            separatorBuilder: (_, _) => const SizedBox(width: 8),
-            itemCount: _stayPicks.length,
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _buildPromoBanner() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -2966,12 +3819,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
           TextButton(
             onPressed: _openPromoApplication,
-            child: const Text('Başvur'),
+            child: Text(context.tr('Başvur', 'Apply')),
           ),
           const SizedBox(width: 4),
           TextButton(
             onPressed: () => context.push('/legal?doc=ads'),
-            child: const Text('Politika'),
+            child: Text(context.tr('Politika', 'Policy')),
           ),
         ],
       ),
@@ -3958,9 +4811,14 @@ class _FilterChip extends StatelessWidget {
 }
 
 class _TopPickCard extends StatelessWidget {
-  const _TopPickCard({required this.place, required this.onTap});
+  const _TopPickCard({
+    required this.place,
+    required this.locationLabel,
+    required this.onTap,
+  });
 
   final PlaceModel place;
+  final String locationLabel;
   final VoidCallback onTap;
 
   static const _categoryColors = {
@@ -3973,6 +4831,7 @@ class _TopPickCard extends StatelessWidget {
     'canyon': Color(0xFFEF4444),
     'food': Color(0xFFEA580C),
     'cafe': Color(0xFFD97706),
+    'mall': Color(0xFF2563EB),
     'lodging': Color(0xFF7C3AED),
     'activity': Color(0xFF059669),
     'tour': Color(0xFF00C2A8),
@@ -3988,6 +4847,7 @@ class _TopPickCard extends StatelessWidget {
     'canyon': 'Kanyon',
     'food': 'Restoran',
     'cafe': 'Kafe',
+    'mall': 'Alışveriş',
     'lodging': 'Konaklama',
     'activity': 'Aktivite',
     'tour': 'Tur',
@@ -4003,18 +4863,55 @@ class _TopPickCard extends StatelessWidget {
     'canyon': Icons.terrain_rounded,
     'food': Icons.restaurant_rounded,
     'cafe': Icons.local_cafe_rounded,
+    'mall': Icons.shopping_bag_rounded,
     'lodging': Icons.hotel_rounded,
     'activity': Icons.directions_run_rounded,
     'tour': Icons.tour_rounded,
   };
 
+  int _routeviaScore() {
+    final base = place.routeviaScore > 0
+        ? place.routeviaScore
+        : (place.effectiveRating * 20);
+    return base.clamp(0, 100).round();
+  }
+
+  bool _isGoodNow() {
+    final bestTime = place.bestTime.toLowerCase();
+    final hour = DateTime.now().hour;
+    if (bestTime.contains('all')) return true;
+    if (bestTime.contains('day')) return hour >= 9 && hour <= 18;
+    if (bestTime.contains('morning')) return hour >= 7 && hour <= 11;
+    if (bestTime.contains('afternoon')) return hour >= 12 && hour <= 17;
+    if (bestTime.contains('sunset')) return hour >= 17 && hour <= 20;
+    if (bestTime.contains('night')) return hour >= 19 || hour <= 1;
+    return false;
+  }
+
+  List<String> _signals() {
+    final chips = <String>[];
+    final meters = place.metersFromUser;
+    if (meters != null && meters <= 3000) {
+      chips.add('Yakın');
+    }
+    if (_routeviaScore() >= 85) {
+      chips.add('Öne çıkan');
+    }
+    if (_isGoodNow()) {
+      chips.add('Şimdi uygun');
+    }
+    return chips.take(2).toList(growable: false);
+  }
+
   @override
   Widget build(BuildContext context) {
     final imageUrl = place.media.firstOrNull?.publicUrl;
-    final catColor = _categoryColors[place.category] ?? RouteviaColors.navyMid;
-    final catIcon = _categoryIcons[place.category] ?? Icons.place_rounded;
-    final catLabel = _categoryLabels[place.category] ?? place.category;
-    final rating = place.effectiveRating;
+    final displayCategory = _resolveDisplayCategory(place);
+    final catColor = _categoryColors[displayCategory] ?? RouteviaColors.navyMid;
+    final catIcon = _categoryIcons[displayCategory] ?? Icons.place_rounded;
+    final catLabel = _categoryLabels[displayCategory] ?? displayCategory;
+    final routeviaScore = _routeviaScore();
+    final signals = _signals();
 
     return GestureDetector(
       onTap: onTap,
@@ -4140,25 +5037,78 @@ class _TopPickCard extends StatelessWidget {
                           height: 1.2,
                         ),
                       ),
-                      if (rating > 0) ...[
-                        const SizedBox(height: 6),
-                        Row(
-                          children: [
-                            const Icon(
-                              Icons.star_rounded,
-                              size: 12,
-                              color: Color(0xFFFFB703),
-                            ),
-                            const SizedBox(width: 3),
-                            Text(
-                              rating.toStringAsFixed(1),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.location_on_outlined,
+                            size: 12,
+                            color: Colors.white70,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              locationLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                color: Colors.white,
+                                color: Colors.white70,
                                 fontSize: 11,
-                                fontWeight: FontWeight.w700,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
-                          ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.18),
+                          ),
+                        ),
+                        child: Text(
+                          'Routevia $routeviaScore/100',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      if (signals.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: signals
+                              .map(
+                                (signal) => Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    signal,
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              )
+                              .toList(growable: false),
                         ),
                       ],
                     ],
@@ -4170,6 +5120,47 @@ class _TopPickCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  String _resolveDisplayCategory(PlaceModel place) {
+    final values = <String>[
+      place.name.toLowerCase(),
+      place.category.toLowerCase(),
+      ...place.tags.map((tag) => tag.toLowerCase()),
+    ];
+    const foodNeedles = <String>[
+      'restaurant',
+      'restoran',
+      'lokanta',
+      'sofra',
+      'meyhane',
+      'mangal',
+      'kebap',
+      'doner',
+      'burger',
+      'kahvalti',
+      'cafe',
+      'kahve',
+      'coffee',
+      'food',
+    ];
+    if (values.any((value) => foodNeedles.any(value.contains))) {
+      return place.category == 'cafe' ? 'cafe' : 'food';
+    }
+    const mallNeedles = <String>[
+      'avm',
+      'alışveriş',
+      'alisveris',
+      'shopping',
+      'mall',
+      'outlet',
+      'çarşı',
+      'carsi',
+    ];
+    if (values.any((value) => mallNeedles.any(value.contains))) {
+      return 'mall';
+    }
+    return place.category;
   }
 }
 
@@ -4347,6 +5338,45 @@ class _RouteLinePainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
+class _ScorePill extends StatelessWidget {
+  const _ScorePill({
+    required this.icon,
+    required this.color,
+    required this.label,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Utility
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4369,15 +5399,19 @@ class _SmartCard {
     required this.icon,
     required this.eyebrow,
     required this.title,
+    this.subtitle,
     required this.chips,
     required this.onTap,
+    this.imageUrl,
   });
   final Color accentColor;
   final IconData icon;
   final String eyebrow;
   final String title;
+  final String? subtitle;
   final List<_SmartChip> chips;
   final VoidCallback onTap;
+  final String? imageUrl;
 }
 
 class _SmartSuggestionCard extends StatelessWidget {
@@ -4398,7 +5432,7 @@ class _SmartSuggestionCard extends StatelessWidget {
     return GestureDetector(
       onTap: card.onTap,
       child: Container(
-        width: 226,
+        width: 242,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(22),
           border: Border.all(color: accent.withValues(alpha: 0.28), width: 1),
@@ -4420,53 +5454,78 @@ class _SmartSuggestionCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(22),
           child: Stack(
             children: [
-              // ── Hero-card base gradient ──────────────────────────────────
-              Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: _bg,
-                    stops: [0.0, 0.35, 0.70, 1.0],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+              // ── Background: photo or dark-navy gradient ──────────────────
+              if (card.imageUrl != null && card.imageUrl!.isNotEmpty)
+                Positioned.fill(
+                  child: SafeNetworkImage(
+                    url: card.imageUrl,
+                    fit: BoxFit.cover,
+                  ),
+                )
+              else
+                Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: _bg,
+                      stops: [0.0, 0.35, 0.70, 1.0],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
                   ),
                 ),
-              ),
-              // ── Accent glow — top right (mirrors hero card's teal glow) ─
-              Positioned(
-                top: -28,
-                right: -18,
+              // ── Dark overlay so text stays readable over photos ──────────
+              Positioned.fill(
                 child: Container(
-                  width: 120,
-                  height: 120,
                   decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
+                    gradient: LinearGradient(
                       colors: [
-                        accent.withValues(alpha: 0.38),
-                        accent.withValues(alpha: 0.0),
+                        Colors.black.withValues(alpha: card.imageUrl != null ? 0.28 : 0.0),
+                        Colors.black.withValues(alpha: card.imageUrl != null ? 0.70 : 0.0),
                       ],
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
                     ),
                   ),
                 ),
               ),
-              // ── Subtle secondary glow — bottom left ──────────────────────
-              Positioned(
-                bottom: -16,
-                left: -10,
-                child: Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        accent.withValues(alpha: 0.14),
-                        accent.withValues(alpha: 0.0),
-                      ],
+              // ── Accent glow — top right (only when no photo) ─────────────
+              if (card.imageUrl == null || card.imageUrl!.isEmpty)
+                Positioned(
+                  top: -28,
+                  right: -18,
+                  child: Container(
+                    width: 120,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [
+                          accent.withValues(alpha: 0.38),
+                          accent.withValues(alpha: 0.0),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
+              // ── Subtle secondary glow — bottom left (only when no photo) ─
+              if (card.imageUrl == null || card.imageUrl!.isEmpty)
+                Positioned(
+                  bottom: -16,
+                  left: -10,
+                  child: Container(
+                    width: 80,
+                    height: 80,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [
+                          accent.withValues(alpha: 0.14),
+                          accent.withValues(alpha: 0.0),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               // ── Content ──────────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.all(16),
@@ -4519,6 +5578,20 @@ class _SmartSuggestionCard extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
+                    if (card.subtitle != null &&
+                        card.subtitle!.trim().isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        card.subtitle!,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.72),
+                          fontSize: 12,
+                          height: 1.3,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 8),
                     // Chips — accent-tinted pills
                     Wrap(
