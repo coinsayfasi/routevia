@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -22,12 +23,18 @@ import 'features/place/place_detail_screen.dart';
 import 'features/legal/consent_settings_screen.dart';
 import 'features/legal/legal_screen.dart';
 import 'features/premium/premium_screen.dart';
+import 'features/profile/my_content_screen.dart';
+import 'features/profile/saved_places_screen.dart';
 import 'features/profile/stats_screen.dart';
 import 'features/saved_import/saved_import_screen.dart';
 import 'features/shell/main_tabs_screen.dart';
 import 'features/shared/deep_link_resolver_screen.dart';
 import 'features/shared/share_token_route_screen.dart';
 import 'features/shared/shared_trip_screen.dart';
+import 'features/trips/community_post_detail_screen.dart';
+import 'features/trips/community_post_editor_screen.dart';
+import 'data/providers.dart';
+import 'models/community_post_models.dart';
 import 'models/trip_models.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
@@ -39,7 +46,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final isAuthRoute = state.fullPath == '/auth';
       final isShareRoute = state.fullPath == '/share/:token';
       final needsAuth =
-          state.fullPath == '/trips' || state.fullPath == '/saved-import';
+          state.fullPath == '/trips' ||
+          state.fullPath == '/community-post' ||
+          state.fullPath == '/community-post-editor' ||
+          state.fullPath == '/saved-import' ||
+          state.fullPath == '/saved-places';
 
       if (session == null && needsAuth) return '/auth';
       if (session != null && isAuthRoute) return '/home';
@@ -74,8 +85,26 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         },
       ),
       GoRoute(path: '/explore', redirect: (context, state) => '/home?tab=0'),
-      GoRoute(path: '/admin', builder: (context, state) => const AdminScreen()),
+      GoRoute(
+        path: '/admin',
+        builder: (context, state) => const _AdminRouteGuard(),
+      ),
       GoRoute(path: '/trips', redirect: (context, state) => '/home?tab=1'),
+      GoRoute(
+        path: '/community-post-editor',
+        builder: (context, state) => CommunityPostEditorScreen(
+          initialPost: state.extra as CommunityPostModel?,
+        ),
+      ),
+      GoRoute(
+        path: '/community-post',
+        redirect: (context, state) =>
+            state.extra is CommunityPostModel ? null : '/trips',
+        builder: (context, state) {
+          final post = state.extra as CommunityPostModel;
+          return CommunityPostDetailScreen(postId: post.id, initialPost: post);
+        },
+      ),
       GoRoute(path: '/eco', redirect: (context, state) => '/home?tab=2'),
       GoRoute(path: '/suggest', redirect: (context, state) => '/home?tab=3'),
       GoRoute(path: '/profile', redirect: (context, state) => '/home?tab=4'),
@@ -84,6 +113,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const PremiumScreen(),
       ),
       GoRoute(path: '/stats', builder: (context, state) => const StatsScreen()),
+      GoRoute(
+        path: '/saved-places',
+        builder: (context, state) => const SavedPlacesScreen(),
+      ),
+      GoRoute(
+        path: '/my-content',
+        builder: (context, state) => const MyContentScreen(),
+      ),
       GoRoute(
         path: '/consent',
         builder: (context, state) => const ConsentSettingsScreen(),
@@ -131,6 +168,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             plan: null,
             initialLat: (extra['lat'] as num?)?.toDouble(),
             initialLng: (extra['lng'] as num?)?.toDouble(),
+            initialPlaceId: extra['place_id'] as String?,
             initialProvinceSlug: extra['province_slug'] as String?,
             initialDistrictId: extra['district_id'] as String?,
             initialDistrictSlug: extra['district_slug'] as String?,
@@ -209,24 +247,41 @@ class _RouteviaAppState extends ConsumerState<RouteviaApp> {
   @override
   void initState() {
     super.initState();
+    unawaited(ref.read(appLocaleProvider.notifier).load());
     _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
       if (!mounted) return;
       final router = ref.read(appRouterProvider);
+
+      if (data.event == AuthChangeEvent.initialSession) {
+        return;
+      }
 
       if (data.event == AuthChangeEvent.passwordRecovery) {
         router.go('/reset-password');
         return;
       }
 
-      final uri = router.routerDelegate.currentConfiguration.uri;
-      final path = uri.path;
-      final tab = int.tryParse(uri.queryParameters['tab'] ?? '0') ?? 0;
-      final isProtectedHomeTab = path == '/home' && tab == 1;
-      final needsAuth =
-          path == '/saved-import' || path == '/admin' || isProtectedHomeTab;
-
-      if (data.session == null && needsAuth) {
-        router.go('/auth');
+      // On explicit sign-out or session loss, redirect to auth from any screen
+      // except screens that are already public (auth, onboarding, share, ref, reset-password)
+      if (data.event == AuthChangeEvent.signedOut) {
+        final uri = router.routerDelegate.currentConfiguration.uri;
+        final path = uri.path;
+        final publicPaths = {
+          '/auth',
+          '/onboarding',
+          '/reset-password',
+          '/location-setup',
+        };
+        final isPublic =
+            publicPaths.contains(path) ||
+            path.startsWith('/share/') ||
+            path.startsWith('/ref/') ||
+            path.startsWith('/place/') ||
+            path.startsWith('/plan/');
+        if (!isPublic) {
+          router.go('/auth');
+        }
+        return;
       }
     });
     try {
@@ -304,11 +359,52 @@ class _RouteviaAppState extends ConsumerState<RouteviaApp> {
   @override
   Widget build(BuildContext context) {
     final router = ref.watch(appRouterProvider);
+    final locale = ref.watch(appLocaleProvider);
     return MaterialApp.router(
       title: 'Routevia',
       theme: buildRouteviaTheme(),
       routerConfig: router,
       debugShowCheckedModeBanner: false,
+      locale: locale,
+      supportedLocales: const [Locale('tr'), Locale('en')],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+    );
+  }
+}
+
+class _AdminRouteGuard extends ConsumerWidget {
+  const _AdminRouteGuard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final session = Supabase.instance.client.auth.currentSession;
+    if (session == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (context.mounted) context.go('/auth');
+      });
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    return FutureBuilder<bool>(
+      future: ref.read(repositoryProvider).isCurrentUserAdmin(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snapshot.data != true) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (context.mounted) context.go('/home');
+          });
+          return const Scaffold(body: SizedBox.shrink());
+        }
+        return const AdminScreen();
+      },
     );
   }
 }

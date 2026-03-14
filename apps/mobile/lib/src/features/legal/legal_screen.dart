@@ -134,8 +134,8 @@ class LegalScreen extends StatelessWidget {
                 Expanded(
                   child: Text(
                     context.tr(
-                      'Guncel hukuki metin uygulama icinde gosteriliyor. Web yayini gecici olarak kullanima kapali olabilir.',
-                      'The current legal text is shown inside the app. Web publication may be temporarily unavailable.',
+                      'Guncel hukuki metin uygulama icinde gosterilir ve resmi web yasal sayfasi ile eslesir.',
+                      'The current legal text is shown in-app and matches the official web legal page.',
                     ),
                     style: const TextStyle(
                       color: Color(0xFF475569),

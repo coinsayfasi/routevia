@@ -1,13 +1,16 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/billing_catalog.dart';
 import '../../core/constants.dart';
 import '../../core/error_utils.dart';
+import '../../core/i18n.dart';
 import '../../core/theme.dart';
 import '../../data/providers.dart';
 import 'purchase_service.dart';
@@ -80,7 +83,7 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
     try {
       await _purchaseService.buy(product);
       if (!mounted) return;
-      setState(() => _billingNote = 'Store satin alma akisi baslatildi.');
+      setState(() => _billingNote = context.tr('Store satin alma akisi baslatildi.', 'Store purchase flow started.'));
     } catch (e) {
       if (!mounted) return;
       setState(() => _billingNote = friendlyError(e));
@@ -94,8 +97,7 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
     try {
       await _purchaseService.restore();
       if (!mounted) return;
-      setState(
-          () => _billingNote = 'Restore istegi store tarafina gonderildi.');
+      setState(() => _billingNote = context.tr('Restore istegi store tarafina gonderildi.', 'Restore request sent to the store.'));
     } catch (e) {
       if (!mounted) return;
       setState(() => _billingNote = friendlyError(e));
@@ -129,13 +131,17 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
             if (result['ok'] == true) {
               ref.read(premiumStateProvider.notifier).refresh();
               setState(() {
-                _billingNote =
-                    'Premium aktif edildi! Bitis: ${result['expires_at'] ?? '-'}';
+                _billingNote = context.tr(
+                  'Premium aktif edildi! Bitis: ${result['expires_at'] ?? '-'}',
+                  'Premium activated! Expiry: ${result['expires_at'] ?? '-'}',
+                );
               });
             } else {
               setState(() {
-                _billingNote =
-                    'Dogrulama basarisiz: ${result['error'] ?? 'Bilinmeyen hata'}';
+                _billingNote = context.tr(
+                  'Dogrulama basarisiz: ${result['error'] ?? 'Bilinmeyen hata'}',
+                  'Verification failed: ${result['error'] ?? 'Unknown error'}',
+                );
               });
             }
           } catch (e) {
@@ -145,15 +151,16 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
           }
           break;
         case PurchaseStatus.pending:
-          setState(
-              () => _billingNote = 'Odeme islemi store tarafinda beklemede.');
+          setState(() => _billingNote = context.tr('Odeme islemi store tarafinda beklemede.', 'Payment is pending on the store side.'));
           break;
         case PurchaseStatus.error:
-          setState(() => _billingNote =
-              'Store hata verdi: ${purchase.error?.message ?? "Bilinmeyen hata"}');
+          setState(() => _billingNote = context.tr(
+                'Store hata verdi: ${purchase.error?.message ?? "Bilinmeyen hata"}',
+                'Store returned an error: ${purchase.error?.message ?? "Unknown error"}',
+              ));
           break;
         case PurchaseStatus.canceled:
-          setState(() => _billingNote = 'Satin alma islemi iptal edildi.');
+          setState(() => _billingNote = context.tr('Satin alma islemi iptal edildi.', 'Purchase was canceled.'));
           break;
       }
     }
@@ -176,7 +183,9 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
     await SharePlus.instance.share(
       ShareParams(
         text:
-            'Routevia\'da gezilerini planla! Davet kodum: $_referralCode\nhttps://routevia.tabserve.com.tr/ref/$_referralCode',
+            'Routevia\'da gezilerini planla! Davet kodum: $_referralCode\n'
+            'Uygulamada ac: routevia://ref/$_referralCode\n'
+            'Kodun elle girisi: $_referralCode',
       ),
     );
   }
@@ -186,6 +195,11 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
     final premiumAsync = ref.watch(premiumStateProvider);
     final premium = premiumAsync.valueOrNull;
     final isPro = premium?.isPro ?? false;
+    final storeReady = _storeAvailable && _products.isNotEmpty;
+    final storeComingSoon = _storeAvailable && _products.isEmpty;
+    final missingKnownProducts = _notFoundProductIds
+        .where(BillingCatalog.storeProductIds.contains)
+        .toList();
 
     return Scaffold(
       appBar: AppBar(title: const Text('Routevia Pro')),
@@ -249,7 +263,9 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
                       Text(
                         isPro
                             ? 'Premium erisimin aktif.${premium?.expiresAt != null ? ' Bitis: ${premium!.expiresAt!.day}.${premium.expiresAt!.month}.${premium.expiresAt!.year}' : ''}'
-                            : 'Sinirsiz plan, trend harita, offline paketler ve daha fazlasi.',
+                            : storeReady
+                            ? 'Sinirsiz plan, trend harita, offline paketler ve daha fazlasi.'
+                            : 'Pro altyapisi hazir. Store acilana kadar davet ve destek akisi ile erisim verilebilir.',
                         style:
                             const TextStyle(color: Colors.white70, height: 1.5),
                       ),
@@ -283,8 +299,8 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
                 ],
 
                 // ── Feature Comparison ─────────────────────────────────
-                const Text(
-                  'Ozellik Karsilastirmasi',
+                Text(
+                  context.tr('Ozellik Karsilastirmasi', 'Feature Comparison'),
                   style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
                 ),
                 const SizedBox(height: 12),
@@ -346,9 +362,9 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
                 const SizedBox(height: 20),
 
                 // ── Price Cards (from store or fallback) ───────────────
-                if (_products.isNotEmpty) ...[
-                  const Text(
-                    'Planlar',
+                if (storeReady) ...[
+                  Text(
+                    context.tr('Planlar', 'Plans'),
                     style:
                         TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
                   ),
@@ -391,14 +407,93 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
                             onPressed: (_purchaseBusy || isPro)
                                 ? null
                                 : () => _buy(product),
-                            child:
-                                Text(isPro ? 'Aktif' : 'Satin Al'),
+                            child: Text(isPro ? context.tr('Aktif', 'Active') : context.tr('Satin Al', 'Buy')),
                           ),
                         ],
                       ),
                     ),
                   ),
                 ] else ...[
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: RouteviaColors.border),
+                    ),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Routevia Pro Aylik',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 16,
+                                ),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                BillingCatalog.targetMonthlyPriceLabel,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: RouteviaColors.tealDark,
+                                  fontSize: 18,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        OutlinedButton(
+                          onPressed: null,
+                          child: Text(context.tr('Store Bekleniyor', 'Store Pending')),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: RouteviaColors.border),
+                    ),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Routevia Pro Yillik',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 16,
+                                ),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                BillingCatalog.targetYearlyPriceLabel,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: RouteviaColors.tealDark,
+                                  fontSize: 18,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        OutlinedButton(
+                          onPressed: null,
+                          child: Text(context.tr('Store Bekleniyor', 'Store Pending')),
+                        ),
+                      ],
+                    ),
+                  ),
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
@@ -413,18 +508,18 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            _storeAvailable
-                                ? _notFoundProductIds.isNotEmpty
-                                    ? 'Store baglandi ama urunler bulunamadi. Gecici olarak davet kodu ve destek uzerinden Pro kullanimina devam edebilirsin.'
-                                    : 'Store urunleri henuz yayinlanmamis. Davet kodu ile 7 gun Pro kullanabilirsin.'
-                                : 'Store su an erisilebilir degil.',
+                            !_storeAvailable
+                                ? context.tr('Store su an erisilebilir degil. Bu asamada davet ve destek uzerinden Pro erisimi kullanilabilir.', 'Store is currently unavailable. During this phase, Pro can be accessed through invite and support flows.')
+                                : storeComingSoon
+                                ? context.tr('Store baglandi ancak Pro paketleri henuz yayinda degil. Kapali testte davet ve destek akisi aktif.', 'Store is connected but Pro products are not live yet. Invite and support flows remain active during closed testing.')
+                                : context.tr('Pro paketleri henuz hazir degil.', 'Pro plans are not ready yet.'),
                             style: const TextStyle(height: 1.45),
                           ),
                         ),
                       ],
                     ),
                   ),
-                  if (_notFoundProductIds.isNotEmpty) ...[
+                  if (kDebugMode && missingKnownProducts.isNotEmpty) ...[
                     const SizedBox(height: 10),
                     Container(
                       padding: const EdgeInsets.all(14),
@@ -434,7 +529,7 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
                         border: Border.all(color: const Color(0xFFE2E8F0)),
                       ),
                       child: Text(
-                        'Beklenen urun IDleri: ${_notFoundProductIds.join(', ')}',
+                        'Beklenen urun IDleri: ${missingKnownProducts.join(', ')}',
                         style: const TextStyle(
                           color: RouteviaColors.textSecondary,
                           fontSize: 12,
@@ -451,9 +546,11 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
                   children: [
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: _purchaseBusy ? null : _restorePurchases,
+                        onPressed: (_purchaseBusy || !storeReady)
+                            ? null
+                            : _restorePurchases,
                         icon: const Icon(Icons.restore, size: 18),
-                        label: const Text('Geri Yukle'),
+                        label: Text(context.tr('Geri Yukle', 'Restore')),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -461,7 +558,7 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
                       child: OutlinedButton.icon(
                         onPressed: _openSupport,
                         icon: const Icon(Icons.mail_outline, size: 18),
-                        label: const Text('Destek'),
+                        label: Text(context.tr('Destek', 'Support')),
                       ),
                     ),
                   ],
@@ -529,7 +626,9 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
                         child: FilledButton.icon(
                           onPressed: _shareReferral,
                           icon: const Icon(Icons.share, size: 18),
-                          label: const Text('Davet Kodunu Paylas'),
+                          label: Text(
+                            context.tr('Davet Kodunu Paylas', 'Share Invite Code'),
+                          ),
                           style: FilledButton.styleFrom(
                             backgroundColor: const Color(0xFF166534),
                           ),
@@ -555,7 +654,12 @@ class _FeatureRow {
 
 const _featureRows = <_FeatureRow>[
   _FeatureRow(Icons.map_outlined, 'Plan uretimi', '3/gun', 'Sinirsiz'),
-  _FeatureRow(Icons.route_outlined, 'Trip optimizasyonu', 'Temel', 'Gelismis'),
+  _FeatureRow(
+    Icons.route_outlined,
+    'Akilli gun akisi',
+    'Temel',
+    'Gelismis',
+  ),
   _FeatureRow(
       Icons.local_fire_department, 'Trend harita', 'Kilitli', 'Acik'),
   _FeatureRow(Icons.offline_pin, 'Offline paketler', 'Kilitli', 'Acik'),

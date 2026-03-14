@@ -1,7 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/error_utils.dart';
@@ -19,6 +22,7 @@ class _SuggestionScreenState extends ConsumerState<SuggestionScreen> {
   final _note = TextEditingController();
   final _source = TextEditingController();
   final _tags = TextEditingController();
+  final ImagePicker _picker = ImagePicker();
 
   List<Map<String, dynamic>> _provinces = const [];
   List<Map<String, dynamic>> _districts = const [];
@@ -27,6 +31,7 @@ class _SuggestionScreenState extends ConsumerState<SuggestionScreen> {
   String _category = 'historical';
   bool _loading = false;
   Position? _position;
+  File? _pickedImage;
 
   static const _categoryLabels = <String, String>{
     'museum': 'Müze',
@@ -91,6 +96,12 @@ class _SuggestionScreenState extends ConsumerState<SuggestionScreen> {
 
     setState(() => _loading = true);
     try {
+      String? sourceUrl = _source.text.trim().isEmpty ? null : _source.text.trim();
+      if (_pickedImage != null) {
+        sourceUrl = await ref.read(repositoryProvider).uploadSuggestionImage(
+          _pickedImage!,
+        );
+      }
       await ref
           .read(repositoryProvider)
           .submitPlaceSuggestion(
@@ -106,18 +117,36 @@ class _SuggestionScreenState extends ConsumerState<SuggestionScreen> {
                 .toList(),
             lat: _position?.latitude,
             lng: _position?.longitude,
-            sourceUrl: _source.text.trim().isEmpty ? null : _source.text.trim(),
+            sourceUrl: sourceUrl,
           );
       _toast('Önerin alındı! İnceleme sürecine girdi.');
       _name.clear();
       _note.clear();
       _source.clear();
       _tags.clear();
-      setState(() => _position = null);
+      setState(() {
+        _position = null;
+        _pickedImage = null;
+      });
     } catch (e) {
       _toast(friendlyError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _pickSuggestionImage() async {
+    try {
+      final picked = await _picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 2400,
+        maxHeight: 2400,
+        imageQuality: 88,
+      );
+      if (picked == null || !mounted) return;
+      setState(() => _pickedImage = File(picked.path));
+    } catch (e) {
+      _toast(friendlyError(e));
     }
   }
 
@@ -217,6 +246,28 @@ class _SuggestionScreenState extends ConsumerState<SuggestionScreen> {
               hintText: 'Ornek: Kayakoy Panorama Noktasi',
             ),
           ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _loading ? null : _pickSuggestionImage,
+            icon: const Icon(Icons.add_photo_alternate_outlined),
+            label: Text(
+              _pickedImage == null
+                  ? 'Kart gorseli yukle'
+                  : 'Gorsel secildi, degistir',
+            ),
+          ),
+          if (_pickedImage != null) ...[
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Image.file(
+                _pickedImage!,
+                height: 180,
+                width: double.infinity,
+                fit: BoxFit.cover,
+              ),
+            ),
+          ],
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
             initialValue: _category,

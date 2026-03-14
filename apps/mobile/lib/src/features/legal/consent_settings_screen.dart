@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/i18n.dart';
 import '../../data/providers.dart';
 
 class ConsentSettingsScreen extends ConsumerStatefulWidget {
@@ -45,7 +46,14 @@ class _ConsentSettingsScreenState extends ConsumerState<ConsentSettingsScreen> {
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Gizlilik tercihleriniz kaydedildi.')),
+      SnackBar(
+        content: Text(
+          context.tr(
+            'Gizlilik tercihleriniz kaydedildi.',
+            'Your privacy preferences were saved.',
+          ),
+        ),
+      ),
     );
     await _load();
   }
@@ -71,7 +79,7 @@ class _ConsentSettingsScreenState extends ConsumerState<ConsentSettingsScreen> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Gizlilik ve Veri Tercihleri')),
+      appBar: AppBar(title: Text(context.tr('Gizlilik ve Veri Tercihleri', 'Privacy and Data Preferences'))),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 48),
         children: [
@@ -86,13 +94,13 @@ class _ConsentSettingsScreenState extends ConsumerState<ConsentSettingsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Row(
+                Row(
                   children: [
-                    Icon(Icons.shield_outlined,
+                    const Icon(Icons.shield_outlined,
                         size: 16, color: Color(0xFF0C4A6E)),
-                    SizedBox(width: 6),
+                    const SizedBox(width: 6),
                     Text(
-                      'Verileriniz sizin kontrolünüzde',
+                      context.tr('Verileriniz sizin kontrolünüzde', 'Your data is under your control'),
                       style: TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 13,
@@ -102,9 +110,11 @@ class _ConsentSettingsScreenState extends ConsumerState<ConsentSettingsScreen> {
                   ],
                 ),
                 const SizedBox(height: 6),
-                const Text(
-                  'Aşağıdaki tercihleri istediğiniz zaman değiştirebilirsiniz. '
-                  'Temel hizmet işlevleri için veri işleme her zaman aktiftir.',
+                Text(
+                  context.tr(
+                    'Aşağıdaki tercihleri istediğiniz zaman değiştirebilirsiniz. Temel hizmet işlevleri için veri işleme her zaman aktiftir.',
+                    'You can change the preferences below at any time. Data processing required for core service functionality always remains active.',
+                  ),
                   style: TextStyle(
                     fontSize: 12.5,
                     height: 1.5,
@@ -119,7 +129,10 @@ class _ConsentSettingsScreenState extends ConsumerState<ConsentSettingsScreen> {
                           size: 12, color: Color(0xFF64748B)),
                       const SizedBox(width: 4),
                       Text(
-                        'Son güncelleme: ${_formatDate(_updatedAt)}',
+                        context.tr(
+                          'Son güncelleme: ${_formatDate(_updatedAt)}',
+                          'Last updated: ${_formatDate(_updatedAt)}',
+                        ),
                         style: const TextStyle(
                           fontSize: 11.5,
                           color: Color(0xFF64748B),
@@ -136,9 +149,11 @@ class _ConsentSettingsScreenState extends ConsumerState<ConsentSettingsScreen> {
           // Policy acceptance
           _ConsentTile(
             value: _policyAccepted,
-            title: 'Gizlilik politikasını ve kullanım şartlarını okudum',
-            subtitle:
-                'Gizlilik Politikası, Kullanım Şartları ve Sponsorlu İçerik kurallarını okudum ve kabul ediyorum.',
+            title: context.tr('Gizlilik politikasını ve kullanım şartlarını okudum', 'I have read the privacy policy and terms of use'),
+            subtitle: context.tr(
+              'Gizlilik Politikası, Kullanım Şartları ve Sponsorlu İçerik kurallarını okudum ve kabul ediyorum.',
+              'I have read and accept the Privacy Policy, Terms of Use, and Sponsored Content rules.',
+            ),
             icon: Icons.description_outlined,
             onChanged: (v) => setState(() => _policyAccepted = v),
           ),
@@ -147,10 +162,11 @@ class _ConsentSettingsScreenState extends ConsumerState<ConsentSettingsScreen> {
           // Analytics
           _ConsentTile(
             value: _analyticsEnabled,
-            title: 'Kullanım analitiği',
-            subtitle:
-                'Uygulama kalitesini artırmak için anonim kullanım verileri toplanabilir. '
-                'Kimliğiniz bu verilerle ilişkilendirilmez.',
+            title: context.tr('Kullanım analitiği', 'Usage analytics'),
+            subtitle: context.tr(
+              'Uygulama kalitesini artırmak için anonim kullanım verileri toplanabilir. Kimliğiniz bu verilerle ilişkilendirilmez.',
+              'Anonymous usage data may be collected to improve app quality. Your identity is not linked to this data.',
+            ),
             icon: Icons.bar_chart_outlined,
             onChanged: (v) => setState(() => _analyticsEnabled = v),
           ),
@@ -159,10 +175,11 @@ class _ConsentSettingsScreenState extends ConsumerState<ConsentSettingsScreen> {
           // Personalized ads
           _ConsentTile(
             value: _personalizedAdsEnabled,
-            title: 'Kişiselleştirilmiş sponsorlu içerik',
-            subtitle:
-                'İlgi alanlarınıza göre hedeflenmiş sponsorlu önerilerin gösterilmesine izin veriyorum. '
-                'Kapalıyken yalnızca konum/kategori bazlı bağlamsal içerik gösterilir.',
+            title: context.tr('Kişiselleştirilmiş sponsorlu içerik', 'Personalized sponsored content'),
+            subtitle: context.tr(
+              'İlgi alanlarınıza göre hedeflenmiş sponsorlu önerilerin gösterilmesine izin veriyorum. Kapalıyken yalnızca konum/kategori bazlı bağlamsal içerik gösterilir.',
+              'I allow sponsored suggestions targeted to my interests. When disabled, only contextual content based on location or category is shown.',
+            ),
             icon: Icons.ads_click_outlined,
             onChanged: (v) => setState(() => _personalizedAdsEnabled = v),
           ),
@@ -170,7 +187,7 @@ class _ConsentSettingsScreenState extends ConsumerState<ConsentSettingsScreen> {
 
           FilledButton(
             onPressed: _save,
-            child: const Text('Tercihleri Kaydet'),
+            child: Text(context.tr('Tercihleri Kaydet', 'Save Preferences')),
           ),
           const SizedBox(height: 10),
 
@@ -178,7 +195,7 @@ class _ConsentSettingsScreenState extends ConsumerState<ConsentSettingsScreen> {
           OutlinedButton.icon(
             onPressed: () => context.push('/legal?doc=privacy'),
             icon: const Icon(Icons.open_in_new, size: 16),
-            label: const Text('Gizlilik Politikasını Görüntüle'),
+            label: Text(context.tr('Gizlilik Politikasını Görüntüle', 'View Privacy Policy')),
           ),
         ],
       ),

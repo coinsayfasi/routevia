@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'src/app.dart';
 import 'src/core/constants.dart';
+import 'src/core/firebase_runtime.dart';
 import 'src/data/local_cache.dart';
 
 Future<void> main() async {
@@ -30,6 +31,7 @@ Future<void> main() async {
       PlatformDispatcher.instance.onError = (error, stack) {
         debugPrint('Uncaught platform error: $error');
         debugPrintStack(stackTrace: stack);
+        unawaited(FirebaseRuntime.recordError(error, stack, fatal: true));
         return true;
       };
       runApp(const ProviderScope(child: _BootstrapApp()));
@@ -106,6 +108,12 @@ class _BootstrapAppState extends State<_BootstrapApp>
       );
     }
     try {
+      await FirebaseRuntime.initialize();
+    } catch (e) {
+      debugPrint('[bootstrap] Firebase fail: $e');
+    }
+
+    try {
       await Supabase.initialize(
         url: AppConstants.supabaseUrl,
         anonKey: AppConstants.supabaseAnonKey,
@@ -122,6 +130,12 @@ class _BootstrapAppState extends State<_BootstrapApp>
         debugPrint('[bootstrap] Supabase fail: $e');
         rethrow;
       }
+    }
+
+    try {
+      await FirebaseRuntime.registerPushIfAllowed();
+    } catch (e) {
+      debugPrint('[bootstrap] Firebase push registration fail: $e');
     }
   }
 

@@ -71,6 +71,10 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
               : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 48),
                   children: [
+                    // ── Explorer Score ─────────────────────────────────
+                    _ExplorerScoreCard(stats: _stats),
+                    const SizedBox(height: 16),
+
                     // ── Summary Cards ──────────────────────────────────
                     Wrap(
                       spacing: 12,
@@ -284,6 +288,153 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
             ),
           ),
       ],
+    );
+  }
+}
+
+// ── Explorer Score Card ───────────────────────────────────────────────────────
+// Gamified score derived from check-ins, favorites, reviews, trips, cities.
+// Shown at top of stats screen to motivate continued exploration.
+
+class _ExplorerScoreCard extends StatelessWidget {
+  const _ExplorerScoreCard({required this.stats});
+
+  final Map<String, dynamic> stats;
+
+  static const _levels = [
+    (0,    99,   'Yeni Gezgin',   '🧭'),
+    (100,  299,  'Gezgin',        '🚶'),
+    (300,  699,  'Kaşif',         '🗺️'),
+    (700,  1499, 'Usta Kaşif',    '🏆'),
+    (1500, 9999, 'Efsane Gezgin', '⭐'),
+  ];
+
+  int _score() {
+    final checkins = (stats['checkins'] as num?)?.toInt() ?? 0;
+    final favorites = (stats['favorites'] as num?)?.toInt() ?? 0;
+    final reviews = (stats['reviews'] as num?)?.toInt() ?? 0;
+    final trips = (stats['trips'] as num?)?.toInt() ?? 0;
+    final cities = (stats['cities_visited'] as num?)?.toInt() ?? 0;
+    return checkins * 10 + favorites * 5 + reviews * 15 + trips * 20 + cities * 25;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final score = _score();
+
+    // Find current and next level
+    int currentMin = 0;
+    String label = 'Yeni Gezgin';
+    String emoji = '🧭';
+    int nextMin = 100;
+    String nextLabel = 'Gezgin';
+    String nextEmoji = '🚶';
+    bool isMaxLevel = false;
+
+    for (var i = 0; i < _levels.length; i++) {
+      final l = _levels[i];
+      if (score >= l.$1) {
+        currentMin = l.$1;
+        label = l.$3;
+        emoji = l.$4;
+        if (i + 1 < _levels.length) {
+          nextMin = _levels[i + 1].$1;
+          nextLabel = _levels[i + 1].$3;
+          nextEmoji = _levels[i + 1].$4;
+          isMaxLevel = false;
+        } else {
+          isMaxLevel = true;
+        }
+      }
+    }
+
+    final progress = isMaxLevel
+        ? 1.0
+        : ((score - currentMin) / (nextMin - currentMin)).clamp(0.0, 1.0);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0B3B68), Color(0xFF1A5F9E)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(emoji, style: const TextStyle(fontSize: 32)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 18,
+                      ),
+                    ),
+                    Text(
+                      '$score Keşif Puanı',
+                      style: const TextStyle(
+                        color: Color(0xFFBFD0E2),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (!isMaxLevel) ...[
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Sonraki: $nextLabel $nextEmoji',
+                  style: const TextStyle(
+                    color: Color(0xFFBFD0E2),
+                    fontSize: 11,
+                  ),
+                ),
+                Text(
+                  '${nextMin - score} puan kaldı',
+                  style: const TextStyle(
+                    color: Color(0xFFBFD0E2),
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: progress.clamp(0.0, 1.0),
+                minHeight: 6,
+                backgroundColor: const Color(0xFF1A4A7A),
+                valueColor: const AlwaysStoppedAnimation(Color(0xFF60A5FA)),
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          const Text(
+            'Check-in ×10  •  Favori ×5  •  Yorum ×15  •  Gezi ×20  •  Şehir ×25',
+            style: TextStyle(
+              color: Color(0xFF7BA8CF),
+              fontSize: 10,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

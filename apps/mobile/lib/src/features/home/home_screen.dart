@@ -15,9 +15,11 @@ import '../../core/i18n.dart';
 import '../../core/premium_gate.dart';
 import '../../core/theme.dart';
 import '../../core/widgets/ad_banner.dart';
+import '../../data/fallback_provinces.dart';
 import '../../data/providers.dart';
 import '../../data/must_see_places.dart';
 import '../../data/routevia_repository.dart';
+import '../../models/weather_models.dart';
 import '../../models/trip_models.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
@@ -78,6 +80,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // Pexels destination cover
   String? _coverImageUrl;
   bool _coverLoading = false;
+
+  // Weather
+  WeatherData? _weather;
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -1056,6 +1061,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       });
       unawaited(_loadSmartSeason());
       unawaited(_loadLiveStatusForTopPicks());
+      unawaited(_loadWeather());
     } catch (_) {
       serviceError = true;
       var places = await _fallbackTopPicks(
@@ -1097,8 +1103,49 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       });
       unawaited(_loadSmartSeason());
       unawaited(_loadLiveStatusForTopPicks());
+      unawaited(_loadWeather());
     } finally {
       if (mounted) setState(() => _popularLoading = false);
+    }
+  }
+
+  Future<void> _loadWeather() async {
+    final slug = _provinceSlug;
+    if (slug == null) return;
+
+    // Look up coordinates — try _provinces first, then kFallbackProvinces
+    Map<String, dynamic> province = _provinces.firstWhere(
+      (p) => p['slug'] == slug,
+      orElse: () => const {},
+    );
+    double? lat = (province['lat'] as num?)?.toDouble();
+    double? lng = (province['lng'] as num?)?.toDouble();
+
+    if (lat == null || lng == null) {
+      province = kFallbackProvinces.firstWhere(
+        (p) => p['slug'] == slug,
+        orElse: () => const {},
+      );
+      lat = (province['lat'] as num?)?.toDouble();
+      lng = (province['lng'] as num?)?.toDouble();
+    }
+    if (lat == null || lng == null) return;
+
+    final cityName = (province['name'] as String?)?.isNotEmpty == true
+        ? province['name'] as String
+        : slug;
+
+    try {
+      final data = await ref.read(repositoryProvider).getWeather(
+            citySlug: slug,
+            cityName: cityName,
+            lat: lat,
+            lng: lng,
+          );
+      if (!mounted) return;
+      setState(() => _weather = data);
+    } catch (_) {
+      // Non-fatal — weather is enhancement only
     }
   }
 
@@ -1751,8 +1798,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       const SizedBox(height: 20),
                       _buildLocationSelector(),
                       _buildDestinationCover(),
-                      const SizedBox(height: 20),
-                      _buildSmartContextSection(),
+                      const SizedBox(height: 12),
+                      _buildWeatherSection(),
+                      const SizedBox(height: 8),
                       _buildPersonalSuggestionsSection(),
                       _buildSmartSeasonSection(),
                       _buildOfflinePackSection(),
@@ -2447,6 +2495,134 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   // ── Smart Context Section ─────────────────────────────────────────────────
+
+  Widget _buildWeatherSection() {
+    final w = _weather;
+    if (w == null) return const SizedBox.shrink();
+
+    final bool hasRain = w.precipitationProbability >= 30;
+
+    const modeColors = {
+      'outdoor': Color(0xFF2E7D32),
+      'indoor':  Color(0xFF1565C0),
+      'sunset':  Color(0xFFE65100),
+      'mixed':   Color(0xFF00695C),
+    };
+    const modeLabels = {
+      'outdoor': 'Dışarı çıkmak için güzel',
+      'indoor':  'Kapalı mekanlar için ideal',
+      'sunset':  'Gün batımı vakti',
+      'mixed':   'Karma aktiviteler uygun',
+    };
+    const modeIcons = {
+      'outdoor': '🌳',
+      'indoor':  '🏛️',
+      'sunset':  '🌅',
+      'mixed':   '🌆',
+    };
+
+    final accent = modeColors[w.suggestionMode] ?? const Color(0xFF0B3B68);
+    final modeLabel = modeLabels[w.suggestionMode] ?? '';
+    final modeIcon = modeIcons[w.suggestionMode] ?? '🌤️';
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFBFD0E2)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.06),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            // Big emoji
+            Text(w.conditionEmoji,
+                style: const TextStyle(fontSize: 40)),
+            const SizedBox(width: 14),
+            // Temp + condition
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        '${w.temperature.round()}°',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 32,
+                          height: 1,
+                          color: Color(0xFF0B3B68),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Text(
+                          w.conditionText,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF475569),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  // Suggestion mode chip
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '$modeIcon $modeLabel',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: accent,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // Right side details
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                if (hasRain)
+                  Text('💧 ${w.precipitationProbability}%',
+                      style: const TextStyle(
+                          fontSize: 12, color: Color(0xFF0284C7),
+                          fontWeight: FontWeight.w600)),
+                const SizedBox(height: 4),
+                Text('💨 ${w.windSpeed.round()} km/h',
+                    style: const TextStyle(
+                        fontSize: 12, color: Color(0xFF94A3B8))),
+                const SizedBox(height: 4),
+                Text('💧 ${w.humidity}%',
+                    style: const TextStyle(
+                        fontSize: 12, color: Color(0xFF94A3B8))),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _buildSmartContextSection() {
     final now = DateTime.now();
@@ -3211,18 +3387,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   color: RouteviaColors.textPrimary,
                 ),
               ),
-              const SizedBox(height: 4),
-              Text(
-                context.tr(
-                  '12 onerilik yakin, mevsim uyumlu ve otelsiz secim listesi.',
-                  'A 12-pick list tuned for proximity, season fit and no lodging.',
+              const SizedBox(height: 8),
+              if (_weather != null)
+                _HomeWeatherChip(weather: _weather!)
+              else
+                Text(
+                  context.tr(
+                    'Yakin, mevsim uyumlu ve otelsiz secim listesi.',
+                    'Proximity-tuned, seasonal picks without lodging.',
+                  ),
+                  style: const TextStyle(
+                    color: RouteviaColors.textSecondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
-                style: const TextStyle(
-                  color: RouteviaColors.textSecondary,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
             ],
           ),
         ),
@@ -5651,4 +5830,82 @@ String _cleanPlaceName(String raw) {
         .trim();
   }
   return raw;
+}
+
+
+// ── Home Weather Chip ─────────────────────────────────────────────────────────
+// Compact one-line weather strip shown under "Bu Hafta Nereye Gidilir?" header.
+// Replaces the static subtitle; contextualises the smart season picks.
+
+class _HomeWeatherChip extends StatelessWidget {
+  const _HomeWeatherChip({required this.weather});
+  final WeatherData weather;
+
+  static const _modeLabel = {
+    'outdoor': 'Dışarısı güzel, doğa rotaları öne çıkarıldı',
+    'indoor':  'Kapalı mekanlar öne çıkarıldı',
+    'sunset':  'Gün batımı vakti, manzara noktaları önce',
+    'mixed':   'Karma öneri listesi hazırlandı',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final label = _modeLabel[weather.suggestionMode]
+        ?? 'Haftalık seçim listesi hazırlandı';
+    final hasRain = weather.precipitationProbability >= 30;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0F6FF),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFBFD0E2)),
+      ),
+      child: Row(
+        children: [
+          Text(weather.conditionEmoji,
+              style: const TextStyle(fontSize: 20)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      '${weather.temperature.round()}°  ${weather.conditionText}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                        color: Color(0xFF0B3B68),
+                      ),
+                    ),
+                    if (hasRain) ...[
+                      const SizedBox(width: 6),
+                      Text(
+                        '💧${weather.precipitationProbability}%',
+                        style: const TextStyle(
+                            fontSize: 11, color: Color(0xFF0284C7)),
+                      ),
+                    ],
+                  ],
+                ),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF64748B),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            '💨 ${weather.windSpeed.round()} km/h',
+            style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+          ),
+        ],
+      ),
+    );
+  }
 }

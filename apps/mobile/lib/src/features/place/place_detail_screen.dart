@@ -9,6 +9,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/error_utils.dart';
+import '../../core/i18n.dart';
 import '../../core/theme.dart';
 import '../../core/widgets/ad_banner.dart';
 import '../../data/providers.dart';
@@ -58,8 +59,11 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
   List<PlacePhotoModel> _photos = const [];
   Map<String, dynamic>? _trustMetric;
   Map<String, dynamic>? _liveStatus;
+  List<Map<String, dynamic>> _placeStories = const [];
   bool _posting = false;
   bool _uploadingPhoto = false;
+  bool _favoriteActive = false;
+  bool _checkinActive = false;
   int _rating = 5;
   final Set<String> _flags = {};
   final TextEditingController _commentController = TextEditingController();
@@ -83,21 +87,9 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
         photos = await repo.getPlacePhotos(widget.place.id);
       } catch (_) {}
       if (!mounted) return;
-      final approvedMedia = photos
-          .where((photo) => photo.isApproved)
-          .map(
-            (photo) => MediaModel(
-              storagePath: photo.storagePath,
-              publicUrl: photo.imageUrl,
-              sortOrder: 0,
-            ),
-          )
-          .toList();
       setState(() {
         _photos = photos;
-        _detail = approvedMedia.isNotEmpty
-            ? detail.copyWith(media: approvedMedia)
-            : detail;
+        _detail = detail;
       });
     } catch (_) {
       setState(() => _detail = widget.place);
@@ -112,11 +104,19 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
       final live = await repo.getLiveStatusForPlaces([
         widget.place.id,
       ], hours: 6);
+      final savedState = await repo.getPlaceSavedState(widget.place.id);
       if (!mounted) return;
       setState(() {
         _trustMetric = trust;
         _liveStatus = live[widget.place.id];
+        _favoriteActive = savedState['favorite'] ?? false;
+        _checkinActive = savedState['checkin'] ?? false;
       });
+    } catch (_) {}
+    try {
+      final stories = await repo.getApprovedPlaceStories(widget.place.id);
+      if (!mounted) return;
+      setState(() => _placeStories = stories);
     } catch (_) {}
   }
 
@@ -124,8 +124,13 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
     if (!_isLoggedIn) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Yorum ve puan icin once giris yapmalisin.'),
+        SnackBar(
+          content: Text(
+            context.tr(
+              'Yorum ve puan icin once giris yapmalisin.',
+              'You need to sign in before posting a review or rating.',
+            ),
+          ),
         ),
       );
       context.push('/auth');
@@ -143,13 +148,15 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
             flags: _flags.toList(),
             commentShort: comment,
           );
-      await ref
-          .read(repositoryProvider)
-          .submitUserSignal(
-            placeId: widget.place.id,
-            type: 'rating',
-            rating: _rating.toDouble(),
-          );
+      try {
+        await ref
+            .read(repositoryProvider)
+            .submitUserSignal(
+              placeId: widget.place.id,
+              type: 'rating',
+              rating: _rating.toDouble(),
+            );
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
         _stats = stats;
@@ -157,14 +164,21 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
         _flags.clear();
         _commentController.clear();
       });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Yorum kaydedildi.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.tr(
+              'Yorumun alindi. Admin onayindan sonra yayinlanacak.',
+              'Your review was received. It will be published after admin approval.',
+            ),
+          ),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(friendlyError(e))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     } finally {
       if (mounted) setState(() => _posting = false);
     }
@@ -174,8 +188,13 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
     if (!_isLoggedIn) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Fotoğraf yüklemek için önce giriş yapmalısın.'),
+        SnackBar(
+          content: Text(
+            context.tr(
+              'Fotoğraf yüklemek için önce giriş yapmalısın.',
+              'You need to sign in before uploading a photo.',
+            ),
+          ),
         ),
       );
       context.push('/auth');
@@ -199,17 +218,20 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
       await _load();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Fotoğrafın alındı! Moderasyon onayının ardından yayınlanacak.',
+            context.tr(
+              'Fotoğrafın alındı! Moderasyon onayının ardından yayınlanacak.',
+              'Your photo was received. It will be published after moderation approval.',
+            ),
           ),
         ),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(friendlyError(e))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     } finally {
       if (mounted) setState(() => _uploadingPhoto = false);
     }
@@ -245,8 +267,7 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
               const SizedBox(height: 4),
               Text(
                 '$lat, $lng',
-                style:
-                    const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
               ),
               const SizedBox(height: 16),
               if (Platform.isIOS)
@@ -257,7 +278,8 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
                     Navigator.pop(ctx);
                     await launchUrl(
                       Uri.parse(
-                          'https://maps.apple.com/?daddr=$lat,$lng&q=$name'),
+                        'https://maps.apple.com/?daddr=$lat,$lng&q=$name',
+                      ),
                       mode: LaunchMode.externalApplication,
                     );
                   },
@@ -269,7 +291,8 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
                   Navigator.pop(ctx);
                   await launchUrl(
                     Uri.parse(
-                        'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng'),
+                      'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng',
+                    ),
                     mode: LaunchMode.externalApplication,
                   );
                 },
@@ -281,8 +304,7 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
                   Navigator.pop(ctx);
                   Clipboard.setData(ClipboardData(text: '$lat, $lng'));
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text('Koordinatlar kopyalandı.')),
+                    const SnackBar(content: Text('Koordinatlar kopyalandı.')),
                   );
                 },
               ),
@@ -298,9 +320,9 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
     final districtText = p.tags.isEmpty
         ? ''
         : ' - ${p.tags.take(2).join(", ")}';
+    final summaryLine = p.shortSummary.length > 25 ? '${p.shortSummary}\n' : '';
     final text =
-        '${p.name}$districtText\n'
-        '${p.shortSummary}\n'
+        '${p.name}$districtText\n$summaryLine'
         'routevia://place/${p.id}';
     await SharePlus.instance.share(ShareParams(text: text));
     await ref
@@ -313,16 +335,30 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
     if (session == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Check-in ve favori icin giris yapmalisin.'),
+        SnackBar(
+          content: Text(
+            context.tr(
+              'Check-in ve favori icin giris yapmalisin.',
+              'You need to sign in before using check-in and favorites.',
+            ),
+          ),
         ),
       );
       context.push('/auth');
       return;
     }
     try {
+      bool? activeState;
       if (type == 'checkin') {
-        await ref.read(repositoryProvider).addPlaceCheckin(widget.place.id);
+        activeState = await ref
+            .read(repositoryProvider)
+            .toggleCheckin(widget.place.id);
+        if (mounted) setState(() => _checkinActive = activeState ?? false);
+      } else if (type == 'favorite') {
+        activeState = await ref
+            .read(repositoryProvider)
+            .toggleFavorite(widget.place.id);
+        if (mounted) setState(() => _favoriteActive = activeState ?? false);
       } else {
         await ref
             .read(repositoryProvider)
@@ -337,53 +373,232 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
         SnackBar(
           content: Text(
             type == 'checkin'
-                ? 'Check-in kaydedildi'
+                ? (activeState == true
+                      ? 'Check-in kaydedildi'
+                      : 'Check-in kaldırıldı')
                 : type == 'favorite'
-                ? 'Favorilere eklendi'
+                ? (activeState == true
+                      ? 'Favorilere eklendi'
+                      : 'Favoriden kaldırıldı')
                 : 'Puan sinyali kaydedildi',
           ),
         ),
       );
-      await _load();
+      try {
+        await _load();
+      } catch (_) {}
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(friendlyError(e))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     }
   }
 
   String _flagLabel(String f) {
-    const map = {
-      'crowded': 'Kalabalık',
-      'family': 'Aile Dostu',
-      'quiet': 'Sakin',
-      'photo_spot': 'Fotoğraf Noktası',
-      'budget': 'Bütçe Dostu',
-      'sunset_worthy': 'Gün Batımı',
+    final map = {
+      'crowded': context.tr('Kalabalık', 'Crowded'),
+      'family': context.tr('Aile Dostu', 'Family Friendly'),
+      'quiet': context.tr('Sakin', 'Quiet'),
+      'photo_spot': context.tr('Fotoğraf Noktası', 'Photo Spot'),
+      'budget': context.tr('Bütçe Dostu', 'Budget Friendly'),
+      'sunset_worthy': context.tr('Gün Batımı', 'Sunset'),
     };
     return map[f] ?? f;
   }
 
   String _summaryText(PlaceStats? stats) {
     if (stats == null || stats.reviewCount == 0) {
-      return 'Bu yer icin ilk yorumu sen birak.';
+      return context.tr(
+        'Bu yer icin ilk yorumu sen birak.',
+        'Be the first to review this place.',
+      );
     }
-    return '${stats.reviewCount} topluluk yorumu, ${stats.checkinsCount} check-in ve ${stats.photoCount} fotoğraf var. Ortalama ${stats.avgRating.toStringAsFixed(1)} / 5.';
+    return context.tr(
+      '${stats.reviewCount} topluluk yorumu, ${stats.checkinsCount} check-in ve ${stats.photoCount} fotoğraf var. Ortalama ${stats.avgRating.toStringAsFixed(1)} / 5.',
+      '${stats.reviewCount} community reviews, ${stats.checkinsCount} check-ins, and ${stats.photoCount} photos. Average ${stats.avgRating.toStringAsFixed(1)} / 5.',
+    );
+  }
+
+  Future<void> _submitPlaceStory() async {
+    if (!_isLoggedIn) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.tr(
+              'Yer hikayesi paylaşmak için önce giriş yapmalısın.',
+              'Sign in before sharing a place story.',
+            ),
+          ),
+        ),
+      );
+      context.push('/auth');
+      return;
+    }
+    final titleCtrl = TextEditingController();
+    final storyCtrl = TextEditingController();
+    var factType = 'story';
+    final submitted = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setLocalState) => AlertDialog(
+          title: Text(
+            context.tr(
+              'Yer hikayesi veya gizli özelliği paylaş',
+              'Share a place story or hidden detail',
+            ),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: factType,
+                  items: [
+                    DropdownMenuItem(
+                      value: 'story',
+                      child: Text(context.tr('Hikâye', 'Story')),
+                    ),
+                    DropdownMenuItem(
+                      value: 'local_tip',
+                      child: Text(context.tr('Yerel İpucu', 'Local Tip')),
+                    ),
+                    DropdownMenuItem(
+                      value: 'history_note',
+                      child: Text(context.tr('Tarih Notu', 'History Note')),
+                    ),
+                    DropdownMenuItem(
+                      value: 'hidden_feature',
+                      child: Text(
+                        context.tr('Bilinmeyen Özellik', 'Hidden Feature'),
+                      ),
+                    ),
+                  ],
+                  onChanged: (value) =>
+                      setLocalState(() => factType = value ?? 'story'),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: titleCtrl,
+                  decoration: InputDecoration(
+                    labelText: context.tr('Kısa Başlık', 'Short Title'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: storyCtrl,
+                  minLines: 5,
+                  maxLines: 8,
+                  decoration: InputDecoration(
+                    labelText: context.tr('Katkın', 'Your contribution'),
+                    hintText: context.tr(
+                      'Bu yerde insanların bilmediği bir detay, kısa hikâye veya yerel ipucu yaz.',
+                      'Share a detail, short story, or local tip people may not know.',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: Text(context.tr('Vazgeç', 'Cancel')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: Text(context.tr('Gönder', 'Submit')),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (submitted != true) return;
+    final trimmedTitle = titleCtrl.text.trim();
+    final trimmedStory = storyCtrl.text.trim();
+    if (trimmedStory.length < 40) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.tr(
+              'Yer hikayesi en az 40 karakter olmalı.',
+              'Place story must be at least 40 characters.',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+    if (trimmedStory.length > 2000) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.tr(
+              'Yer hikayesi 2000 karakteri aşamaz.',
+              'Place story cannot exceed 2000 characters.',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+    if (trimmedTitle.length > 140) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.tr(
+              'Kısa başlık 140 karakteri aşamaz.',
+              'Short title cannot exceed 140 characters.',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+    try {
+      await ref
+          .read(repositoryProvider)
+          .submitPlaceStoryContribution(
+            placeId: widget.place.id,
+            title: trimmedTitle,
+            storyText: trimmedStory,
+            factType: factType,
+          );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.tr(
+              'Katkın alındı. Moderasyon sonrası bu yerde görünebilir.',
+              'Your contribution was received and may appear here after moderation.',
+            ),
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+    }
   }
 
   String _ratingLabel(int rating) {
     switch (rating) {
       case 1:
-        return 'Çok kötü';
+        return context.tr('Çok kötü', 'Very bad');
       case 2:
-        return 'Kötü';
+        return context.tr('Kötü', 'Bad');
       case 3:
-        return 'Orta';
+        return context.tr('Orta', 'Average');
       case 4:
-        return 'İyi';
+        return context.tr('İyi', 'Good');
       case 5:
-        return 'Mükemmel!';
+        return context.tr('Mükemmel!', 'Excellent!');
       default:
         return '';
     }
@@ -545,14 +760,24 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
                     ),
                     const SizedBox(width: 8),
                     _ActionButton(
-                      icon: Icons.place,
+                      icon: _checkinActive
+                          ? Icons.check_circle_rounded
+                          : Icons.place,
                       label: 'Check-in',
+                      foreground: _checkinActive
+                          ? const Color(0xFFDC2626)
+                          : null,
                       onTap: () => _signal('checkin'),
                     ),
                     const SizedBox(width: 8),
                     _ActionButton(
-                      icon: Icons.favorite_border,
+                      icon: _favoriteActive
+                          ? Icons.favorite
+                          : Icons.favorite_border,
                       label: 'Favori',
+                      foreground: _favoriteActive
+                          ? const Color(0xFFDC2626)
+                          : null,
                       onTap: () => _signal('favorite'),
                     ),
                   ],
@@ -573,6 +798,158 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Topluluk fotoğrafı notu',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                        ),
+                      ),
+                      SizedBox(height: 6),
+                      Text(
+                        'Yalnızca kendi çektiğin veya kullanım hakkına sahip olduğun fotoğrafları yükle. Moderasyondan geçen görseller topluluk galerisinde ve seçilirse yerin ana görselinde kullanılabilir.',
+                        style: TextStyle(
+                          color: Color(0xFF475569),
+                          height: 1.45,
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Net kadraj, yatay çekim ve mekanın ayırt edici detayları daha hızlı öne çıkar.',
+                        style: TextStyle(
+                          color: Color(0xFF0F766E),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        context.tr(
+                          'Bu yerin hikâyesini sen tamamla',
+                          'Help complete this place story',
+                        ),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        context.tr(
+                          'Gittiğin yerle ilgili kısa hikâye, bilinmeyen özellik veya yerel ipucu ekleyebilirsin. Onay sonrası burada görünür.',
+                          'Add a short story, hidden feature, or local tip about this place. It appears here after approval.',
+                        ),
+                        style: const TextStyle(
+                          color: Color(0xFF475569),
+                          height: 1.45,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      FilledButton.tonalIcon(
+                        onPressed: _submitPlaceStory,
+                        icon: const Icon(Icons.auto_stories_outlined, size: 18),
+                        label: Text(
+                          context.tr(
+                            'Hikâye veya Özellik Ekle',
+                            'Add Story or Feature',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_placeStories.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          context.tr(
+                            'Topluluktan Yer Hikâyeleri',
+                            'Community Place Stories',
+                          ),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        ..._placeStories.map(
+                          (story) => Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  (story['title']
+                                              ?.toString()
+                                              .trim()
+                                              .isNotEmpty ??
+                                          false)
+                                      ? story['title'].toString()
+                                      : context.tr(
+                                          'Topluluk notu',
+                                          'Community note',
+                                        ),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  story['story_text']?.toString() ?? '',
+                                  style: const TextStyle(
+                                    color: Color(0xFF475569),
+                                    height: 1.45,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${story['submitter_name'] ?? 'Routevia gezgini'} • ${story['fact_type'] ?? 'story'}',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Color(0xFF94A3B8),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
 
                 // Summary — sadece gerçek açıklama varsa göster (ilçe adı gibi kısa değerler atlanır)
@@ -1108,31 +1485,39 @@ class _ActionButton extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.onTap,
+    this.foreground,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback onTap;
+  final Color? foreground;
 
   @override
   Widget build(BuildContext context) {
+    final color = foreground ?? RouteviaColors.primary;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          border: Border.all(color: const Color(0xFFCBD5E1)),
+          color: color.withValues(alpha: 0.08),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 20, color: RouteviaColors.primary),
+            Icon(icon, size: 20, color: color),
             const SizedBox(height: 2),
             Text(
               label,
-              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
             ),
           ],
         ),

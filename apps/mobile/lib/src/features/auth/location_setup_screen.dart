@@ -78,6 +78,7 @@ class _LocationSetupScreenState extends ConsumerState<LocationSetupScreen> {
     setState(() => _saving = true);
     try {
       final cache = ref.read(localCacheProvider);
+      await cache.setLocationSetupSkipped(false);
       await cache.setPreferredProvinceSlug(provinceSlug);
       await cache.setPreferredDistrictId(_districtId);
 
@@ -92,11 +93,7 @@ class _LocationSetupScreenState extends ConsumerState<LocationSetupScreen> {
       if (lat != null && lng != null) {
         context.go(
           '/map-explore',
-          extra: {
-            'lat': lat,
-            'lng': lng,
-            'province_slug': provinceSlug,
-          },
+          extra: {'lat': lat, 'lng': lng, 'province_slug': provinceSlug},
         );
       } else {
         context.go('/home');
@@ -106,10 +103,23 @@ class _LocationSetupScreenState extends ConsumerState<LocationSetupScreen> {
     }
   }
 
+  Future<void> _skipForNow() async {
+    setState(() => _saving = true);
+    try {
+      final cache = ref.read(localCacheProvider);
+      await cache.setLocationSetupSkipped(true);
+      await cache.setPreferredProvinceSlug(null);
+      await cache.setPreferredDistrictId(null);
+      if (!mounted) return;
+      context.go('/home');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   String get _selectedProvinceName {
     if (_provinceSlug == null) return 'İl Seç';
-    return _provinces
-            .firstWhere(
+    return _provinces.firstWhere(
               (p) => p['slug'] == _provinceSlug,
               orElse: () => <String, dynamic>{},
             )['name']
@@ -119,8 +129,7 @@ class _LocationSetupScreenState extends ConsumerState<LocationSetupScreen> {
 
   String get _selectedDistrictName {
     if (_districtId == null || _districts.isEmpty) return 'İlçe Seç';
-    return _districts
-            .firstWhere(
+    return _districts.firstWhere(
               (d) => d['id'] == _districtId,
               orElse: () => <String, dynamic>{},
             )['name']
@@ -152,16 +161,12 @@ class _LocationSetupScreenState extends ConsumerState<LocationSetupScreen> {
       isScrollControlled: true,
       useSafeArea: true,
       showDragHandle: true,
-      builder: (ctx) => _DistrictPickerSheet(
-        districts: _districts,
-        selectedId: _districtId,
-      ),
+      builder: (ctx) =>
+          _DistrictPickerSheet(districts: _districts, selectedId: _districtId),
     );
     if (!mounted) return;
     if (selected != null) {
-      setState(
-        () => _districtId = selected == '__all__' ? null : selected,
-      );
+      setState(() => _districtId = selected == '__all__' ? null : selected);
     }
   }
 
@@ -357,7 +362,7 @@ class _LocationSetupScreenState extends ConsumerState<LocationSetupScreen> {
                         SizedBox(
                           width: double.infinity,
                           child: OutlinedButton(
-                            onPressed: () => context.go('/home'),
+                            onPressed: _saving ? null : _skipForNow,
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 15),
                               shape: RoundedRectangleBorder(
@@ -417,7 +422,9 @@ class _SelectorButton extends StatelessWidget {
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
         decoration: BoxDecoration(
-          color: disabled ? RouteviaColors.surfaceVariant : RouteviaColors.surface,
+          color: disabled
+              ? RouteviaColors.surfaceVariant
+              : RouteviaColors.surface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: hasValue && !disabled
@@ -460,7 +467,9 @@ class _SelectorButton extends StatelessWidget {
                         color: hasValue
                             ? RouteviaColors.textPrimary
                             : RouteviaColors.textTertiary,
-                        fontWeight: hasValue ? FontWeight.w600 : FontWeight.w400,
+                        fontWeight: hasValue
+                            ? FontWeight.w600
+                            : FontWeight.w400,
                         fontSize: 15,
                       ),
                     ),
@@ -520,10 +529,8 @@ class _ProvincePickerSheetState extends State<_ProvincePickerSheet> {
       _filtered = q.isEmpty
           ? widget.provinces
           : widget.provinces
-              .where(
-                (p) => (p['name'] as String).toLowerCase().contains(q),
-              )
-              .toList();
+                .where((p) => (p['name'] as String).toLowerCase().contains(q))
+                .toList();
     });
   }
 
@@ -608,8 +615,9 @@ class _ProvincePickerSheetState extends State<_ProvincePickerSheet> {
                             : null,
                         onTap: () => Navigator.of(ctx).pop(slug),
                         selected: isSelected,
-                        selectedTileColor:
-                            RouteviaColors.teal.withValues(alpha: 0.05),
+                        selectedTileColor: RouteviaColors.teal.withValues(
+                          alpha: 0.05,
+                        ),
                       );
                     },
                   ),
@@ -661,10 +669,8 @@ class _DistrictPickerSheetState extends State<_DistrictPickerSheet> {
       _filtered = q.isEmpty
           ? widget.districts
           : widget.districts
-              .where(
-                (d) => (d['name'] as String).toLowerCase().contains(q),
-              )
-              .toList();
+                .where((d) => (d['name'] as String).toLowerCase().contains(q))
+                .toList();
     });
   }
 
@@ -733,8 +739,9 @@ class _DistrictPickerSheetState extends State<_DistrictPickerSheet> {
                         : null,
                     onTap: () => Navigator.of(ctx).pop('__all__'),
                     selected: isSelected,
-                    selectedTileColor:
-                        RouteviaColors.teal.withValues(alpha: 0.05),
+                    selectedTileColor: RouteviaColors.teal.withValues(
+                      alpha: 0.05,
+                    ),
                   );
                 }
                 final d = _filtered[i - 1];
@@ -745,8 +752,9 @@ class _DistrictPickerSheetState extends State<_DistrictPickerSheet> {
                   title: Text(
                     name,
                     style: TextStyle(
-                      fontWeight:
-                          isSelected ? FontWeight.w700 : FontWeight.w500,
+                      fontWeight: isSelected
+                          ? FontWeight.w700
+                          : FontWeight.w500,
                       color: isSelected
                           ? RouteviaColors.teal
                           : RouteviaColors.textPrimary,
@@ -760,8 +768,9 @@ class _DistrictPickerSheetState extends State<_DistrictPickerSheet> {
                       : null,
                   onTap: () => Navigator.of(ctx).pop(id),
                   selected: isSelected,
-                  selectedTileColor:
-                      RouteviaColors.teal.withValues(alpha: 0.05),
+                  selectedTileColor: RouteviaColors.teal.withValues(
+                    alpha: 0.05,
+                  ),
                 );
               },
             ),

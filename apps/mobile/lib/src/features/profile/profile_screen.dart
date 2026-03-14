@@ -22,6 +22,7 @@ class ProfileScreen extends ConsumerStatefulWidget {
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   bool _loading = true;
   bool _generatingReferral = false;
+  bool _savingPace = false;
   String? _error;
   Map<String, dynamic>? _profile;
   List<Map<String, dynamic>> _entitlements = const [];
@@ -67,24 +68,27 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   Future<void> _deleteAccount() async {
+    final isEnglish = Localizations.localeOf(context).languageCode == 'en';
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Hesabimi Sil'),
-        content: const Text(
-          'Hesabin ve tum verilerin kalici olarak silinecek. Bu islem geri alinamaz.',
+        title: Text(isEnglish ? 'Delete Account' : 'Hesabimi Sil'),
+        content: Text(
+          isEnglish
+              ? 'Your account and all data will be permanently deleted. This action cannot be undone.'
+              : 'Hesabin ve tum verilerin kalici olarak silinecek. Bu islem geri alinamaz.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Vazgec'),
+            child: Text(isEnglish ? 'Cancel' : 'Vazgec'),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: const Color(0xFFB42318),
             ),
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Evet, Sil'),
+            child: Text(isEnglish ? 'Yes, delete' : 'Evet, Sil'),
           ),
         ],
       ),
@@ -120,6 +124,31 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     } finally {
       if (mounted) setState(() => _generatingReferral = false);
+    }
+  }
+
+  Future<void> _updatePace(String pace) async {
+    if (_savingPace) return;
+    final normalized = pace.trim().toLowerCase();
+    setState(() => _savingPace = true);
+    try {
+      await ref
+          .read(repositoryProvider)
+          .updateProfilePreferences(prefPace: normalized);
+      if (!mounted) return;
+      setState(() {
+        _profile = {...?_profile, 'pref_pace': normalized};
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Tercih modu güncellendi.')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+    } finally {
+      if (mounted) setState(() => _savingPace = false);
     }
   }
 
@@ -196,8 +225,20 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     );
   }
 
+  String _paceLabel(String value, bool isEnglish) {
+    switch (value.trim().toLowerCase()) {
+      case 'slow':
+        return isEnglish ? 'Slow' : 'Yavas';
+      case 'fast':
+        return isEnglish ? 'Fast' : 'Hizli';
+      default:
+        return isEnglish ? 'Medium' : 'Orta';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isEnglish = Localizations.localeOf(context).languageCode == 'en';
     final isLoggedIn = Supabase.instance.client.auth.currentSession != null;
     final email = Supabase.instance.client.auth.currentUser?.email ?? 'Misafir';
     DateTime? premiumExpiry;
@@ -217,7 +258,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Profil')),
+      appBar: AppBar(title: Text(isEnglish ? 'Profile' : 'Profil')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -235,19 +276,25 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Hesabınla giriş yap',
+                        Text(
+                          isEnglish
+                              ? 'Sign in to your account'
+                              : 'Hesabınla giriş yap',
                           style: TextStyle(fontWeight: FontWeight.w800),
                         ),
                         const SizedBox(height: 6),
-                        const Text(
-                          'Profil, kaydetme ve premium özellikleri için oturum açman gerekiyor.',
+                        Text(
+                          isEnglish
+                              ? 'You need to sign in for profile, saved items, and premium features.'
+                              : 'Profil, kaydetme ve premium özellikleri için oturum açman gerekiyor.',
                           style: TextStyle(color: RouteviaColors.textSecondary),
                         ),
                         const SizedBox(height: 10),
                         FilledButton(
                           onPressed: () => context.go('/auth'),
-                          child: const Text('Giriş Ekranına Git'),
+                          child: Text(
+                            isEnglish ? 'Go to Sign In' : 'Giriş Ekranına Git',
+                          ),
                         ),
                       ],
                     ),
@@ -328,6 +375,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                             ),
                             child: Text(
                               premiumActive ? 'PRO aktif' : 'Ucretsiz plan',
+                              // keep short labels in both locales
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.w700,
@@ -360,8 +408,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   title: const Text('Routevia Pro'),
                   subtitle: Text(
                     premiumActive
-                        ? 'Premium erisimin aktif'
-                        : 'Sinirsiz plan, trend harita ve daha fazlasi',
+                        ? (isEnglish
+                              ? 'Your premium access is active'
+                              : 'Premium erisimin aktif')
+                        : (isEnglish
+                              ? 'Unlimited plans, trend map, and more'
+                              : 'Sinirsiz plan, trend harita ve daha fazlasi'),
                   ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => context.push('/premium'),
@@ -375,9 +427,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     ),
                     tileColor: Colors.white,
                     leading: const Icon(Icons.manage_accounts_outlined),
-                    title: const Text('Aboneligi Yonet'),
-                    subtitle: const Text(
-                      'Play Store uzerinden aboneligini yonet',
+                    title: Text(
+                      isEnglish ? 'Manage Subscription' : 'Aboneligi Yonet',
+                    ),
+                    subtitle: Text(
+                      isEnglish
+                          ? 'Manage your subscription via the store'
+                          : 'Play Store uzerinden aboneligini yonet',
                     ),
                     trailing: const Icon(Icons.open_in_new, size: 18),
                     onTap: () {
@@ -400,18 +456,182 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   ),
                   tileColor: Colors.white,
                   leading: const Icon(Icons.bar_chart_outlined),
-                  title: const Text('Gezgin Istatistikleri'),
-                  subtitle: const Text(
-                    'Check-in, favori, yorum ve daha fazlasi',
+                  title: Text(
+                    isEnglish ? 'Traveler Stats' : 'Gezgin Istatistikleri',
+                  ),
+                  subtitle: Text(
+                    isEnglish
+                        ? 'Check-ins, favorites, reviews, and more'
+                        : 'Check-in, favori, yorum ve daha fazlasi',
                   ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => context.push('/stats'),
                 ),
                 const SizedBox(height: 10),
-                _InfoTile(
-                  icon: Icons.travel_explore,
-                  title: 'Tercih Modu',
-                  value: (_profile?['pref_pace'] as String?) ?? 'medium',
+                ListTile(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    side: const BorderSide(color: RouteviaColors.border),
+                  ),
+                  tileColor: Colors.white,
+                  leading: const Icon(Icons.bookmarks_outlined),
+                  title: Text(
+                    isEnglish ? 'Saved Places' : 'Favoriler ve Check-inler',
+                  ),
+                  subtitle: Text(
+                    isEnglish
+                        ? 'Your favorites and visited places in one list'
+                        : 'Favorilerin ve gittigin yerler tek listede',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: isLoggedIn
+                      ? () => context.push('/saved-places')
+                      : null,
+                ),
+                const SizedBox(height: 10),
+                ListTile(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    side: const BorderSide(color: RouteviaColors.border),
+                  ),
+                  tileColor: Colors.white,
+                  leading: const Icon(Icons.collections_bookmark_outlined),
+                  title: Text(
+                    isEnglish
+                        ? 'My Reviews and Photos'
+                        : 'Yorumlarım ve Fotoğraflarım',
+                  ),
+                  subtitle: Text(
+                    isEnglish
+                        ? 'See your submitted content and moderation status'
+                        : 'Gönderdiğin içerikleri ve moderasyon durumlarını gör',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: isLoggedIn ? () => context.push('/my-content') : null,
+                ),
+                const SizedBox(height: 10),
+                ListTile(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    side: const BorderSide(color: RouteviaColors.border),
+                  ),
+                  tileColor: Colors.white,
+                  leading: const Icon(Icons.language_outlined),
+                  title: Text(isEnglish ? 'Language' : 'Dil'),
+                  subtitle: Text(switch (ref
+                      .watch(appLocaleProvider)
+                      ?.languageCode) {
+                    'en' => 'English',
+                    'tr' => 'Turkce',
+                    _ =>
+                      isEnglish
+                          ? 'Use system language'
+                          : 'Sistem dilini kullan',
+                  }),
+                  trailing: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value:
+                          ref.watch(appLocaleProvider)?.languageCode ??
+                          'system',
+                      items: [
+                        DropdownMenuItem(
+                          value: 'system',
+                          child: Text(isEnglish ? 'System' : 'Sistem'),
+                        ),
+                        const DropdownMenuItem(
+                          value: 'tr',
+                          child: Text('Turkce'),
+                        ),
+                        const DropdownMenuItem(
+                          value: 'en',
+                          child: Text('English'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value == null) return;
+                        ref
+                            .read(appLocaleProvider.notifier)
+                            .setLanguageCode(value);
+                      },
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: RouteviaColors.border),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.travel_explore,
+                        color: RouteviaColors.navyLight,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              isEnglish ? 'Travel Pace' : 'Tercih Modu',
+                              style: const TextStyle(
+                                color: RouteviaColors.textSecondary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              isEnglish
+                                  ? 'Affects planning density on future routes'
+                                  : 'Yeni rotalarda plan yogunlugunu belirler',
+                              style: const TextStyle(
+                                color: RouteviaColors.textSecondary,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value:
+                              ((_profile?['pref_pace'] as String?) ?? 'medium')
+                                  .toLowerCase(),
+                          items: [
+                            DropdownMenuItem(
+                              value: 'slow',
+                              child: Text(_paceLabel('slow', isEnglish)),
+                            ),
+                            DropdownMenuItem(
+                              value: 'medium',
+                              child: Text(_paceLabel('medium', isEnglish)),
+                            ),
+                            DropdownMenuItem(
+                              value: 'fast',
+                              child: Text(_paceLabel('fast', isEnglish)),
+                            ),
+                          ],
+                          onChanged: !isLoggedIn || _savingPace
+                              ? null
+                              : (value) {
+                                  if (value == null) return;
+                                  _updatePace(value);
+                                },
+                        ),
+                      ),
+                      if (_savingPace) ...[
+                        const SizedBox(width: 8),
+                        const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 10),
                 _buildReferralTile(isLoggedIn),
@@ -426,29 +646,50 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Politikalar ve Yasal',
+                      Text(
+                        isEnglish
+                            ? 'Policies and Legal'
+                            : 'Politikalar ve Yasal',
                         style: TextStyle(fontWeight: FontWeight.w700),
                       ),
                       const SizedBox(height: 8),
                       _ActionRow(
                         icon: Icons.privacy_tip_outlined,
-                        title: 'Gizlilik Politikasi',
+                        title: isEnglish
+                            ? 'Privacy Policy'
+                            : 'Gizlilik Politikasi',
                         onTap: () => context.push('/legal?doc=privacy'),
                       ),
                       _ActionRow(
                         icon: Icons.description_outlined,
-                        title: 'Kullanim Sartlari',
+                        title: isEnglish ? 'Terms of Use' : 'Kullanim Sartlari',
                         onTap: () => context.push('/legal?doc=terms'),
                       ),
                       _ActionRow(
                         icon: Icons.campaign_outlined,
-                        title: 'Reklam ve Sponsorlu Icerik',
+                        title: isEnglish
+                            ? 'Ads and Sponsored Content'
+                            : 'Reklam ve Sponsorlu Icerik',
                         onTap: () => context.push('/legal?doc=ads'),
                       ),
                       _ActionRow(
+                        icon: Icons.groups_outlined,
+                        title: isEnglish
+                            ? 'Community Rules'
+                            : 'Topluluk Kurallari',
+                        onTap: () => context.push('/legal?doc=community'),
+                      ),
+                      _ActionRow(
+                        icon: Icons.delete_outline,
+                        title: isEnglish ? 'Account Deletion' : 'Hesap Silme',
+                        onTap: () =>
+                            context.push('/legal?doc=account-deletion'),
+                      ),
+                      _ActionRow(
                         icon: Icons.shield_outlined,
-                        title: 'Consent ve Tracking Ayarlari',
+                        title: isEnglish
+                            ? 'Consent and Tracking Settings'
+                            : 'Consent ve Tracking Ayarlari',
                         onTap: () => context.push('/consent'),
                       ),
                     ],
@@ -458,7 +699,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 OutlinedButton.icon(
                   onPressed: _load,
                   icon: const Icon(Icons.refresh),
-                  label: const Text('Yenile'),
+                  label: Text(isEnglish ? 'Refresh' : 'Yenile'),
                 ),
                 const SizedBox(height: 10),
                 if (isLoggedIn)
@@ -468,7 +709,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       backgroundColor: RouteviaColors.rose,
                     ),
                     icon: const Icon(Icons.logout),
-                    label: const Text('Cikis Yap'),
+                    label: Text(isEnglish ? 'Sign Out' : 'Cikis Yap'),
                   ),
                 if (isLoggedIn) ...[
                   const SizedBox(height: 10),
@@ -479,51 +720,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       side: const BorderSide(color: Color(0xFFB42318)),
                     ),
                     icon: const Icon(Icons.delete_forever),
-                    label: const Text('Hesabimi Sil'),
+                    label: Text(isEnglish ? 'Delete Account' : 'Hesabimi Sil'),
                   ),
                 ],
               ],
             ),
-    );
-  }
-}
-
-class _InfoTile extends StatelessWidget {
-  const _InfoTile({
-    required this.icon,
-    required this.title,
-    required this.value,
-  });
-
-  final IconData icon;
-  final String title;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: RouteviaColors.border),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: RouteviaColors.navyLight),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              title,
-              style: const TextStyle(
-                color: RouteviaColors.textSecondary,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
-        ],
-      ),
     );
   }
 }

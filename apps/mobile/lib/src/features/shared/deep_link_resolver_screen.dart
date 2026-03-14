@@ -53,7 +53,7 @@ class _DeepLinkResolverScreenState
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Davet kodu uygulandı. 7 gün premium önizleme aktif.',
+              'Davet kodu uygulandı. 7 günlük Pro davet erişimi aktif.',
             ),
           ),
         );

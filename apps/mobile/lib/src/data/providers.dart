@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -98,4 +99,35 @@ class PremiumStateNotifier extends AsyncNotifier<PremiumState> {
 final premiumStateProvider =
     AsyncNotifierProvider<PremiumStateNotifier, PremiumState>(
   PremiumStateNotifier.new,
+);
+
+class AppLocaleNotifier extends Notifier<Locale?> {
+  @override
+  Locale? build() => null;
+
+  Future<void> load() async {
+    final code = await ref.read(localCacheProvider).getPreferredLanguageCode();
+    state = _localeFromCode(code);
+  }
+
+  Future<void> setLanguageCode(String code) async {
+    final normalized = code.trim().toLowerCase();
+    await ref.read(localCacheProvider).setPreferredLanguageCode(normalized);
+    state = _localeFromCode(normalized);
+  }
+
+  Locale? _localeFromCode(String? code) {
+    switch ((code ?? '').trim().toLowerCase()) {
+      case 'tr':
+        return const Locale('tr');
+      case 'en':
+        return const Locale('en');
+      default:
+        return null;
+    }
+  }
+}
+
+final appLocaleProvider = NotifierProvider<AppLocaleNotifier, Locale?>(
+  AppLocaleNotifier.new,
 );

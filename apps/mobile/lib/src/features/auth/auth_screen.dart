@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/i18n.dart';
 import '../../data/providers.dart';
 
 class AuthScreen extends ConsumerStatefulWidget {
@@ -18,12 +19,14 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
+  final _inviteCtrl = TextEditingController();
 
   bool _createAccount = false;
   bool _obscurePassword = true;
   bool _obscureConfirm = true;
   bool _loading = false;
   bool _resetSent = false;
+  bool _verificationResent = false;
 
   StreamSubscription<AuthState>? _authSub;
 
@@ -36,19 +39,25 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
       if (event.event == AuthChangeEvent.passwordRecovery) return;
       if (event.session != null && mounted) {
         final repo = ref.read(repositoryProvider);
-        await repo.ensureProfile();
-        // Refresh premium state so admin role is detected immediately
-        ref.read(premiumStateProvider.notifier).refresh();
         final pendingCode = await ref
             .read(localCacheProvider)
             .getPendingReferralCode();
+        await repo.ensureProfile();
         final profile = await repo.getMyProfile();
         final completed = (profile?['onboarding_completed'] as bool?) ?? false;
         if (pendingCode != null && pendingCode.isNotEmpty) {
+          if (!completed) {
+            await ref.read(localCacheProvider).setPendingReferralCode(null);
+            if (mounted) context.go('/onboarding?ref=$pendingCode');
+            return;
+          }
+          try {
+            await repo.redeemReferral(pendingCode);
+          } catch (_) {}
           await ref.read(localCacheProvider).setPendingReferralCode(null);
-          if (mounted) context.go('/onboarding?ref=$pendingCode');
-          return;
         }
+        // Refresh premium state so admin role is detected immediately
+        ref.read(premiumStateProvider.notifier).refresh();
         if (!completed) {
           if (mounted) context.go('/onboarding');
           return;
@@ -68,29 +77,33 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
     _confirmCtrl.dispose();
+    _inviteCtrl.dispose();
     super.dispose();
   }
 
   String _friendlyAuthError(Object error) {
     final lower = error.toString().toLowerCase();
     if (lower.contains('invalid login credentials')) {
-      return 'E-posta veya şifre hatalı.';
+      return context.tr('E-posta veya şifre hatalı.', 'Incorrect email or password.');
     }
     if (lower.contains('email rate limit') || lower.contains('security purposes')) {
-      return 'Çok sık deneme yapıldı. Biraz bekle.';
+      return context.tr(
+        'Çok sık istek gönderildi. Birkaç saniye bekleyip tekrar dene.',
+        'Too many requests. Wait a few seconds and try again.',
+      );
     }
-    if (lower.contains('invalid email')) return 'Geçersiz e-posta adresi.';
+    if (lower.contains('invalid email')) return context.tr('Geçersiz e-posta adresi.', 'Invalid email address.');
     if (lower.contains('email not confirmed')) {
-      return 'E-posta doğrulanmamış. Şifreni sıfırlamayı dene.';
+      return context.tr('E-posta doğrulanmamış. Şifreni sıfırlamayı dene.', 'Email is not verified. Try resetting your password.');
     }
     if (lower.contains('password should be at least')) {
-      return 'Şifre en az 6 karakter olmalı.';
+      return context.tr('Şifre en az 6 karakter olmalı.', 'Password must be at least 6 characters.');
     }
     if (lower.contains('user already registered')) {
-      return 'Bu e-posta zaten kayıtlı. Giriş yapmayı dene.';
+      return context.tr('Bu e-posta zaten kayıtlı. Giriş yapmayı dene.', 'This email is already registered. Try signing in.');
     }
     if (lower.contains('error sending')) {
-      return 'Mail gönderilemedi. Biraz sonra tekrar dene.';
+      return context.tr('Mail gönderilemedi. Biraz sonra tekrar dene.', 'Email could not be sent. Please try again later.');
     }
     return error.toString();
   }
@@ -99,43 +112,69 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
     final email = _emailCtrl.text.trim();
     final password = _passwordCtrl.text;
     final confirm = _confirmCtrl.text;
+    final inviteCode = _inviteCtrl.text.trim().toUpperCase();
 
     if (email.isEmpty || !email.contains('@')) {
-      _snack('Geçerli bir e-posta gir.');
+      _snack(context.tr('Geçerli bir e-posta gir.', 'Enter a valid email.'));
       return;
     }
     if (password.length < 6) {
-      _snack('Şifre en az 6 karakter olmalı.');
+      _snack(context.tr('Şifre en az 6 karakter olmalı.', 'Password must be at least 6 characters.'));
       return;
     }
     if (_createAccount && password != confirm) {
-      _snack('Şifre tekrarı eşleşmiyor.');
+      _snack(context.tr('Şifre tekrarı eşleşmiyor.', 'Passwords do not match.'));
+      return;
+    }
+    if (inviteCode.isNotEmpty &&
+        !RegExp(r'^[A-Z0-9]{8}$').hasMatch(inviteCode)) {
+      _snack(
+        context.tr(
+          'Davet kodu 8 karakterli olmalı.',
+          'Invite code must be 8 characters.',
+        ),
+      );
       return;
     }
 
     setState(() => _loading = true);
     try {
+      final repo = ref.read(repositoryProvider);
+      if (inviteCode.isNotEmpty) {
+        final isValid = await repo.validateReferralCode(inviteCode);
+        if (!mounted) return;
+        if (!isValid) {
+          _snack(
+            context.tr(
+              'Davet kodu geçersiz veya bulunamadı.',
+              'Invite code is invalid or was not found.',
+            ),
+          );
+          return;
+        }
+      }
+      await ref.read(localCacheProvider).setPendingReferralCode(
+            inviteCode.isEmpty ? null : inviteCode,
+          );
       if (_createAccount) {
-        await ref
-            .read(repositoryProvider)
-            .signUpWithPassword(email: email, password: password);
+        await repo.signUpWithPassword(email: email, password: password);
         if (!mounted) return;
         final session = Supabase.instance.client.auth.currentSession;
         if (session == null) {
           _snack(
-            '$email adresine doğrulama bağlantısı gönderildi. '
-            'Mailine gel, bağlantıya tıkla ve geri dön.',
+            context.tr(
+              '$email adresine doğrulama bağlantısı gönderildi. Mailine gel, bağlantıya tıkla ve geri dön.',
+              'A verification link was sent to $email. Open your email, tap the link, and come back.',
+            ),
             duration: 8,
           );
           return;
         }
-        _snack('Hesap oluşturuldu, oturum açılıyor...');
+        _snack(context.tr('Hesap oluşturuldu, oturum açılıyor...', 'Account created, signing you in...'));
       } else {
-        await ref
-            .read(repositoryProvider)
-            .signInWithPassword(email: email, password: password);
+        await repo.signInWithPassword(email: email, password: password);
         if (!mounted) return;
-        _snack('Giriş başarılı.');
+        _snack(context.tr('Giriş başarılı.', 'Signed in successfully.'));
       }
     } catch (e) {
       if (!mounted) return;
@@ -148,7 +187,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   Future<void> _resetPassword() async {
     final email = _emailCtrl.text.trim();
     if (email.isEmpty || !email.contains('@')) {
-      _snack('Önce e-posta adresini gir.');
+      _snack(context.tr('Önce e-posta adresini gir.', 'Enter your email first.'));
       return;
     }
     setState(() => _loading = true);
@@ -157,7 +196,36 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
       if (!mounted) return;
       setState(() => _resetSent = true);
       _snack(
-        '$email adresine şifre sıfırlama bağlantısı gönderildi.',
+        context.tr(
+          '$email adresine şifre sıfırlama bağlantısı gönderildi.',
+          'A password reset link was sent to $email.',
+        ),
+        duration: 6,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _snack(_friendlyAuthError(e));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _resendVerification() async {
+    final email = _emailCtrl.text.trim();
+    if (email.isEmpty || !email.contains('@')) {
+      _snack(context.tr('Önce e-posta adresini gir.', 'Enter your email first.'));
+      return;
+    }
+    setState(() => _loading = true);
+    try {
+      await ref.read(repositoryProvider).resendSignupConfirmation(email);
+      if (!mounted) return;
+      setState(() => _verificationResent = true);
+      _snack(
+        context.tr(
+          '$email adresine doğrulama maili yeniden gönderildi.',
+          'A new verification email was sent to $email.',
+        ),
         duration: 6,
       );
     } catch (e) {
@@ -224,7 +292,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                 ),
                 const SizedBox(height: 20),
                 Text(
-                  _createAccount ? 'Hesap Oluştur' : 'Giriş Yap',
+                  _createAccount ? context.tr('Hesap Oluştur', 'Create Account') : context.tr('Giriş Yap', 'Sign In'),
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w900,
@@ -235,8 +303,8 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                 const SizedBox(height: 8),
                 Text(
                   _createAccount
-                      ? 'E-posta ve şifrenle hesap oluştur.'
-                      : 'Hoş geldin. E-posta ve şifrenle devam et.',
+                      ? context.tr('E-posta ve şifrenle hesap oluştur.', 'Create an account with your email and password.')
+                      : context.tr('Hoş geldin. E-posta ve şifrenle devam et.', 'Welcome back. Continue with your email and password.'),
                   style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.78),
                     fontSize: 14,
@@ -268,7 +336,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                         keyboardType: TextInputType.emailAddress,
                         autocorrect: false,
                         decoration: InputDecoration(
-                          labelText: 'E-posta',
+                          labelText: context.tr('E-posta', 'Email'),
                           prefixIcon: const Icon(Icons.alternate_email_rounded),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -282,7 +350,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                         controller: _passwordCtrl,
                         obscureText: _obscurePassword,
                         decoration: InputDecoration(
-                          labelText: 'Şifre',
+                          labelText: context.tr('Şifre', 'Password'),
                           prefixIcon: const Icon(Icons.lock_outline_rounded),
                           suffixIcon: IconButton(
                             onPressed: () => setState(
@@ -307,7 +375,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                           controller: _confirmCtrl,
                           obscureText: _obscureConfirm,
                           decoration: InputDecoration(
-                            labelText: 'Şifre Tekrarı',
+                            labelText: context.tr('Şifre Tekrarı', 'Confirm Password'),
                             prefixIcon:
                                 const Icon(Icons.lock_person_outlined),
                             suffixIcon: IconButton(
@@ -326,6 +394,27 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                           ),
                         ),
                       ],
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _inviteCtrl,
+                        textCapitalization: TextCapitalization.characters,
+                        maxLength: 8,
+                        decoration: InputDecoration(
+                          labelText: context.tr(
+                            'Davet Kodu (Opsiyonel)',
+                            'Invite Code (Optional)',
+                          ),
+                          prefixIcon: const Icon(Icons.card_giftcard_outlined),
+                          helperText: context.tr(
+                            '7 gun Pro denemesi icin kodun varsa burada gir.',
+                            'If you have an invite code for a 7-day Pro trial, enter it here.',
+                          ),
+                          counterText: '',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
 
                       // Forgot password (login mode only)
                       if (!_createAccount) ...[
@@ -342,14 +431,38 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                             ),
                             child: Text(
                               _resetSent
-                                  ? 'Mail gönderildi ✓'
-                                  : 'Şifremi unuttum',
+                                  ? context.tr('Mail gönderildi ✓', 'Email sent ✓')
+                                  : context.tr('Şifremi unuttum', 'Forgot password'),
                               style: const TextStyle(fontSize: 13),
                             ),
                           ),
                         ),
                       ] else ...[
-                        const SizedBox(height: 14),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: _loading ? null : _resendVerification,
+                            style: TextButton.styleFrom(
+                              foregroundColor: const Color(0xFF0B3B68),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                                vertical: 2,
+                              ),
+                            ),
+                            child: Text(
+                              _verificationResent
+                                  ? context.tr(
+                                      'Doğrulama maili gönderildi ✓',
+                                      'Verification email sent ✓',
+                                    )
+                                  : context.tr(
+                                      'Doğrulama mailini tekrar gönder',
+                                      'Resend verification email',
+                                    ),
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                          ),
+                        ),
                       ],
 
                       // Submit button
@@ -364,10 +477,10 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                           ),
                           label: Text(
                             _loading
-                                ? 'İşleniyor...'
+                                ? context.tr('İşleniyor...', 'Processing...')
                                 : (_createAccount
-                                      ? 'Hesap Oluştur'
-                                      : 'Giriş Yap'),
+                                      ? context.tr('Hesap Oluştur', 'Create Account')
+                                      : context.tr('Giriş Yap', 'Sign In')),
                           ),
                           style: FilledButton.styleFrom(
                             backgroundColor: const Color(0xFF0B3B68),
@@ -389,8 +502,8 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                                 }),
                           child: Text(
                             _createAccount
-                                ? 'Zaten hesabın var mı? Giriş yap'
-                                : 'Hesabın yok mu? Kayıt ol',
+                                ? context.tr('Zaten hesabın var mı? Giriş yap', 'Already have an account? Sign in')
+                                : context.tr('Hesabın yok mu? Kayıt ol', 'No account yet? Sign up'),
                             style: const TextStyle(
                               color: Color(0xFF0B3B68),
                               fontWeight: FontWeight.w600,
@@ -415,7 +528,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                       ),
                       padding: const EdgeInsets.symmetric(vertical: 13),
                     ),
-                    child: const Text('Misafir devam et (sınırlı)'),
+                    child: Text(context.tr('Misafir devam et (sınırlı)', 'Continue as guest (limited)')),
                   ),
                 ),
               ],

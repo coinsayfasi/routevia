@@ -21,10 +21,17 @@ class _SharedTripScreenState extends State<SharedTripScreen> {
   }
 
   Future<void> _open() async {
+    final token = _token.text.trim();
+    if (token.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Paylaşım kodunu gir.')),
+      );
+      return;
+    }
     setState(() => _loading = true);
     try {
       if (!mounted) return;
-      context.go('/share/${_token.text.trim()}');
+      context.go('/share/$token');
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(

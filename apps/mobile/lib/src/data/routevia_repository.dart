@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/constants.dart';
 import '../models/community_post_models.dart';
 import '../models/trip_models.dart';
+import '../models/weather_models.dart';
 import 'fallback_provinces.dart';
 import 'local_cache.dart';
 import 'must_see_places.dart';
@@ -5968,6 +5969,33 @@ class RouteviaRepository {
       requireAuth: true,
     );
     return Map<String, dynamic>.from((result.data as Map?) ?? const {});
+  }
+
+  // ── Weather ────────────────────────────────────────────────────────────────
+  // No auth required — weather is a shared cached resource, not user-specific.
+  // TTL is managed server-side; many users for the same city share one cache row.
+
+  Future<WeatherData> getWeather({
+    required String citySlug,
+    required String cityName,
+    required double lat,
+    required double lng,
+    String? districtSlug,
+    String? districtName,
+  }) async {
+    final result = await _invokeFunction(
+      'get_weather',
+      body: {
+        'city_slug': citySlug,
+        'city_name': cityName,
+        'lat': lat,
+        'lng': lng,
+        'district_slug': districtSlug,
+        'district_name': districtName,
+      },
+    );
+    final data = Map<String, dynamic>.from((result.data as Map?) ?? const {});
+    return WeatherData.fromJson(data);
   }
 }
 

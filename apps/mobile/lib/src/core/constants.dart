@@ -10,20 +10,16 @@ class AppConstants {
   );
   static const cacheBox = 'routevia_cache';
   static const useLlm = bool.fromEnvironment('USE_LLM', defaultValue: false);
-  static const privacyPolicyUrl =
-      'https://legal.routevia.tabserve.com.tr/privacy/';
-  static const termsUrl = 'https://legal.routevia.tabserve.com.tr/terms/';
-  static const adsPolicyUrl = 'https://legal.routevia.tabserve.com.tr/ads/';
-  static const businessApplyUrl =
-      'https://legal.routevia.tabserve.com.tr/business/';
-  static const communityGuidelinesUrl =
-      'https://legal.routevia.tabserve.com.tr/community/';
-  static const accountDeletionUrl =
-      'https://legal.routevia.tabserve.com.tr/account-deletion/';
-  static const authCallbackUrl =
-      'https://legal.routevia.tabserve.com.tr/auth-callback/';
+  static const _legalPrimaryBase = 'https://legal.routevia.tabserve.com.tr';
   static const _legalFallbackBase =
       'https://cdn.jsdelivr.net/gh/coinsayfasi/routevia@main/site';
+  static const privacyPolicyUrl = '$_legalPrimaryBase/privacy/';
+  static const termsUrl = '$_legalPrimaryBase/terms/';
+  static const adsPolicyUrl = '$_legalPrimaryBase/ads/';
+  static const businessApplyUrl = '$_legalPrimaryBase/business/';
+  static const communityGuidelinesUrl = '$_legalPrimaryBase/community/';
+  static const accountDeletionUrl = '$_legalPrimaryBase/account-deletion/';
+  static const authCallbackUrl = '$_legalPrimaryBase/auth-callback/';
   static const supportEmail = 'routevia@tabserve.com.tr';
   static const playStoreUrl =
       'https://play.google.com/store/apps/details?id=com.yunusgunes.routevia';
@@ -44,18 +40,25 @@ class AppConstants {
   static List<Uri> legalUrlCandidates(String primaryUrl) {
     final primary = Uri.parse(primaryUrl);
     final path = switch (primary.path) {
-      '/privacy/' || '/privacy' => 'privacy/index.html',
-      '/terms/' || '/terms' => 'terms/index.html',
-      '/ads/' || '/ads' => 'ads/index.html',
-      '/community/' || '/community' => 'community/index.html',
-      '/account-deletion/' || '/account-deletion' =>
-        'account-deletion/index.html',
-      '/business/' || '/business' => 'business/index.html',
+      '/privacy/' ||
+      '/privacy' ||
+      '/privacy/index.html' => 'privacy/index.html',
+      '/terms/' || '/terms' || '/terms/index.html' => 'terms/index.html',
+      '/ads/' || '/ads' || '/ads/index.html' => 'ads/index.html',
+      '/community/' ||
+      '/community' ||
+      '/community/index.html' => 'community/index.html',
+      '/account-deletion/' ||
+      '/account-deletion' ||
+      '/account-deletion/index.html' => 'account-deletion/index.html',
+      '/business/' ||
+      '/business' ||
+      '/business/index.html' => 'business/index.html',
+      '/auth-callback/' ||
+      '/auth-callback' ||
+      '/auth-callback/index.html' => 'auth-callback/index.html',
       _ => 'index.html',
     };
-    return <Uri>[
-      primary,
-      Uri.parse('$_legalFallbackBase/$path'),
-    ];
+    return <Uri>[primary, Uri.parse('$_legalFallbackBase/$path')];
   }
 }

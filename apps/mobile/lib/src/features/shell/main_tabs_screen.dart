@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/ad_service.dart';
+import '../../core/i18n.dart';
 import '../../core/theme.dart';
 import '../../data/providers.dart';
 import '../contribute/suggestion_screen.dart';
@@ -138,31 +139,31 @@ class _MainTabsScreenState extends ConsumerState<MainTabsScreen> {
               height: 72,
               selectedIndex: _currentIndex,
               onDestinationSelected: _onTap,
-              destinations: const [
+              destinations: [
                 NavigationDestination(
-                  icon: Icon(Icons.explore_outlined),
-                  selectedIcon: Icon(Icons.explore),
-                  label: 'Kesfet',
+                  icon: const Icon(Icons.explore_outlined),
+                  selectedIcon: const Icon(Icons.explore),
+                  label: context.tr('Kesfet', 'Explore'),
                 ),
                 NavigationDestination(
-                  icon: Icon(Icons.route_outlined),
-                  selectedIcon: Icon(Icons.route),
-                  label: 'Rotalar',
+                  icon: const Icon(Icons.route_outlined),
+                  selectedIcon: const Icon(Icons.route),
+                  label: context.tr('Rotalar', 'Routes'),
                 ),
                 NavigationDestination(
-                  icon: Icon(Icons.eco_outlined),
-                  selectedIcon: Icon(Icons.eco),
-                  label: 'Eko',
+                  icon: const Icon(Icons.eco_outlined),
+                  selectedIcon: const Icon(Icons.eco),
+                  label: context.tr('Eko', 'Eco'),
                 ),
                 NavigationDestination(
-                  icon: Icon(Icons.add_location_alt_outlined),
-                  selectedIcon: Icon(Icons.add_location_alt),
-                  label: 'Katki',
+                  icon: const Icon(Icons.add_location_alt_outlined),
+                  selectedIcon: const Icon(Icons.add_location_alt),
+                  label: context.tr('Katki', 'Contribute'),
                 ),
                 NavigationDestination(
-                  icon: Icon(Icons.person_outline),
-                  selectedIcon: Icon(Icons.person),
-                  label: 'Profil',
+                  icon: const Icon(Icons.person_outline),
+                  selectedIcon: const Icon(Icons.person),
+                  label: context.tr('Profil', 'Profile'),
                 ),
               ],
             ),

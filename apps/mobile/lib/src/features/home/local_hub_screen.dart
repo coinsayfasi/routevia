@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -7,10 +8,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/i18n.dart';
 import '../../core/widgets/safe_network_image.dart';
+import '../../data/fallback_provinces.dart';
 import '../../data/providers.dart';
 import '../../models/trip_models.dart';
+import '../../models/weather_models.dart';
 
 Color _categoryColor(String category) {
   const colors = {
@@ -69,6 +74,25 @@ String _categoryLabel(String category) {
   return labels[category] ?? category;
 }
 
+String _categoryEmoji(String category) {
+  const emojis = {
+    'museum': '🏛️',
+    'historical': '🏰',
+    'nature': '🌿',
+    'beach': '🏖️',
+    'viewpoint': '🔭',
+    'food': '🍽️',
+    'cafe': '☕',
+    'lodging': '🏨',
+    'activity': '🎯',
+    'market': '🛍️',
+    'tour': '🗺️',
+    'waterfall': '💧',
+    'canyon': '🏔️',
+  };
+  return emojis[category] ?? '📍';
+}
+
 class LocalHubScreen extends ConsumerStatefulWidget {
   const LocalHubScreen({super.key, this.initialProvinceSlug});
   final String? initialProvinceSlug;
@@ -81,13 +105,19 @@ class _LocalHubScreenState extends ConsumerState<LocalHubScreen> {
   final MapController _mapController = MapController();
   bool _mapReady = false;
 
+  int _planDays = 3;
   String _mode = 'relax';
+  int _radiusKm = 10;
+  bool _allowOutsideDistrict = false;
   bool _loading = false;
   bool _hasError = false;
   List<PlaceModel> _places = const [];
   List<Map<String, dynamic>> _provinces = const [];
+  List<Map<String, dynamic>> _districts = const [];
   String? _provinceSlug;
   String _provinceName = 'Yerel Keşif';
+  String? _nearestDistrictId;
+  String? _nearestDistrictName;
   LatLng _center = const LatLng(39.9255, 32.8663);
   final double _zoom = 10.8;
   PlaceModel? _selectedPlace;
@@ -95,6 +125,9 @@ class _LocalHubScreenState extends ConsumerState<LocalHubScreen> {
   // Pexels cover
   String? _coverImageUrl;
   bool _coverLoading = false;
+
+  // Weather (loaded async after province selection, non-fatal if fails)
+  WeatherData? _weather;
 
   // User location for distance calc
   double? _userLat;
@@ -123,35 +156,44 @@ class _LocalHubScreenState extends ConsumerState<LocalHubScreen> {
 
   Future<void> _initHub() async {
     final repo = ref.read(repositoryProvider);
+    final planSettings = await ref.read(localCacheProvider).getPlanSettings();
     List<Map<String, dynamic>> provinces = const [];
     try {
       provinces = await repo.listProvinces();
     } catch (_) {}
 
+    try {
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.whileInUse ||
+          permission == LocationPermission.always) {
+        final pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.low,
+            timeLimit: Duration(seconds: 5),
+          ),
+        );
+        _userLat = pos.latitude;
+        _userLng = pos.longitude;
+      }
+    } catch (_) {}
+
     String? provinceSlug = widget.initialProvinceSlug;
     if (provinceSlug == null && provinces.isNotEmpty) {
       try {
-        final permission = await Geolocator.checkPermission();
-        if (permission == LocationPermission.whileInUse ||
-            permission == LocationPermission.always) {
-          final pos = await Geolocator.getCurrentPosition(
-            locationSettings: const LocationSettings(
-              accuracy: LocationAccuracy.low,
-              timeLimit: Duration(seconds: 5),
-            ),
-          );
-          _userLat = pos.latitude;
-          _userLng = pos.longitude;
+        if (_userLat != null && _userLng != null) {
           final withCoords = provinces
               .where((p) => p['lat'] != null && p['lng'] != null)
               .toList();
           withCoords.sort((a, b) {
             final da = Geolocator.distanceBetween(
-              pos.latitude, pos.longitude,
+              _userLat!, _userLng!,
               (a['lat'] as num).toDouble(), (a['lng'] as num).toDouble(),
             );
             final db = Geolocator.distanceBetween(
-              pos.latitude, pos.longitude,
+              _userLat!, _userLng!,
               (b['lat'] as num).toDouble(), (b['lng'] as num).toDouble(),
             );
             return da.compareTo(db);
@@ -166,6 +208,13 @@ class _LocalHubScreenState extends ConsumerState<LocalHubScreen> {
     setState(() {
       _provinces = provinces;
       _provinceSlug = provinceSlug;
+      _planDays = (planSettings['days'] as num?)?.toInt() ?? _planDays;
+      _radiusKm = (planSettings['radius_km'] as num?)?.toInt() ?? _radiusKm;
+      _allowOutsideDistrict =
+          (planSettings['allow_outside'] as bool?) ?? _allowOutsideDistrict;
+      _mode = (planSettings['persona'] as String?)?.trim().isNotEmpty == true
+          ? planSettings['persona'] as String
+          : _mode;
     });
     await _loadPlaces();
   }
@@ -181,24 +230,43 @@ class _LocalHubScreenState extends ConsumerState<LocalHubScreen> {
     });
     try {
       final province = await repo.getProvinceBySlug(slug);
+      final districts = await repo.listDistrictsByProvinceSlug(slug);
+      _districts = districts;
+      _resolveNearestDistrict();
+      final strictDistrictName =
+          _userLat == null || _userLng == null ? _nearestDistrictName : null;
       var places = await repo.listProvinceHubPlaces(
         provinceSlug: slug,
         personaMode: _mode,
         preferences: _prefsForMode(_mode),
+        districtName: strictDistrictName,
       );
+      if (places.isEmpty) {
+        places = await repo.listProvinceHubPlaces(
+          provinceSlug: slug,
+          personaMode: _mode,
+          preferences: _prefsForMode(_mode),
+        );
+      }
       if (places.isEmpty) {
         places = await repo.listProvinceOrNationalTopPicks(
           provinceSlug: slug,
+          districtName: strictDistrictName,
           limit: 120,
         );
       }
-      places = places.where((p) => p.category != 'lodging').toList();
+      places = _filterPlacesByRadius(
+        _sortPlacesForUser(places.where((p) => p.category != 'lodging').toList()),
+      );
       if (!mounted) return;
       final lat = (province?['lat'] as num?)?.toDouble();
       final lng = (province?['lng'] as num?)?.toDouble();
       setState(() {
         _provinceName = (province?['name'] as String?) ?? slug;
-        if (lat != null && lng != null) {
+        _districts = districts;
+        if (_userLat != null && _userLng != null) {
+          _center = LatLng(_userLat!, _userLng!);
+        } else if (lat != null && lng != null) {
           _center = LatLng(lat, lng);
         }
         _places = places;
@@ -209,6 +277,7 @@ class _LocalHubScreenState extends ConsumerState<LocalHubScreen> {
         } catch (_) {}
       }
       unawaited(_loadCoverImage().catchError((_) {}));
+      unawaited(_loadWeather().catchError((_) {}));
     } catch (e) {
       if (!mounted) return;
       setState(() => _hasError = true);
@@ -238,6 +307,47 @@ class _LocalHubScreenState extends ConsumerState<LocalHubScreen> {
     }
   }
 
+  Future<void> _loadWeather() async {
+    final slug = _provinceSlug;
+    if (slug == null) return;
+
+    // Try _provinces first (may come from DB without lat/lng),
+    // then fall back to kFallbackProvinces which always has coordinates.
+    Map<String, dynamic> province = _provinces.firstWhere(
+      (p) => p['slug'] == slug,
+      orElse: () => const {},
+    );
+    double? lat = (province['lat'] as num?)?.toDouble();
+    double? lng = (province['lng'] as num?)?.toDouble();
+
+    if (lat == null || lng == null) {
+      province = kFallbackProvinces.firstWhere(
+        (p) => p['slug'] == slug,
+        orElse: () => const {},
+      );
+      lat = (province['lat'] as num?)?.toDouble();
+      lng = (province['lng'] as num?)?.toDouble();
+    }
+
+    if (lat == null || lng == null) return;
+    final cityName = (province['name'] as String?)?.isNotEmpty == true
+        ? province['name'] as String
+        : _provinceName;
+
+    try {
+      final data = await ref.read(repositoryProvider).getWeather(
+            citySlug: slug,
+            cityName: cityName,
+            lat: lat,
+            lng: lng,
+          );
+      if (!mounted) return;
+      setState(() => _weather = data);
+    } catch (_) {
+      // Non-fatal: weather is an enhancement, not critical
+    }
+  }
+
   double? _distanceTo(PlaceModel p) {
     if (_userLat == null || _userLng == null || p.lat == null || p.lng == null) {
       return null;
@@ -250,42 +360,211 @@ class _LocalHubScreenState extends ConsumerState<LocalHubScreen> {
     return '${km.toStringAsFixed(1)} km';
   }
 
+  List<PlaceModel> _filterPlacesByRadius(List<PlaceModel> places) {
+    if (_userLat == null || _userLng == null) return places;
+    final inRadius = places.where((p) {
+      final lat = p.lat;
+      final lng = p.lng;
+      if (lat == null || lng == null) return false;
+      return Geolocator.distanceBetween(_userLat!, _userLng!, lat, lng) / 1000 <=
+          _radiusKm;
+    }).toList();
+    return inRadius.isNotEmpty ? inRadius : places;
+  }
+
+  void _resolveNearestDistrict() {
+    if (_userLat == null || _userLng == null || _districts.isEmpty) {
+      _nearestDistrictId = null;
+      _nearestDistrictName = null;
+      return;
+    }
+
+    Map<String, dynamic>? nearest;
+    var bestDistanceKm = double.infinity;
+    for (final district in _districts) {
+      final lat = (district['lat'] as num?)?.toDouble();
+      final lng = (district['lng'] as num?)?.toDouble();
+      if (lat == null || lng == null) continue;
+      final distanceKm =
+          Geolocator.distanceBetween(_userLat!, _userLng!, lat, lng) / 1000;
+      if (distanceKm < bestDistanceKm) {
+        bestDistanceKm = distanceKm;
+        nearest = district;
+      }
+    }
+
+    _nearestDistrictId = nearest?['id'] as String?;
+    _nearestDistrictName = nearest?['name'] as String?;
+  }
+
+  List<PlaceModel> _sortPlacesForUser(List<PlaceModel> places) {
+    final sorted = List<PlaceModel>.from(places);
+    sorted.sort((a, b) {
+      final da = _distanceTo(a);
+      final db = _distanceTo(b);
+      if (da != null || db != null) {
+        if (da == null) return 1;
+        if (db == null) return -1;
+        final cmp = da.compareTo(db);
+        if (cmp != 0) return cmp;
+      }
+
+      return a.name.compareTo(b.name);
+    });
+    return sorted;
+  }
+
+  void _focusPlaceOnMap(PlaceModel place) {
+    final lat = place.lat;
+    final lng = place.lng;
+    setState(() => _selectedPlace = place);
+    if (lat == null || lng == null || !_mapReady) return;
+    try {
+      _mapController.move(LatLng(lat, lng), _zoom < 14 ? 14 : _zoom);
+    } catch (_) {}
+  }
+
+  Future<void> _openDirections(PlaceModel place) async {
+    final lat = place.lat;
+    final lng = place.lng;
+    if (lat == null || lng == null) return;
+    final encodedName = Uri.encodeComponent(place.name);
+    final url = Platform.isIOS
+        ? 'https://maps.apple.com/?daddr=$lat,$lng&q=$encodedName'
+        : 'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng';
+    await launchUrl(
+      Uri.parse(url),
+      mode: LaunchMode.externalApplication,
+    );
+  }
+
   Future<void> _buildPlan() async {
     if (_places.isEmpty || _provinceSlug == null) return;
     final repo = ref.read(repositoryProvider);
     try {
-      final plan = await repo.generateTripPlan(
+      TripPlan plan = await repo.generateTripPlan(
         provinceSlug: _provinceSlug!,
-        days: 1,
-        transportMode: 'car',
-        pace: 'relaxed',
+        days: _planDays,
+        transportMode: _userLat != null && _userLng != null ? 'walk' : 'transit',
+        pace: 'medium',
         personaMode: _mode,
         preferences: _prefsForMode(_mode),
+        districtId: _nearestDistrictId,
+        maxRadiusKm: _radiusKm,
+        allowOutsideDistrict: false,
         startLat: _userLat,
         startLng: _userLng,
       );
+      var stopCount = plan.daysPlan.fold<int>(
+        0,
+        (sum, day) => sum + day.stops.length,
+      );
+      if (_nearestDistrictId != null && stopCount < 5) {
+        plan = await repo.generateTripPlan(
+          provinceSlug: _provinceSlug!,
+          days: _planDays,
+          transportMode:
+              _userLat != null && _userLng != null ? 'walk' : 'transit',
+          pace: 'medium',
+          personaMode: _mode,
+          preferences: _prefsForMode(_mode),
+          districtId: _nearestDistrictId,
+          maxRadiusKm: _radiusKm,
+          allowOutsideDistrict: _allowOutsideDistrict,
+          startLat: _userLat,
+          startLng: _userLng,
+        );
+        stopCount = plan.daysPlan.fold<int>(
+          0,
+          (sum, day) => sum + day.stops.length,
+        );
+      }
       if (!mounted) return;
+      final expectedStops = _planDays * 4;
+      if (stopCount < expectedStops) {
+        await showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text(context.tr('Bolgede Yer Azaldi', 'Area Running Low')),
+            content: Text(
+              context.tr(
+                'Bolgende daha fazla yer kalmadi. Gittigin yeni bir yeri bize onerirsen local hub daha da guclenir.',
+                'There are not many places left in this area. If you suggest a place you visited, local hub gets stronger.',
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: Text(context.tr('Bu Planla Devam Et', 'Continue')),
+              ),
+              FilledButton(
+                onPressed: () {
+                  Navigator.of(ctx).pop();
+                  context.push('/suggest');
+                },
+                child: Text(context.tr('Yer Oner', 'Suggest Place')),
+              ),
+            ],
+          ),
+        );
+        if (!mounted) return;
+      }
       context.push('/day-plan', extra: plan);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Plan oluşturulamadı, tekrar dene.')),
+        SnackBar(
+          content: Text(
+            context.tr(
+              'Plan oluşturulamadı, tekrar dene.',
+              'Plan could not be created. Please try again.',
+            ),
+          ),
+        ),
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final markers = _places
-        .where((p) => p.lat != null && p.lng != null)
-        .take(500)
-        .map(
+    final markers = [
+          if (_userLat != null && _userLng != null)
+            Marker(
+              point: LatLng(_userLat!, _userLng!),
+              width: 30,
+              height: 30,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2563EB),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 3),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x332563EB),
+                      blurRadius: 12,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+                child: const Center(
+                  child: Icon(
+                    Icons.my_location_rounded,
+                    size: 14,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ..._places
+              .where((p) => p.lat != null && p.lng != null)
+              .take(500)
+              .map(
           (p) => Marker(
             point: LatLng(p.lat!, p.lng!),
             width: 38,
             height: 38,
             child: GestureDetector(
-              onTap: () => setState(() => _selectedPlace = p),
+              onTap: () => _focusPlaceOnMap(p),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 decoration: BoxDecoration(
@@ -308,27 +587,27 @@ class _LocalHubScreenState extends ConsumerState<LocalHubScreen> {
                     ),
                   ],
                 ),
-                child: Icon(
-                  _categoryIcon(p.category),
-                  color: Colors.white,
-                  size: 16,
+                child: Text(
+                  _categoryEmoji(p.category),
+                  style: const TextStyle(fontSize: 14, height: 1),
+                  textAlign: TextAlign.center,
                 ),
               ),
             ),
-          ),
-        )
-        .toList();
+            ),
+        ),
+        ];
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('$_provinceName Keşif'),
+        title: Text(context.tr('$_provinceName Keşif', 'Discover $_provinceName')),
         centerTitle: false,
         actions: [
           if (_places.isNotEmpty)
             TextButton.icon(
               onPressed: () => _buildPlan(),
               icon: const Icon(Icons.route_rounded, size: 18),
-              label: const Text('Plan Yap'),
+              label: Text(context.tr('Plan Yap', 'Build Plan')),
               style: TextButton.styleFrom(
                 foregroundColor: const Color(0xFF0B3B68),
               ),
@@ -398,6 +677,27 @@ class _LocalHubScreenState extends ConsumerState<LocalHubScreen> {
                         .toList(),
                   ),
                 ),
+                const SizedBox(height: 6),
+                SizedBox(
+                  height: 34,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [6, 10, 15, 25, 40].map((km) {
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: ChoiceChip(
+                          label: Text('$km km'),
+                          selected: _radiusKm == km,
+                          visualDensity: VisualDensity.compact,
+                          onSelected: (_) {
+                            setState(() => _radiusKm = km);
+                            _loadPlaces();
+                          },
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
               ],
             ),
           ),
@@ -408,6 +708,10 @@ class _LocalHubScreenState extends ConsumerState<LocalHubScreen> {
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
               child: _buildCoverCard(),
             ),
+
+          // ── Weather banner ───────────────────────────────────────────────
+          if (_weather != null)
+            _WeatherBanner(weather: _weather!),
 
           // ── Map ──────────────────────────────────────────────────────────
           Expanded(
@@ -453,12 +757,14 @@ class _LocalHubScreenState extends ConsumerState<LocalHubScreen> {
                           const Icon(Icons.wifi_off_rounded,
                               size: 40, color: Colors.grey),
                           const SizedBox(height: 12),
-                          const Text('Veriler yüklenemedi',
-                              style: TextStyle(fontWeight: FontWeight.w600)),
+                          Text(
+                            context.tr('Veriler yüklenemedi', 'Data could not be loaded'),
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
                           const SizedBox(height: 8),
                           FilledButton(
                             onPressed: _loadPlaces,
-                            child: const Text('Tekrar Dene'),
+                            child: Text(context.tr('Tekrar Dene', 'Try Again')),
                           ),
                         ],
                       ),
@@ -476,9 +782,11 @@ class _LocalHubScreenState extends ConsumerState<LocalHubScreen> {
             SizedBox(
               height: 180,
               child: _places.isEmpty && !_loading
-                  ? const Center(
-                      child: Text('Bu modda yer bulunamadı',
-                          style: TextStyle(color: Colors.grey)),
+                  ? Center(
+                      child: Text(
+                        context.tr('Bu modda yer bulunamadı', 'No places found for this mode'),
+                        style: const TextStyle(color: Colors.grey),
+                      ),
                     )
                   : ListView.builder(
                       scrollDirection: Axis.horizontal,
@@ -508,7 +816,7 @@ class _LocalHubScreenState extends ConsumerState<LocalHubScreen> {
           shadowColor: Colors.black.withValues(alpha: 0.12),
           child: InkWell(
             borderRadius: BorderRadius.circular(16),
-            onTap: () => context.push('/place', extra: p),
+            onTap: () => _focusPlaceOnMap(p),
             child: Row(
               children: [
                 // Image
@@ -726,7 +1034,26 @@ class _LocalHubScreenState extends ConsumerState<LocalHubScreen> {
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-                child: const Text('Detay', style: TextStyle(fontSize: 12)),
+                child: Text(
+                  context.tr('Detay', 'Details'),
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+              const SizedBox(height: 6),
+              OutlinedButton(
+                onPressed: () => _openDirections(p),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF0B3B68),
+                  side: const BorderSide(color: Color(0xFFBFD0E2)),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text(
+                  context.tr('Git', 'Go'),
+                  style: const TextStyle(fontSize: 12),
+                ),
               ),
             ],
           ),
@@ -823,5 +1150,95 @@ class _LocalHubScreenState extends ConsumerState<LocalHubScreen> {
       default:
         return '😌 Rahat';
     }
+  }
+}
+
+// ── Weather Banner ──────────────────────────────────────────────────────────
+// Compact, non-blocking weather strip shown below the city cover.
+// Loads asynchronously after province selection; failure is silent.
+
+class _WeatherBanner extends StatelessWidget {
+  const _WeatherBanner({required this.weather});
+
+  final WeatherData weather;
+
+  static const _modeIcon = {
+    'outdoor': '🌳',
+    'indoor': '🏛️',
+    'sunset': '🌅',
+    'mixed': '🌆',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final modeIcon = _modeIcon[weather.suggestionMode] ?? '🌤️';
+    final hasRain = weather.precipitationProbability >= 30;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0F6FF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFBFD0E2)),
+      ),
+      child: Row(
+        children: [
+          Text(
+            weather.conditionEmoji,
+            style: const TextStyle(fontSize: 22),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      weather.tempLabel,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                        color: Color(0xFF0B3B68),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      weather.conditionText,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: Color(0xFF475569),
+                      ),
+                    ),
+                    if (hasRain) ...[
+                      const SizedBox(width: 6),
+                      Text(
+                        '💧${weather.precipitationProbability}%',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF0284C7),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                Text(
+                  '$modeIcon ${weather.suggestionLabel}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF64748B),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            '💨 ${weather.windSpeed.round()} km/h',
+            style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+          ),
+        ],
+      ),
+    );
   }
 }

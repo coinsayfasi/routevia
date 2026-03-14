@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/error_utils.dart';
 import '../../core/theme.dart';
 import '../../data/providers.dart';
 
@@ -36,7 +37,7 @@ class _EcoScreenState extends ConsumerState<EcoScreen> {
           'distance_km': 0.0,
           'co2_kg': 0.0,
           'saved_vs_car_kg': 0.0,
-          'tips': ['Eko skor alinamadi: $e'],
+          'tips': [friendlyError(e)],
         };
       });
     } finally {
@@ -57,6 +58,7 @@ class _EcoScreenState extends ConsumerState<EcoScreen> {
     final modeKm = Map<String, dynamic>.from(
       (_eco['mode_breakdown_km'] as Map?) ?? const {},
     );
+    final ecoActive = distance > 0 || modeKm.isNotEmpty;
 
     return Scaffold(
       body: Container(
@@ -73,6 +75,50 @@ class _EcoScreenState extends ConsumerState<EcoScreen> {
               : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 140),
                   children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: ecoActive
+                            ? const Color(0xFFECFDF3)
+                            : const Color(0xFFFFFBEB),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: ecoActive
+                              ? const Color(0xFFA6F4C5)
+                              : const Color(0xFFFDE68A),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            ecoActive
+                                ? Icons.verified_outlined
+                                : Icons.hourglass_disabled_outlined,
+                            color: ecoActive
+                                ? const Color(0xFF027A48)
+                                : const Color(0xFFB54708),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              ecoActive
+                                  ? 'Eko skor aktif. Son rotana gore canli hesaplandi.'
+                                  : 'Eko skor hazir ama aktif veri yok. Once rota olusturup haritada ac.',
+                              style: TextStyle(
+                                color: ecoActive
+                                    ? const Color(0xFF027A48)
+                                    : const Color(0xFFB54708),
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                     Container(
                       padding: const EdgeInsets.all(18),
                       decoration: BoxDecoration(

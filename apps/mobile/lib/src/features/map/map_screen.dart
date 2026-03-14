@@ -40,6 +40,27 @@ const _categoryStyles = <String, _CategoryStyle>{
   'canyon':     _CategoryStyle(Color(0xFF4527A0), Icons.terrain,           'Kanyon'),
 };
 
+// Category → emoji mapping for map markers.
+// Emoji instantly communicates the place type without needing to read text.
+const _categoryEmojis = <String, String>{
+  'museum':     '🏛️',
+  'historical': '🏰',
+  'nature':     '🌿',
+  'beach':      '🏖️',
+  'viewpoint':  '🔭',
+  'food':       '🍽️',
+  'cafe':       '☕',
+  'lodging':    '🏨',
+  'activity':   '🎯',
+  'market':     '🛍️',
+  'tour':       '🗺️',
+  'waterfall':  '💧',
+  'canyon':     '🏔️',
+};
+
+String _emojiOf(String category) =>
+    _categoryEmojis[category] ?? '📍';
+
 _CategoryStyle _styleOf(String category) =>
     _categoryStyles[category] ??
     const _CategoryStyle(Color(0xFF78909C), Icons.place, 'Diğer');
@@ -52,6 +73,7 @@ class MapScreen extends ConsumerStatefulWidget {
     this.readOnly = false,
     this.initialLat,
     this.initialLng,
+    this.initialPlaceId,
     this.initialProvinceSlug,
     this.initialDistrictId,
     this.initialDistrictSlug,
@@ -62,6 +84,7 @@ class MapScreen extends ConsumerStatefulWidget {
   final bool readOnly;
   final double? initialLat;
   final double? initialLng;
+  final String? initialPlaceId;
   final String? initialProvinceSlug;
   final String? initialDistrictId;
   final String? initialDistrictSlug;
@@ -99,9 +122,18 @@ class _MapScreenState extends ConsumerState<MapScreen>
   Timer? _viewportDebounce;
   Timer? _searchDebounce;
   final _bboxCache = _LruBBoxCache(maxEntries: 24);
+  bool _initialPlaceFocusApplied = false;
+  String? _selectedExplorePlaceId;
+  LatLng? _userLocation;
+  // Immediate pin shown before viewport data loads (when navigating from a card tap)
+  LatLng? _initialPinLatLng;
 
   LatLng _center = const LatLng(39.9255, 32.8663);
-  late double _zoom = widget.initialDistrictName != null ? 10.8 : 8.0;
+  late double _zoom = widget.initialPlaceId != null && widget.initialPlaceId!.isNotEmpty
+      ? 13.4
+      : widget.initialDistrictName != null
+          ? 10.8
+          : 8.0;
 
   bool get _exploreMode => widget.plan == null;
 
@@ -143,6 +175,27 @@ class _MapScreenState extends ConsumerState<MapScreen>
     return sorted.take(20).toList();
   }
 
+  List<PlaceModel> get _exploreCardItems {
+    final picks = List<PlaceModel>.from(_topPicks);
+    final pinnedId =
+        (_selectedExplorePlaceId?.trim().isNotEmpty ?? false)
+            ? _selectedExplorePlaceId!.trim()
+            : widget.initialPlaceId?.trim();
+    if (pinnedId == null || pinnedId.isEmpty) return picks;
+    final pinned = _filteredPlaces.cast<PlaceModel?>().firstWhere(
+      (candidate) => candidate?.id == pinnedId,
+      orElse: () => null,
+    );
+    if (pinned == null) return picks;
+    final existingIndex = picks.indexWhere((candidate) => candidate.id == pinned.id);
+    if (existingIndex >= 0) {
+      final item = picks.removeAt(existingIndex);
+      picks.insert(0, item);
+      return picks;
+    }
+    return [pinned, ...picks.take(19)];
+  }
+
   // ── Init ──────────────────────────────────────────────────────────
   @override
   void initState() {
@@ -151,6 +204,10 @@ class _MapScreenState extends ConsumerState<MapScreen>
     final lng = widget.initialLng ?? widget.plan?.startLng;
     if (lat != null && lng != null) {
       _center = LatLng(lat, lng);
+      // Show an immediate pin when coming from a card tap with a specific place
+      if (widget.initialPlaceId != null && widget.initialPlaceId!.isNotEmpty) {
+        _initialPinLatLng = LatLng(lat, lng);
+      }
     }
     _loadLocationAndData();
   }
@@ -168,6 +225,21 @@ class _MapScreenState extends ConsumerState<MapScreen>
   }
 
   Future<void> _loadLocationAndData() async {
+    try {
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.whileInUse ||
+          permission == LocationPermission.always) {
+        final pos = await Geolocator.getCurrentPosition();
+        _userLocation = LatLng(pos.latitude, pos.longitude);
+        if (widget.initialLat == null && widget.initialLng == null) {
+          _center = _userLocation!;
+        }
+      }
+    } catch (_) {}
+
     final hasInitialPoint =
         widget.initialLat != null && widget.initialLng != null;
 
@@ -272,6 +344,55 @@ class _MapScreenState extends ConsumerState<MapScreen>
     if (sig == _allPlacesSignature) return;
     _allPlacesSignature = sig;
     _allPlaces = places;
+    if (_exploreMode) {
+      _applyInitialPlaceFocusIfNeeded();
+    }
+  }
+
+  void _applyInitialPlaceFocusIfNeeded() {
+    if (_initialPlaceFocusApplied) return;
+    final targetId = widget.initialPlaceId?.trim();
+    if (targetId == null || targetId.isEmpty) return;
+    final idx = _allPlaces.indexWhere((p) => p.id == targetId);
+    if (idx < 0) return;
+    _initialPlaceFocusApplied = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final place = _allPlaces[idx];
+      // Clear the initial pin – the real marker is now available
+      setState(() => _initialPinLatLng = null);
+      final cardIndex = _exploreCardItems.indexWhere(
+        (candidate) => candidate.id == place.id,
+      );
+      _focusExplorePlace(
+        place,
+        pageIndex: cardIndex >= 0 ? cardIndex : null,
+      );
+    });
+  }
+
+  void _focusExplorePlace(
+    PlaceModel place, {
+    int? pageIndex,
+    bool animatePage = true,
+  }) {
+    if (!_exploreMode) return;
+    setState(() => _selectedExplorePlaceId = place.id);
+    if (place.lat != null && place.lng != null) {
+      _mapController.move(
+        LatLng(place.lat!, place.lng!),
+        _zoom < 13.4 ? 13.4 : _zoom,
+      );
+    }
+    if (!animatePage) return;
+    final idx = pageIndex ??
+        _exploreCardItems.indexWhere((candidate) => candidate.id == place.id);
+    if (idx < 0 || !_pageController.hasClients) return;
+    _pageController.animateToPage(
+      idx,
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   void _scheduleViewportLoad({bool force = false}) {
@@ -427,6 +548,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
       }
       final pos = await Geolocator.getCurrentPosition();
       final loc = LatLng(pos.latitude, pos.longitude);
+      setState(() => _userLocation = loc);
       _mapController.move(loc, 14);
       _scheduleViewportLoad(force: true);
     } catch (_) {}
@@ -452,9 +574,10 @@ class _MapScreenState extends ConsumerState<MapScreen>
     }
 
     return byCoord.values.map((p) {
-      final isTop = topIds.contains(p.id);
+      final isSelected = _selectedExplorePlaceId == p.id;
+      final isTop = topIds.contains(p.id) || isSelected;
       final style = _styleOf(p.category);
-      final size = isTop ? 42.0 : 34.0;
+      final size = isSelected ? 48.0 : (isTop ? 42.0 : 34.0);
 
       return Marker(
         key: ValueKey('m:${p.id}'),
@@ -463,27 +586,32 @@ class _MapScreenState extends ConsumerState<MapScreen>
         width: size,
         height: size,
         child: GestureDetector(
-          onTap: () => context.push('/place', extra: p),
+          onTap: () => _focusExplorePlace(p),
           child: Container(
             decoration: BoxDecoration(
               color: style.color,
               shape: BoxShape.circle,
               border: Border.all(
-                color: isTop ? const Color(0xFFFFD600) : Colors.white,
-                width: isTop ? 2.5 : 1.8,
+                color: isSelected
+                    ? const Color(0xFFFFF3C4)
+                    : (isTop ? const Color(0xFFFFD600) : Colors.white),
+                width: isSelected ? 3.2 : (isTop ? 2.5 : 1.8),
               ),
               boxShadow: [
                 BoxShadow(
                   color: style.color.withValues(alpha: 0.4),
-                  blurRadius: isTop ? 12 : 6,
+                  blurRadius: isSelected ? 16 : (isTop ? 12 : 6),
                   offset: const Offset(0, 2),
                 ),
               ],
             ),
-            child: Icon(
-              style.icon,
-              color: Colors.white,
-              size: isTop ? 20 : 15,
+            child: Text(
+              _emojiOf(p.category),
+              style: TextStyle(
+                fontSize: isTop ? 18 : 13,
+                height: 1,
+              ),
+              textAlign: TextAlign.center,
             ),
           ),
         ),
@@ -493,7 +621,16 @@ class _MapScreenState extends ConsumerState<MapScreen>
 
   // ── Plan Markers ──────────────────────────────────────────────────
   List<Marker> _buildPlanMarkers() {
-    return _stops
+    return [
+      if (_userLocation != null)
+        Marker(
+          point: _userLocation!,
+          alignment: Alignment.center,
+          width: 30,
+          height: 30,
+          child: _buildUserLocationMarker(),
+        ),
+      ..._stops
         .where((s) => s.place.lat != null && s.place.lng != null)
         .map(
           (s) => Marker(
@@ -529,8 +666,63 @@ class _MapScreenState extends ConsumerState<MapScreen>
               ),
             ),
           ),
-        )
-        .toList();
+        ),
+    ];
+  }
+
+  Marker _buildInitialPin(LatLng point) => Marker(
+        key: const ValueKey('initial_pin'),
+        point: point,
+        alignment: Alignment.center,
+        width: 52,
+        height: 52,
+        child: Container(
+          decoration: BoxDecoration(
+            color: RouteviaColors.primary,
+            shape: BoxShape.circle,
+            border: Border.all(color: const Color(0xFFFFF3C4), width: 3.2),
+            boxShadow: [
+              BoxShadow(
+                color: RouteviaColors.primary.withValues(alpha: 0.5),
+                blurRadius: 18,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: const Icon(Icons.place_rounded, color: Colors.white, size: 26),
+        ),
+      );
+
+  Marker _buildExploreUserMarker() => Marker(
+        point: _userLocation!,
+        alignment: Alignment.center,
+        width: 30,
+        height: 30,
+        child: _buildUserLocationMarker(),
+      );
+
+  Widget _buildUserLocationMarker() {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF2563EB),
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 3),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x332563EB),
+            blurRadius: 12,
+            spreadRadius: 2,
+          ),
+        ],
+      ),
+      child: const Center(
+        child: Icon(
+          Icons.my_location_rounded,
+          size: 14,
+          color: Colors.white,
+        ),
+      ),
+    );
   }
 
   List<Polyline> _buildPolylines() {
@@ -549,7 +741,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
   Widget build(BuildContext context) {
     final markers = _exploreMode ? _buildExploreMarkers() : _buildPlanMarkers();
     final cardItems =
-        _exploreMode ? _topPicks : _stops.map((s) => s.place).toList();
+        _exploreMode ? _exploreCardItems : _stops.map((s) => s.place).toList();
 
     // Count by category for info display
     final categoryCounts = <String, int>{};
@@ -620,6 +812,11 @@ class _MapScreenState extends ConsumerState<MapScreen>
                     },
                   ),
                 ),
+              if (_exploreMode && _userLocation != null)
+                MarkerLayer(markers: [_buildExploreUserMarker()]),
+              // Immediate pin before viewport data loads (card-tap navigation)
+              if (_exploreMode && _initialPinLatLng != null)
+                MarkerLayer(markers: [_buildInitialPin(_initialPinLatLng!)]),
               if (!_exploreMode) MarkerLayer(markers: markers),
               if (!_exploreMode) PolylineLayer(polylines: _buildPolylines()),
             ],
@@ -1113,12 +1310,11 @@ class _MapScreenState extends ConsumerState<MapScreen>
                         itemCount: cardItems.length,
                         onPageChanged: (idx) {
                           final p = cardItems[idx];
-                          if (p.lat != null && p.lng != null) {
-                            _mapController.move(
-                              LatLng(p.lat!, p.lng!),
-                              _zoom < 13 ? 13 : _zoom,
-                            );
-                          }
+                          _focusExplorePlace(
+                            p,
+                            pageIndex: idx,
+                            animatePage: false,
+                          );
                         },
                         itemBuilder: (context, idx) {
                           final p = cardItems[idx];

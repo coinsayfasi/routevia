@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 
 class BillingCatalog {
+  static const targetMonthlyPriceLabel = '49,99 TL / ay';
+  static const targetYearlyPriceLabel = '500 TL / yil';
   static const _defaultMonthlyProductId = String.fromEnvironment(
     'IAP_PRO_MONTHLY',
     defaultValue: 'routevia_pro_monthly',
@@ -64,10 +66,12 @@ class BillingCatalog {
     _defaultMonthlyProductId: {
       'entitlement_key': entitlementPro,
       'label': 'Routevia Pro Aylik',
+      'target_price': targetMonthlyPriceLabel,
     },
     _defaultYearlyProductId: {
       'entitlement_key': entitlementPro,
       'label': 'Routevia Pro Yillik',
+      'target_price': targetYearlyPriceLabel,
     },
   };
 }

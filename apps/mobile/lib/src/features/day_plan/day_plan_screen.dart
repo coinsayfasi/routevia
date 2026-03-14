@@ -1,12 +1,10 @@
-import 'dart:io';
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/error_utils.dart';
+import '../../core/constants.dart';
 import '../../data/providers.dart';
 import '../../models/trip_models.dart';
 
@@ -68,29 +66,22 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
   Future<void> _sharePlan() async {
     if (_sharing) return;
     setState(() => _sharing = true);
+    final highlights = _plan.daysPlan
+        .expand((d) => d.stops)
+        .take(3)
+        .map((s) => s.place.name)
+        .join(', ');
     try {
       final repo = ref.read(repositoryProvider);
       final token = await repo.createShareToken(_plan.tripId);
-      final highlights = _plan.daysPlan
-          .expand((d) => d.stops)
-          .take(3)
-          .map((s) => s.place.name)
-          .join(', ');
       final text =
           '${_plan.province.name} • ${_plan.days} Günlük WOW Plan\n'
           'Öne çıkanlar: $highlights\n'
           'Aç: routevia://share/$token\n'
-          'Web: https://routevia.app/share/$token';
-      final imageFile = await _buildShareCardImage(
-        title: '${_plan.days} Günlük WOW Plan',
-        subtitle: _plan.province.name,
-        highlights: highlights,
-      );
+          'Paylaşım kodu: $token\n'
+          'Uygulamayı indir: ${AppConstants.playStoreUrl}';
       await SharePlus.instance.share(
-        ShareParams(
-          text: text,
-          files: imageFile == null ? null : [XFile(imageFile.path)],
-        ),
+        ShareParams(text: text),
       );
       await repo.logAppEvent(
         'plan_shared',
@@ -98,9 +89,20 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+      await SharePlus.instance.share(
+        ShareParams(
+          text:
+              '${_plan.province.name} • ${_plan.days} Günlük WOW Plan\n'
+              'Öne çıkanlar: $highlights\n'
+              'Uygulamayı indir: ${AppConstants.playStoreUrl}',
+        ),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Paylaşım bağlantısı üretilemedi. Genel paylaşım açıldı.'),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _sharing = false);
     }
@@ -119,8 +121,8 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
         SnackBar(
           content: Text(
             premiumUsed
-                ? 'Bugün optimize edildi (Premium).'
-                : 'Bugün optimize edildi (Temel mod).',
+                ? 'Plan güncellendi. Premium rota akışı hazır.'
+                : 'Plan güncellendi. Günün rota akışı hazır.',
           ),
         ),
       );
@@ -134,95 +136,6 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
     }
   }
 
-  Future<File?> _buildShareCardImage({
-    required String title,
-    required String subtitle,
-    required String highlights,
-  }) async {
-    try {
-      const width = 1080.0;
-      const height = 1350.0;
-      final recorder = ui.PictureRecorder();
-      final canvas = Canvas(recorder);
-      final bgPaint = Paint()
-        ..shader = const LinearGradient(
-          colors: [Color(0xFF081426), Color(0xFF0B1F3A), Color(0xFF0E7490)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ).createShader(const Rect.fromLTWH(0, 0, width, height));
-      canvas.drawRect(const Rect.fromLTWH(0, 0, width, height), bgPaint);
-
-      final titlePainter = TextPainter(
-        text: TextSpan(
-          text: 'Routevia',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 64,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout(maxWidth: width - 120);
-      titlePainter.paint(canvas, const Offset(60, 70));
-
-      final p2 = TextPainter(
-        text: TextSpan(
-          text: subtitle,
-          style: const TextStyle(
-            color: Color(0xFFBAE6FD),
-            fontSize: 44,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout(maxWidth: width - 120);
-      p2.paint(canvas, const Offset(60, 180));
-
-      final p3 = TextPainter(
-        text: TextSpan(
-          text: title,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 52,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout(maxWidth: width - 120);
-      p3.paint(canvas, const Offset(60, 280));
-
-      final p4 = TextPainter(
-        text: TextSpan(
-          text: 'Öne çıkanlar: $highlights',
-          style: const TextStyle(color: Colors.white70, fontSize: 34),
-        ),
-        textDirection: TextDirection.ltr,
-        maxLines: 6,
-        ellipsis: '…',
-      )..layout(maxWidth: width - 120);
-      p4.paint(canvas, const Offset(60, 430));
-
-      final p5 = TextPainter(
-        text: const TextSpan(
-          text: 'Türkiye Seyahat Asistanı',
-          style: TextStyle(color: Color(0xFF99F6E4), fontSize: 30),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout(maxWidth: width - 120);
-      p5.paint(canvas, const Offset(60, height - 110));
-
-      final picture = recorder.endRecording();
-      final image = await picture.toImage(width.toInt(), height.toInt());
-      final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      if (bytes == null) return null;
-      final file = File('${Directory.systemTemp.path}/routevia_plan_card.png');
-      await file.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
-      return file;
-    } catch (_) {
-      return null;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final day = _plan.daysPlan.firstWhere(
@@ -232,7 +145,11 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Günlük Plan Zaman Çizelgesi'),
+        title: const Text(
+          'Günlük Plan',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
           IconButton(
             onPressed: _optimizing ? null : _optimizeToday,

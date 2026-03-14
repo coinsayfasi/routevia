@@ -51,6 +51,24 @@ class LocalCache {
         .toList();
   }
 
+  Future<void> deleteTripHistoryEntry(String tripId) async {
+    final normalizedTripId = tripId.trim();
+    if (normalizedTripId.isEmpty) return;
+    final box = await _openSafeBox();
+    final raw = box.get('trip_history');
+    final items = ((raw as List?) ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .where((item) => item['trip_id']?.toString() != normalizedTripId)
+        .toList();
+    await box.put('trip_history', items);
+
+    final lastTrip = box.get('last_trip');
+    if (lastTrip is Map &&
+        lastTrip['trip_id']?.toString() == normalizedTripId) {
+      await box.delete('last_trip');
+    }
+  }
+
   Future<int> bumpSessionCount() async {
     final box = await _openSafeBox();
     final current = (box.get('session_count') as int?) ?? 0;
@@ -121,6 +139,70 @@ class LocalCache {
     return raw is String ? raw : null;
   }
 
+  Future<void> setLocationSetupSkipped(bool skipped) async {
+    final box = await _openSafeBox();
+    await box.put('location_setup_skipped', skipped);
+  }
+
+  Future<bool> getLocationSetupSkipped() async {
+    final box = await _openSafeBox();
+    return (box.get('location_setup_skipped') as bool?) ?? false;
+  }
+
+  Future<void> setOnboardingCompleted(bool completed) async {
+    final box = await _openSafeBox();
+    await box.put('onboarding_completed_local', completed);
+  }
+
+  Future<bool> getOnboardingCompleted() async {
+    final box = await _openSafeBox();
+    return (box.get('onboarding_completed_local') as bool?) ?? false;
+  }
+
+  Future<void> setPreferredLanguageCode(String? code) async {
+    final box = await _openSafeBox();
+    if (code == null || code.trim().isEmpty || code.trim() == 'system') {
+      await box.delete('preferred_language_code');
+      return;
+    }
+    await box.put('preferred_language_code', code.trim().toLowerCase());
+  }
+
+  Future<String?> getPreferredLanguageCode() async {
+    final box = await _openSafeBox();
+    final raw = box.get('preferred_language_code');
+    return raw is String ? raw : null;
+  }
+
+  Future<void> savePlanSettings({
+    required int days,
+    required String transportMode,
+    required String pace,
+    required String persona,
+    required int radiusKm,
+    required bool allowOutside,
+    required Set<String> prefs,
+  }) async {
+    final box = await _openSafeBox();
+    await box.put('plan_settings', {
+      'days': days,
+      'transport_mode': transportMode,
+      'pace': pace,
+      'persona': persona,
+      'radius_km': radiusKm,
+      'allow_outside': allowOutside,
+      'prefs': prefs.toList(growable: false),
+      'updated_at': DateTime.now().toIso8601String(),
+    });
+  }
+
+  Future<Map<String, dynamic>> getPlanSettings() async {
+    final box = await _openSafeBox();
+    final raw = box.get('plan_settings');
+    if (raw is! Map) return const {};
+    return Map<String, dynamic>.from(raw);
+  }
+
   Future<void> saveOfflineCityPack(
     String provinceSlug,
     List<Map<String, dynamic>> places,
@@ -164,9 +246,9 @@ class LocalCache {
     final box = await _openSafeBox();
     final idxRaw = box.get('offline_city_pack_index');
     if (idxRaw is! Map) return const {};
-    return Map<String, dynamic>.from(idxRaw).map(
-      (k, v) => MapEntry(k, v.toString()),
-    );
+    return Map<String, dynamic>.from(
+      idxRaw,
+    ).map((k, v) => MapEntry(k, v.toString()));
   }
 
   // ── Daily Plan Count ───────────────────────────────────────────────────
@@ -209,8 +291,7 @@ class LocalCache {
           (box.get('consent_analytics_enabled') as bool?) ?? false,
       'personalized_ads_enabled':
           (box.get('consent_personalized_ads_enabled') as bool?) ?? false,
-      'policy_accepted':
-          (box.get('consent_policy_accepted') as bool?) ?? false,
+      'policy_accepted': (box.get('consent_policy_accepted') as bool?) ?? false,
       'updated_at': box.get('consent_updated_at') as String?,
     };
   }
