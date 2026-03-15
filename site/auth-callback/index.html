@@ -100,8 +100,8 @@
   <!-- Success state -->
   <div id="state-success">
     <div class="icon-success">✅</div>
-    <h2>Hazır!</h2>
-    <p>Uygulama açılmıyorsa aşağıdaki butona dokun.</p>
+    <h2 id="success-title">Hazır!</h2>
+    <p id="success-msg">Uygulama açılmıyorsa aşağıdaki butona dokun.</p>
     <a id="deep-link-btn" href="#" class="btn">Uygulamayı Aç</a>
     <p class="note">Routevia uygulamasının yüklü olması gerekir.</p>
   </div>
@@ -118,10 +118,11 @@
 
 <script>
 (function () {
-  // Parse both hash fragment and query params
+  // Parse both hash fragment and query params.
+  // Supabase implicit flow → tokens in hash (#access_token=...&type=recovery)
+  // Supabase PKCE flow    → code in query  (?code=...&type=recovery)
   var hash   = window.location.hash.replace(/^#/, '');
   var search = window.location.search.replace(/^\?/, '');
-  var combined = hash || search;
 
   function parseParams(str) {
     var p = {};
@@ -134,7 +135,14 @@
     return p;
   }
 
-  var params = parseParams(combined);
+  // Prefer hash (implicit) over query (PKCE)
+  var hashParams   = parseParams(hash);
+  var searchParams = parseParams(search);
+  // Merge: hash params take priority (implicit flow), fallback to query params (PKCE)
+  var params = Object.assign({}, searchParams, hashParams);
+
+  // Combined string to forward to app (prefer hash if it has tokens, else use search)
+  var combined = hash || search;
 
   function show(id) {
     ['state-loading','state-success','state-error'].forEach(function(s){
@@ -142,20 +150,20 @@
     });
   }
 
-  // Error case
+  // ── Error case ─────────────────────────────────────────────────────────────
   if (params['error']) {
-    var code = params['error_code'] || params['error'];
+    var code  = params['error_code'] || params['error'];
     var title = 'Bir sorun oluştu';
     var msg   = params['error_description']
-      ? decodeURIComponent(params['error_description'].replace(/\+/g,' '))
+      ? decodeURIComponent((params['error_description'] || '').replace(/\+/g,' '))
       : 'Bilinmeyen hata.';
 
     if (code === 'otp_expired') {
       title = 'Bağlantı Süresi Doldu';
-      msg   = 'Şifre sıfırlama bağlantısının süresi dolmuş. Lütfen uygulamaya dön ve tekrar "Şifremi unuttum" seçeneğini kullan.';
+      msg   = 'Bu bağlantının süresi dolmuş. Lütfen uygulamaya dön ve tekrar dene.';
     } else if (code === 'access_denied') {
       title = 'Erişim Reddedildi';
-      msg   = 'Bu bağlantı artık geçerli değil. Lütfen tekrar şifre sıfırlama isteği gönder.';
+      msg   = 'Bu bağlantı artık geçerli değil. Lütfen yeni bir istek gönder.';
     }
 
     document.getElementById('error-title').textContent = title;
@@ -164,31 +172,45 @@
     return;
   }
 
-  function buildDeepLink(paramString) {
-    return 'routevia://auth-callback' + (paramString ? ('?' + paramString) : '');
-  }
+  // ── Success case ───────────────────────────────────────────────────────────
+  // Handle both PKCE (code=...) and implicit (access_token=...) flows.
+  var hasToken = params['access_token'] || params['code'];
 
-  // Success case: has access_token
-  if (params['access_token']) {
-    // Supabase may return tokens either in the hash or in the query string.
-    var deepLink = buildDeepLink(combined);
+  if (hasToken) {
+    // Build deep link — forward ALL params as query string so the app can
+    // call getSessionFromUrl() regardless of flow type.
+    var deepLink = 'routevia://auth-callback?' + combined;
     document.getElementById('deep-link-btn').href = deepLink;
+
+    // Customise message based on link type
+    var linkType = params['type'] || '';
+    if (linkType === 'recovery') {
+      document.getElementById('success-title').textContent = 'Şifre Sıfırlama';
+      document.getElementById('success-msg').textContent   =
+        'Uygulama açılıyor. Açılmıyorsa aşağıdaki butona dokun.';
+    } else if (linkType === 'signup' || linkType === 'email_change') {
+      document.getElementById('success-title').textContent = 'E-posta Doğrulandı!';
+      document.getElementById('success-msg').textContent   =
+        'Hesabın onaylandı. Uygulama açılıyor.';
+    }
+
     show('state-success');
 
-    // Auto-redirect
+    // Auto-redirect to app immediately
     window.location.href = deepLink;
 
-    // Fallback: if still on page after 2s, keep showing success button
+    // Keep showing the button if page didn't close (user can tap manually)
     setTimeout(function () {
       show('state-success');
     }, 2000);
     return;
   }
 
-  // No params at all — just show a minimal "open app" card
+  // ── No usable params ───────────────────────────────────────────────────────
   show('state-error');
   document.getElementById('error-title').textContent = 'Bağlantı Tanınamadı';
-  document.getElementById('error-msg').textContent   = 'Bu sayfa yalnızca Routevia uygulaması üzerinden gelen bağlantıları işler.';
+  document.getElementById('error-msg').textContent   =
+    'Bu sayfa yalnızca Routevia uygulaması üzerinden gelen bağlantıları işler.';
 })();
 </script>
 </body>
