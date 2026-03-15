@@ -87,7 +87,7 @@ export default async function PlacesPage({
                     </form>
                   </td>
                   <td className="px-5 py-3">
-                    <form action={deletePlace.bind(null, place.id)} onSubmit={(e) => { if (!confirm(`"${place.name}" silinsin mi?`)) e.preventDefault(); }}>
+                    <form action={deletePlace.bind(null, place.id)}>
                       <button type="submit" className="rounded-full bg-red-50 px-3 py-0.5 text-xs font-semibold text-red-600 hover:bg-red-100 transition">
                         Sil
                       </button>
