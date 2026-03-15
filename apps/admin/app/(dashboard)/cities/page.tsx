@@ -23,10 +23,10 @@ async function getPlaceCountPerProvince(): Promise<Record<string, number>> {
   const { data } = await supabase
     .from("pois")
     .select("province_id")
-    .eq("is_published", true);
+    .eq("provenance_verified", true);
   const counts: Record<string, number> = {};
   for (const row of data ?? []) {
-    const id = row.province_id as string;
+    const id = (row as Record<string, unknown>).province_id as string | undefined;
     if (id) counts[id] = (counts[id] ?? 0) + 1;
   }
   return counts;

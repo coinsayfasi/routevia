@@ -47,8 +47,8 @@ export default async function EditorialPage() {
                       <td className="px-5 py-3 text-slate-500">{place.category}</td>
                       <td className="px-5 py-3 text-slate-500">{place.city ?? "—"}</td>
                       <td className="px-5 py-3">
-                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${place.is_published ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>
-                          {place.is_published ? "Yayında" : "Taslak"}
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${place.provenance_verified ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>
+                          {place.provenance_verified ? "Doğrulandı" : "Bekliyor"}
                         </span>
                       </td>
                       <td className="px-5 py-3">
