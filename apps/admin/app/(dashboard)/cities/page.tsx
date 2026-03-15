@@ -4,15 +4,13 @@ interface Province {
   id: string;
   name: string;
   slug: string;
-  lat: number | null;
-  lng: number | null;
 }
 
 async function listProvinces(): Promise<Province[]> {
   const supabase = await createSupabaseAdminClient();
   const { data, error } = await supabase
     .from("provinces")
-    .select("id,name,slug,lat,lng")
+    .select("id,name,slug")
     .order("name", { ascending: true });
   if (error) throw error;
   return (data ?? []) as Province[];
@@ -53,8 +51,7 @@ export default async function CitiesPage() {
               <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wider text-slate-500">
                 <th className="px-5 py-3 font-medium">Ad</th>
                 <th className="px-5 py-3 font-medium">Slug</th>
-                <th className="px-5 py-3 font-medium">Koordinat</th>
-                <th className="px-5 py-3 font-medium">Yayındaki Yer</th>
+                <th className="px-5 py-3 font-medium">Doğrulanmış Yer</th>
               </tr>
             </thead>
             <tbody>
@@ -62,9 +59,6 @@ export default async function CitiesPage() {
                 <tr key={p.id} className="border-b border-slate-50 hover:bg-slate-50/60 transition">
                   <td className="px-5 py-3 font-semibold text-slate-800">{p.name}</td>
                   <td className="px-5 py-3 text-slate-500 font-mono text-xs">{p.slug}</td>
-                  <td className="px-5 py-3 text-slate-400 font-mono text-xs">
-                    {p.lat != null && p.lng != null ? `${p.lat.toFixed(3)}, ${p.lng.toFixed(3)}` : "—"}
-                  </td>
                   <td className="px-5 py-3">
                     <span className="rounded-full bg-teal-50 px-2 py-0.5 text-xs font-semibold text-teal-700">
                       {placeCounts[p.id] ?? 0}
