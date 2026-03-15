@@ -26,3 +26,14 @@ export async function toggleFeatured(placeId: string, isFeatured: boolean) {
   revalidatePath("/places");
   revalidatePath("/editorial");
 }
+
+export async function deletePlace(placeId: string) {
+  await requireAdmin();
+  const supabase = await createSupabaseAdminClient();
+  // Remove from featured first to avoid FK issues
+  await supabase.from("featured_places").delete().eq("place_id", placeId);
+  const { error } = await supabase.from("pois").delete().eq("id", placeId);
+  if (error) throw error;
+  revalidatePath("/places");
+  revalidatePath("/editorial");
+}

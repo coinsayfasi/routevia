@@ -1,5 +1,5 @@
 import { listPlaces } from "@/lib/data/places";
-import { toggleVerified, toggleFeatured } from "@/lib/actions/places";
+import { toggleVerified, toggleFeatured, deletePlace } from "@/lib/actions/places";
 
 const CATEGORIES = [
   "all","museum","historical","nature","beach","viewpoint",
@@ -60,6 +60,7 @@ export default async function PlacesPage({
                 <th className="px-5 py-3 font-medium">Şehir</th>
                 <th className="px-5 py-3 font-medium">Doğrulama</th>
                 <th className="px-5 py-3 font-medium">Öne Çıkan</th>
+                <th className="px-5 py-3 font-medium">Sil</th>
               </tr>
             </thead>
             <tbody>
@@ -82,6 +83,13 @@ export default async function PlacesPage({
                     <form action={toggleFeatured.bind(null, place.id, place.is_featured ?? false)}>
                       <button type="submit" className={`rounded-full px-3 py-0.5 text-xs font-semibold transition ${place.is_featured ? "bg-amber-100 text-amber-700 hover:bg-slate-100 hover:text-slate-500" : "bg-slate-100 text-slate-500 hover:bg-amber-100 hover:text-amber-700"}`}>
                         {place.is_featured ? "★ Öne Çıkan" : "Öne Çıkar"}
+                      </button>
+                    </form>
+                  </td>
+                  <td className="px-5 py-3">
+                    <form action={deletePlace.bind(null, place.id)} onSubmit={(e) => { if (!confirm(`"${place.name}" silinsin mi?`)) e.preventDefault(); }}>
+                      <button type="submit" className="rounded-full bg-red-50 px-3 py-0.5 text-xs font-semibold text-red-600 hover:bg-red-100 transition">
+                        Sil
                       </button>
                     </form>
                   </td>
