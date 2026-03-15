@@ -27,5 +27,17 @@ export async function moderateSubmission(input: unknown) {
 
   revalidatePath("/");
   revalidatePath("/moderation");
+  revalidatePath("/images");
   revalidatePath(`/moderation/${parsed.submissionType}/${parsed.submissionId}`);
+}
+
+export async function deletePhotoSubmission(submissionId: string) {
+  await requireAdmin();
+  const supabase = await createSupabaseAdminClient();
+  const { error } = await supabase
+    .from("user_photo_submissions")
+    .delete()
+    .eq("id", submissionId);
+  if (error) throw error;
+  revalidatePath("/images");
 }

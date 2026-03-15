@@ -69,6 +69,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   List<PlaceModel> _popularPlaces = const [];
   List<PlaceModel> _scenicPicks = const [];
   List<PlaceModel> _foodPicks = const [];
+  Set<String> _featuredPlaceIds = {};
   List<Map<String, dynamic>> _smartSeason = const [];
   bool _smartSeasonLoading = false;
   Map<String, String> _offlinePacks = const {};
@@ -264,31 +265,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return values.any((value) => needles.any(value.contains));
   }
 
-  bool _hasMallSignal({
-    required String name,
-    required String category,
-    required Iterable<Object?> tags,
-  }) {
-    final values = <String>[
-      _normalizeLookupText(name),
-      _normalizeLookupText(category),
-      ...tags.map((tag) => _normalizeLookupText(tag?.toString() ?? '')),
-    ];
-    const needles = <String>[
-      'avm',
-      'alisveris',
-      'shopping',
-      'mall',
-      'outlet',
-      'carsi',
-      'çarşı',
-      'shoppingcenter',
-      'shoppingmall',
-      'lifestylecenter',
-    ];
-    return values.any((value) => needles.any(value.contains));
-  }
-
   bool _isFoodLikePlace(PlaceModel place) {
     return {'food', 'cafe'}.contains(place.category) ||
         _hasFoodSignal(
@@ -296,63 +272,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           category: place.category,
           tags: place.tags,
         );
-  }
-
-  bool _isMallLikePlace(PlaceModel place) {
-    return place.category == 'mall' ||
-        _hasMallSignal(
-          name: place.name,
-          category: place.category,
-          tags: place.tags,
-        );
-  }
-
-  bool _matchesSmartSlot(PlaceModel place, List<String> slotCategories) {
-    final wantsFood = slotCategories.any((c) => c == 'food' || c == 'cafe');
-    final wantsMall = slotCategories.contains('mall');
-    final category = place.category;
-    if (wantsFood) {
-      return _isFoodLikePlace(place);
-    }
-    if (wantsMall) {
-      return _isMallLikePlace(place);
-    }
-    if (_isFoodLikePlace(place)) return false;
-    if (_isMallLikePlace(place)) return false;
-    final whitelist = <String>{
-      ...slotCategories.where((c) => c != 'food' && c != 'cafe'),
-    };
-    if (whitelist.contains(category)) return true;
-    if (slotCategories.contains('activity') &&
-        {'historical', 'museum', 'viewpoint', 'nature'}.contains(category)) {
-      return true;
-    }
-    return false;
-  }
-
-  String _displayCategoryForPlace(PlaceModel place) {
-    if (_isFoodLikePlace(place)) {
-      return place.category == 'cafe' ? 'cafe' : 'food';
-    }
-    if (_isMallLikePlace(place)) return 'mall';
-    if (_isLodgingLikePlace(place)) return 'lodging';
-    return place.category;
-  }
-
-  String _displayCategoryForSmartItem(Map<String, dynamic> item) {
-    final category = item['category']?.toString() ?? 'activity';
-    final name = item['name']?.toString() ?? '';
-    final tags = ((item['tags'] as List?) ?? const []).cast<Object?>();
-    if (_hasFoodSignal(name: name, category: category, tags: tags)) {
-      return category == 'cafe' ? 'cafe' : 'food';
-    }
-    if (_hasMallSignal(name: name, category: category, tags: tags)) {
-      return 'mall';
-    }
-    if (_hasLodgingSignal(name: name, category: category, tags: tags)) {
-      return 'lodging';
-    }
-    return category;
   }
 
   List<PlaceModel> _activeTopPicks() {
@@ -455,48 +374,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             best = max(best, 90);
           } else if (name.contains(normalized) || normalized.contains(name)) {
             best = max(best, 70);
-          }
-        }
-      }
-    }
-    return best;
-  }
-
-  int _mustSeeBoostForContextPlace(PlaceModel place) {
-    final provinceSlug = _provinceSlug ?? '';
-    if (provinceSlug.isEmpty) return 0;
-    final name = _normalizeLookupText(place.name);
-    final summary = _normalizeLookupText(place.shortSummary);
-    final district = _normalizeLookupText(_selectedDistrictNameOrNull ?? '');
-    var best = 0;
-    final provinceKeywords = kMustSeePlaceKeywordsByProvince[provinceSlug];
-    if (provinceKeywords != null) {
-      for (final keyword in provinceKeywords) {
-        final normalized = _normalizeLookupText(keyword);
-        if (normalized.isEmpty) continue;
-        if (name == normalized) {
-          best = max(best, 48);
-        } else if (name.contains(normalized) || normalized.contains(name)) {
-          best = max(best, 34);
-        }
-      }
-    }
-    final districtRules = kMustSeePlaceKeywordsByDistrict[provinceSlug];
-    if (districtRules != null && district.isNotEmpty) {
-      for (final entry in districtRules.entries) {
-        final districtKeyword = _normalizeLookupText(entry.key);
-        if (!district.contains(districtKeyword) &&
-            !summary.contains(districtKeyword) &&
-            !districtKeyword.contains(district)) {
-          continue;
-        }
-        for (final keyword in entry.value) {
-          final normalized = _normalizeLookupText(keyword);
-          if (normalized.isEmpty) continue;
-          if (name == normalized) {
-            best = max(best, 72);
-          } else if (name.contains(normalized) || normalized.contains(name)) {
-            best = max(best, 52);
           }
         }
       }
@@ -659,98 +536,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }).toList()..sort((a, b) => b.score.compareTo(a.score));
     return ranked.take(3).map((row) => row.place).toList(growable: false);
   }
-
-  // ── Smart Context Helpers ────────────────────────────────────────────────
-
-  int _minutesUntil(DateTime now, int h, int m) {
-    final t = DateTime(now.year, now.month, now.day, h, m);
-    return t.difference(now).inMinutes;
-  }
-
-  // Astronomical sunrise/sunset for given lat/lng (Turkey = UTC+3).
-  // Accuracy: ±5 min — sufficient for UX display.
-  ({int riseH, int riseM, int setH, int setM}) _solarForCoords(
-    double lat,
-    double lng,
-  ) {
-    final now = DateTime.now();
-    final dayOfYear = now.difference(DateTime(now.year, 1, 1)).inDays + 1;
-    const deg2rad = pi / 180;
-
-    // Declination
-    final declination = -23.45 * cos(2 * pi * (dayOfYear + 10) / 365.0);
-    final decRad = declination * deg2rad;
-    final latRad = lat * deg2rad;
-
-    // Hour angle
-    final cosHA = -tan(latRad) * tan(decRad);
-    final ha = cosHA.clamp(-1.0, 1.0);
-    final haAngle = acos(ha) / deg2rad; // degrees
-
-    // Equation of time (minutes)
-    final b = 2 * pi * (dayOfYear - 81) / 364.0;
-    final eqTime = 9.87 * sin(2 * b) - 7.53 * cos(b) - 1.5 * sin(b);
-
-    // Solar noon in local time (UTC+3 → standard meridian 45°)
-    final solarNoonMin = 720 - eqTime - (lng - 45) * 4;
-
-    final sunriseMin = (solarNoonMin - haAngle * 4).round();
-    final sunsetMin = (solarNoonMin + haAngle * 4).round();
-
-    return (
-      riseH: (sunriseMin ~/ 60).clamp(0, 23),
-      riseM: sunriseMin % 60,
-      setH: (sunsetMin ~/ 60).clamp(0, 23),
-      setM: sunsetMin % 60,
-    );
-  }
-
-  ({int riseH, int riseM, int setH, int setM}) _solar() {
-    final prov = _provinces.firstWhere(
-      (p) => p['slug'] == _provinceSlug,
-      orElse: () => const {},
-    );
-    final lat = (prov['lat'] as num?)?.toDouble();
-    final lng = (prov['lng'] as num?)?.toDouble();
-    // Fallback to Ankara if no coords
-    return _solarForCoords(lat ?? 39.92, lng ?? 32.85);
-  }
-
-  String _timeStr(int h, int m) =>
-      '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
-
-  // Radius (km) travellable by the selected transport in ~30–40min
-  double _transportRadiusKm() => switch (_transportMode) {
-    'walk' => 2.0,
-    'bike' => 12.0,
-    'scooter' => 8.0,
-    'transit' => 30.0,
-    'car' => 60.0,
-    _ => 25.0,
-  };
-
-  String _travelTimeStr(double km) {
-    final speed = switch (_transportMode) {
-      'walk' => 5.0,
-      'bike' => 15.0,
-      'scooter' => 20.0,
-      'transit' => 25.0,
-      'car' => 40.0,
-      _ => 25.0,
-    };
-    final mins = (km / speed * 60).round().clamp(1, 600);
-    return mins < 60 ? '~$mins dk' : '~${mins ~/ 60}s ${mins % 60}dk';
-  }
-
-  String _kmLabel(double km) =>
-      km < 1.0 ? '${(km * 1000).round()} m' : '${km.toStringAsFixed(1)} km';
-
-  IconData _transportIcon() => switch (_transportMode) {
-    'walk' => Icons.directions_walk_rounded,
-    'bike' || 'scooter' => Icons.directions_bike_rounded,
-    'car' => Icons.directions_car_rounded,
-    _ => Icons.directions_transit_rounded,
-  };
 
   // ── Data loading ─────────────────────────────────────────────────────────
 
@@ -988,12 +773,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final districtName = _selectedDistrictNameOrNull;
     var serviceError = false;
     try {
-      var places = await repo.listProvinceHubPlaces(
-        provinceSlug: slug,
-        personaMode: _persona,
-        preferences: _prefs.toList(),
-        districtName: districtName,
-      );
+      final results = await Future.wait([
+        repo.listProvinceHubPlaces(
+          provinceSlug: slug,
+          personaMode: _persona,
+          preferences: _prefs.toList(),
+          districtName: districtName,
+        ),
+        repo.getFeaturedPlaceIds(),
+      ]);
+      var places = results[0] as List<PlaceModel>;
+      final featuredIds = results[1] as Set<String>;
+      if (mounted) setState(() => _featuredPlaceIds = featuredIds);
       if (places.isEmpty) {
         final fallbackBundle = await repo.nearbyPlacesBundle(
           lat:
@@ -1056,7 +847,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             .toList();
         _foodPicks = places
             .where((p) => p.category == 'food' || p.category == 'cafe')
-            .take(10)
+            .take(20)
             .toList();
       });
       unawaited(_loadSmartSeason());
@@ -1098,7 +889,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             .toList();
         _foodPicks = places
             .where((p) => p.category == 'food' || p.category == 'cafe')
-            .take(10)
+            .take(20)
             .toList();
       });
       unawaited(_loadSmartSeason());
@@ -1144,8 +935,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           );
       if (!mounted) return;
       setState(() => _weather = data);
-    } catch (_) {
+    } catch (e, st) {
       // Non-fatal — weather is enhancement only
+      debugPrint('[weather] load failed: $e\n$st');
     }
   }
 
@@ -1310,11 +1102,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     int limit = 16,
   }) {
     if (source.isEmpty) return const [];
-    final realSource = source.where((p) => !_isFakePlaceholder(p)).toList();
+    // Featured (admin-pinned) places always appear first
+    final realSource = source.where((p) => !_isFakePlaceholder(p)).toList()
+      ..sort((a, b) {
+        final aF = _featuredPlaceIds.contains(a.id) ? 1 : 0;
+        final bF = _featuredPlaceIds.contains(b.id) ? 1 : 0;
+        return bF.compareTo(aF);
+      });
     if (realSource.isEmpty) return const [];
     final isAnkara = _provinceSlug == 'ankara';
     final likesMuseum = _prefs.contains('museum');
 
+    // Keşif rotasında yeme-içme yok — sadece scenic/tarihi/doğa.
     final scenicEligible = realSource
         .where((p) => !_isFoodLikePlace(p))
         .toList();
@@ -1337,7 +1136,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final museumPool = scenicEligible
         .where((p) => p.category == 'museum')
         .toList();
-    final foodPool = realSource.where((p) => _isFoodLikePlace(p)).toList();
     final scenicPool = [...naturePool, ...historyPool, ...museumPool];
     final picks = <PlaceModel>[];
     final seen = <String>{};
@@ -1351,31 +1149,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
 
     if (isAnkara) {
-      var natureQuota = (limit * 0.35).ceil();
-      var foodQuota = (limit * 0.25).ceil();
-      var historyQuota = (limit * 0.20).ceil();
-      var museumQuota = likesMuseum ? (limit * 0.20).ceil() : 1;
+      var natureQuota = (limit * 0.40).ceil();
+      var historyQuota = (limit * 0.35).ceil();
+      var museumQuota = likesMuseum ? (limit * 0.25).ceil() : 1;
 
-      if (_persona == 'foodie') {
-        foodQuota += 2;
-        museumQuota = (museumQuota - 1).clamp(0, limit);
-      } else if (_persona == 'photo') {
+      if (_persona == 'photo') {
         natureQuota += 2;
-      } else if (_persona == 'family') {
-        natureQuota += 1;
-        foodQuota += 1;
       }
 
       while (picks.where((p) => naturePool.contains(p)).length < natureQuota &&
           picks.length < limit) {
         final before = picks.length;
         takeOne(naturePool);
-        if (picks.length == before) break;
-      }
-      while (picks.where((p) => foodPool.contains(p)).length < foodQuota &&
-          picks.length < limit) {
-        final before = picks.length;
-        takeOne(foodPool);
         if (picks.length == before) break;
       }
       while (picks.where((p) => historyPool.contains(p)).length <
@@ -1393,21 +1178,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       }
     }
 
-    // Fill remaining slots: prioritise scenic/nature/historical (3:1 over food).
-    int fillCycle = 0;
+    // Fill remaining slots with scenic content only.
     while (picks.length < limit) {
       final before = picks.length;
       takeOne(scenicPool);
       if (picks.length >= limit) break;
-      takeOne(scenicPool);
-      if (picks.length >= limit) break;
-      takeOne(scenicPool);
-      if (picks.length >= limit) break;
-      // Only add food every 4th pick to avoid restaurant dominance.
-      if (fillCycle % 4 == 3) takeOne(foodPool);
-      fillCycle++;
-      if (picks.length >= limit) break;
-      takeOne(realSource);
+      takeOne(scenicEligible);
       if (picks.length == before) break;
     }
     return picks;
@@ -1785,6 +1561,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: RouteviaColors.background,
+      bottomNavigationBar: const AdBannerWidget(),
       body: _dataLoading
           ? _buildLoadingBody()
           : CustomScrollView(
@@ -1810,8 +1587,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         const SizedBox(height: 16),
                       ],
                       _buildQuickActions(),
-                      const SizedBox(height: 24),
-                      const AdBannerWidget(),
                       const SizedBox(height: 24),
                       _buildTopPicksSection(),
                       const SizedBox(height: 24),
@@ -2674,6 +2449,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               return _TopPickCard(
                 place: place,
                 locationLabel: _selectedProvinceName,
+                isMustSee: _featuredPlaceIds.contains(place.id) || _mustSeeBoostForPersonal(place) > 0,
                 onTap: () => context.push(
                   '/map-explore',
                   extra: {
@@ -2727,10 +2503,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   children: [
                     Text(
                       _pickMode == 'food'
-                          ? 'Bu Haftanin Yemek Stoplari'
+                          ? context.tr('Bu Haftanın Yemek Stopları', "This Week's Food Stops")
                           : _pickMode == 'scenic'
-                          ? 'Bu Hafta Nereye Gidilir'
-                          : 'Bu Haftanin Kesif Rotasi',
+                          ? context.tr('Bu Hafta Nereye Gidilir', 'Where to Go This Week')
+                          : context.tr('Bu Haftanın Keşif Rotası', "This Week's Discovery Route"),
                       style: const TextStyle(
                         fontWeight: FontWeight.w800,
                         fontSize: 18,
@@ -2741,10 +2517,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     if (_provinceSlug != null)
                       Text(
                         _pickMode == 'food'
-                            ? 'Hizli yemek ve kafe secimleri • $_selectedProvinceName'
+                            ? context.tr('Hızlı yemek ve kafe seçimleri • $_selectedProvinceName', 'Quick food & café picks • $_selectedProvinceName')
                             : _pickMode == 'scenic'
-                            ? 'Bu hafta yakinindan secilen 12 onerilik liste • $_selectedProvinceName'
-                            : 'Editor secimi + topluluk sinyali • $_selectedProvinceName',
+                            ? context.tr('Bu hafta yakınından seçilen 12 öneri • $_selectedProvinceName', '12 curated picks near you • $_selectedProvinceName')
+                            : context.tr('Editör seçimi + topluluk önerisi • $_selectedProvinceName', 'Editor picks + community signal • $_selectedProvinceName'),
                         style: const TextStyle(
                           color: RouteviaColors.textSecondary,
                           fontSize: 13,
@@ -2871,6 +2647,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     return _TopPickCard(
                       place: p,
                       locationLabel: _selectedProvinceName,
+                      isMustSee: _featuredPlaceIds.contains(p.id) || _mustSeeBoostForPersonal(p) > 0,
                       onTap: () => context.push(
                         '/map-explore',
                         extra: {
@@ -3340,7 +3117,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                     borderRadius: BorderRadius.circular(999),
                                   ),
                                   child: Text(
-                                    t,
+                                    _translateLiveTag(t, context),
                                     style: const TextStyle(
                                       fontSize: 11,
                                       color: Color(0xFF0369A1),
@@ -3353,7 +3130,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         ),
                         const Spacer(),
                         Text(
-                          'Guven: ${(live['confidence'] as num?)?.toInt() ?? 0}%',
+                          '${context.tr('Güven', 'Confidence')}: ${(live['confidence'] as num?)?.toInt() ?? 0}%',
                           style: const TextStyle(
                             fontSize: 11,
                             color: RouteviaColors.textSecondary,
@@ -3373,15 +3150,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
+  /// Translates raw backend tag labels (mevsim, sinyal, etkinlik, trust…)
+  /// into user-friendly localised strings.
+  String _translateLiveTag(String tag, BuildContext ctx) {
+    const map = {
+      'mevsim':   ('Mevsimsel', 'Seasonal'),
+      'sinyal':   ('Canlı Sinyal', 'Live Signal'),
+      'etkinlik': ('Etkinlik', 'Event'),
+      'trust':    ('Güvenilir', 'Trusted'),
+      'yoğunluk':('Yoğun', 'Busy'),
+      'yeni':     ('Yeni', 'New'),
+    };
+    final entry = map[tag.toLowerCase()];
+    if (entry == null) return tag;
+    return ctx.isEnglish ? entry.$2 : entry.$1;
+  }
+
   Widget _buildFoodSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 16),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Text(
-            'Yeme-İçme Önerileri',
-            style: TextStyle(
+            context.tr('Yeme-İçme Önerileri', 'Food & Drinks'),
+            style: const TextStyle(
               fontWeight: FontWeight.w800,
               fontSize: 18,
               letterSpacing: -0.2,
@@ -3501,9 +3294,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     borderRadius: BorderRadius.circular(999),
                     border: Border.all(color: const Color(0xFFFED7AA)),
                   ),
-                  child: const Text(
-                    'Sponsorlu / Reklam',
-                    style: TextStyle(
+                  child: Text(
+                    context.tr('Sponsorlu / Reklam', 'Sponsored / Ad'),
+                    style: const TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w700,
                       color: Color(0xFF9A3412),
@@ -3511,18 +3304,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                const Text(
-                  'İşletmeni sponsorlu alanda göster. Organik sıralama ayrı kalır.',
-                  style: TextStyle(
+                Text(
+                  context.tr(
+                    'İşletmeni sponsorlu alanda göster. Organik sıralama ayrı kalır.',
+                    'Show your business in the sponsored slot. Organic ranking stays separate.',
+                  ),
+                  style: const TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
                     color: RouteviaColors.textPrimary,
                   ),
                 ),
                 const SizedBox(height: 4),
-                const Text(
-                  'Politika: reklam içeriği etiketlenir ve kullanıcıya şeffaf gösterilir.',
-                  style: TextStyle(
+                Text(
+                  context.tr(
+                    'Politika: reklam içeriği etiketlenir ve kullanıcıya şeffaf gösterilir.',
+                    'Policy: ad content is labelled and shown transparently to users.',
+                  ),
+                  style: const TextStyle(
                     fontSize: 11.5,
                     color: RouteviaColors.textSecondary,
                   ),
@@ -4528,11 +4327,13 @@ class _TopPickCard extends StatelessWidget {
     required this.place,
     required this.locationLabel,
     required this.onTap,
+    this.isMustSee = false,
   });
 
   final PlaceModel place;
   final String locationLabel;
   final VoidCallback onTap;
+  final bool isMustSee;
 
   static const _categoryColors = {
     'nature': Color(0xFF10B981),
@@ -4582,6 +4383,38 @@ class _TopPickCard extends StatelessWidget {
     'tour': Icons.tour_rounded,
   };
 
+  static const _categoryEmojis = {
+    'nature': '🌿',
+    'historical': '🏰',
+    'museum': '🏛️',
+    'viewpoint': '🔭',
+    'beach': '🏖️',
+    'waterfall': '💧',
+    'canyon': '🏔️',
+    'food': '🍽️',
+    'cafe': '☕',
+    'mall': '🛍️',
+    'lodging': '🏨',
+    'activity': '🎯',
+    'tour': '🗺️',
+  };
+
+  static const _categoryLabelsEn = {
+    'nature': 'Nature',
+    'historical': 'Historical',
+    'museum': 'Museum',
+    'viewpoint': 'Viewpoint',
+    'beach': 'Beach',
+    'waterfall': 'Waterfall',
+    'canyon': 'Canyon',
+    'food': 'Restaurant',
+    'cafe': 'Café',
+    'mall': 'Shopping',
+    'lodging': 'Lodging',
+    'activity': 'Activity',
+    'tour': 'Tour',
+  };
+
   int _routeviaScore() {
     final base = place.routeviaScore > 0
         ? place.routeviaScore
@@ -4601,30 +4434,22 @@ class _TopPickCard extends StatelessWidget {
     return false;
   }
 
-  List<String> _signals() {
-    final chips = <String>[];
-    final meters = place.metersFromUser;
-    if (meters != null && meters <= 3000) {
-      chips.add('Yakın');
-    }
-    if (_routeviaScore() >= 85) {
-      chips.add('Öne çıkan');
-    }
-    if (_isGoodNow()) {
-      chips.add('Şimdi uygun');
-    }
-    return chips.take(2).toList(growable: false);
-  }
-
   @override
   Widget build(BuildContext context) {
     final imageUrl = place.media.firstOrNull?.publicUrl;
     final displayCategory = _resolveDisplayCategory(place);
     final catColor = _categoryColors[displayCategory] ?? RouteviaColors.navyMid;
     final catIcon = _categoryIcons[displayCategory] ?? Icons.place_rounded;
-    final catLabel = _categoryLabels[displayCategory] ?? displayCategory;
+    final catLabel = context.isEnglish
+        ? (_categoryLabelsEn[displayCategory] ?? displayCategory)
+        : (_categoryLabels[displayCategory] ?? displayCategory);
     final routeviaScore = _routeviaScore();
-    final signals = _signals();
+    final meters = place.metersFromUser;
+    final signals = [
+      if (meters != null && meters <= 3000) context.tr('Yakın', 'Nearby'),
+      if (routeviaScore >= 85) context.tr('Öne çıkan', 'Featured'),
+      if (_isGoodNow()) context.tr('Şimdi uygun', 'Good now'),
+    ].take(2).toList(growable: false);
 
     return GestureDetector(
       onTap: onTap,
@@ -4646,48 +4471,31 @@ class _TopPickCard extends StatelessWidget {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                // Background image or gradient
+                // Background image or category gradient
                 imageUrl != null
                     ? SafeNetworkImage(url: imageUrl, fit: BoxFit.cover)
                     : Stack(
                         fit: StackFit.expand,
                         children: [
-                          // Dark navy base
+                          // Vibrant category gradient
                           Container(
-                            decoration: const BoxDecoration(
+                            decoration: BoxDecoration(
                               gradient: LinearGradient(
-                                colors: [Color(0xFF060D1A), Color(0xFF0B1F3A)],
+                                colors: [
+                                  catColor.withValues(alpha: 0.85),
+                                  catColor.withValues(alpha: 0.55),
+                                  const Color(0xFF0B1F3A),
+                                ],
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
                               ),
                             ),
                           ),
-                          // Category color radial glow (top-left)
-                          Positioned(
-                            top: -20,
-                            left: -20,
-                            child: Container(
-                              width: 140,
-                              height: 140,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                gradient: RadialGradient(
-                                  colors: [
-                                    catColor.withValues(alpha: 0.35),
-                                    Colors.transparent,
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                          // Large faint icon watermark
-                          Positioned(
-                            bottom: -10,
-                            right: -10,
-                            child: Icon(
-                              catIcon,
-                              size: 90,
-                              color: catColor.withValues(alpha: 0.08),
+                          // Large emoji centered
+                          Center(
+                            child: Text(
+                              _categoryEmojis[displayCategory] ?? '📍',
+                              style: const TextStyle(fontSize: 56),
                             ),
                           ),
                         ],
@@ -4706,6 +4514,44 @@ class _TopPickCard extends StatelessWidget {
                     ),
                   ),
                 ),
+                // Must-see badge top-right
+                if (isMustSee)
+                  Positioned(
+                    top: 10,
+                    right: 10,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFD600),
+                        borderRadius: BorderRadius.circular(999),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0x44000000),
+                            blurRadius: 6,
+                            offset: Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('⭐', style: TextStyle(fontSize: 11)),
+                          SizedBox(width: 3),
+                          Text(
+                            'Mutlaka Gör',
+                            style: TextStyle(
+                              color: Color(0xFF1A1A1A),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 // Content
                 Padding(
                   padding: const EdgeInsets.all(14),
@@ -5094,259 +4940,6 @@ class _ScorePill extends StatelessWidget {
 // Utility
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Smart Context
-// ─────────────────────────────────────────────────────────────────────────────
-
-// Simple label chip — color comes from the parent card's accent
-class _SmartChip {
-  const _SmartChip(this.label);
-  final String label;
-}
-
-// Card data — all cards share the same dark navy base; accent tints the glow,
-// icon, eyebrow and chips to keep the design "yek bütün" with the hero card.
-class _SmartCard {
-  const _SmartCard({
-    required this.accentColor,
-    required this.icon,
-    required this.eyebrow,
-    required this.title,
-    this.subtitle,
-    required this.chips,
-    required this.onTap,
-    this.imageUrl,
-  });
-  final Color accentColor;
-  final IconData icon;
-  final String eyebrow;
-  final String title;
-  final String? subtitle;
-  final List<_SmartChip> chips;
-  final VoidCallback onTap;
-  final String? imageUrl;
-}
-
-class _SmartSuggestionCard extends StatelessWidget {
-  const _SmartSuggestionCard({required this.card});
-  final _SmartCard card;
-
-  // Exact same base palette as the hero card
-  static const _bg = [
-    Color(0xFF010915),
-    Color(0xFF071628),
-    Color(0xFF0A2545),
-    Color(0xFF0E3260),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = card.accentColor;
-    return GestureDetector(
-      onTap: card.onTap,
-      child: Container(
-        width: 242,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: accent.withValues(alpha: 0.28), width: 1),
-          boxShadow: [
-            BoxShadow(
-              color: accent.withValues(alpha: 0.20),
-              blurRadius: 22,
-              spreadRadius: -3,
-              offset: const Offset(0, 9),
-            ),
-            BoxShadow(
-              color: const Color(0xFF0B1F3A).withValues(alpha: 0.50),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(22),
-          child: Stack(
-            children: [
-              // ── Background: photo or dark-navy gradient ──────────────────
-              if (card.imageUrl != null && card.imageUrl!.isNotEmpty)
-                Positioned.fill(
-                  child: SafeNetworkImage(
-                    url: card.imageUrl,
-                    fit: BoxFit.cover,
-                  ),
-                )
-              else
-                Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: _bg,
-                      stops: [0.0, 0.35, 0.70, 1.0],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                  ),
-                ),
-              // ── Dark overlay so text stays readable over photos ──────────
-              Positioned.fill(
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        Colors.black.withValues(alpha: card.imageUrl != null ? 0.28 : 0.0),
-                        Colors.black.withValues(alpha: card.imageUrl != null ? 0.70 : 0.0),
-                      ],
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                    ),
-                  ),
-                ),
-              ),
-              // ── Accent glow — top right (only when no photo) ─────────────
-              if (card.imageUrl == null || card.imageUrl!.isEmpty)
-                Positioned(
-                  top: -28,
-                  right: -18,
-                  child: Container(
-                    width: 120,
-                    height: 120,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: RadialGradient(
-                        colors: [
-                          accent.withValues(alpha: 0.38),
-                          accent.withValues(alpha: 0.0),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              // ── Subtle secondary glow — bottom left (only when no photo) ─
-              if (card.imageUrl == null || card.imageUrl!.isEmpty)
-                Positioned(
-                  bottom: -16,
-                  left: -10,
-                  child: Container(
-                    width: 80,
-                    height: 80,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: RadialGradient(
-                        colors: [
-                          accent.withValues(alpha: 0.14),
-                          accent.withValues(alpha: 0.0),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              // ── Content ──────────────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Icon + eyebrow
-                    Row(
-                      children: [
-                        Container(
-                          width: 32,
-                          height: 32,
-                          decoration: BoxDecoration(
-                            color: accent.withValues(alpha: 0.14),
-                            borderRadius: BorderRadius.circular(9),
-                            border: Border.all(
-                              color: accent.withValues(alpha: 0.38),
-                              width: 1,
-                            ),
-                          ),
-                          child: Icon(card.icon, size: 16, color: accent),
-                        ),
-                        const SizedBox(width: 9),
-                        Expanded(
-                          child: Text(
-                            card.eyebrow,
-                            style: TextStyle(
-                              color: accent.withValues(alpha: 0.88),
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.15,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const Spacer(),
-                    // Title
-                    Text(
-                      card.title,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                        height: 1.2,
-                        letterSpacing: -0.3,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (card.subtitle != null &&
-                        card.subtitle!.trim().isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        card.subtitle!,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.72),
-                          fontSize: 12,
-                          height: 1.3,
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 8),
-                    // Chips — accent-tinted pills
-                    Wrap(
-                      spacing: 5,
-                      runSpacing: 4,
-                      children: card.chips
-                          .map(
-                            (c) => Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: accent.withValues(alpha: 0.16),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: accent.withValues(alpha: 0.30),
-                                  width: 0.8,
-                                ),
-                              ),
-                              child: Text(
-                                c.label,
-                                style: TextStyle(
-                                  color: accent.withValues(alpha: 0.92),
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                          )
-                          .toList(),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Utility

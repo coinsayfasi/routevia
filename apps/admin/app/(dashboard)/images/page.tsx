@@ -1,5 +1,5 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/server";
-import { moderateSubmission } from "@/lib/actions/moderation";
+import { moderateSubmission, deletePhotoSubmission } from "@/lib/actions/moderation";
 
 interface PhotoSubmission {
   id: string;
@@ -120,10 +120,7 @@ export default async function ImagesPage({
                         })}
                         className="flex-1"
                       >
-                        <button
-                          type="submit"
-                          className="w-full rounded-lg bg-green-600 py-1 text-xs font-semibold text-white hover:bg-green-700 transition"
-                        >
+                        <button type="submit" className="w-full rounded-lg bg-green-600 py-1 text-xs font-semibold text-white hover:bg-green-700 transition">
                           Onayla
                         </button>
                       </form>
@@ -137,11 +134,40 @@ export default async function ImagesPage({
                         })}
                         className="flex-1"
                       >
-                        <button
-                          type="submit"
-                          className="w-full rounded-lg bg-red-100 py-1 text-xs font-semibold text-red-700 hover:bg-red-200 transition"
-                        >
+                        <button type="submit" className="w-full rounded-lg bg-red-100 py-1 text-xs font-semibold text-red-700 hover:bg-red-200 transition">
                           Reddet
+                        </button>
+                      </form>
+                    </div>
+                  )}
+                  {photo.status === "approved" && (
+                    <div className="flex gap-2 pt-1">
+                      <form
+                        action={moderateSubmission.bind(null, {
+                          submissionType: "photo_submission",
+                          submissionId: photo.id,
+                          decision: "approved",
+                          publish: true,
+                          setCover: true,
+                        })}
+                        className="flex-1"
+                      >
+                        <button type="submit" className="w-full rounded-lg bg-teal-100 py-1 text-xs font-semibold text-teal-700 hover:bg-teal-200 transition">
+                          Kapak Yap
+                        </button>
+                      </form>
+                      <form action={deletePhotoSubmission.bind(null, photo.id)} className="flex-1">
+                        <button type="submit" className="w-full rounded-lg bg-red-50 py-1 text-xs font-semibold text-red-600 hover:bg-red-100 transition">
+                          Sil
+                        </button>
+                      </form>
+                    </div>
+                  )}
+                  {photo.status === "rejected" && (
+                    <div className="flex gap-2 pt-1">
+                      <form action={deletePhotoSubmission.bind(null, photo.id)} className="flex-1">
+                        <button type="submit" className="w-full rounded-lg bg-red-50 py-1 text-xs font-semibold text-red-600 hover:bg-red-100 transition">
+                          Sil
                         </button>
                       </form>
                     </div>

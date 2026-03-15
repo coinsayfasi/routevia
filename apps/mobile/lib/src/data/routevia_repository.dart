@@ -343,6 +343,20 @@ class RouteviaRepository {
     ).where((item) => !_isSuppressedMapItem(item)).toList(growable: false);
   }
 
+  /// Returns place IDs that an admin has marked as "featured" (Öne Çıkan).
+  /// Used in home screen to boost those places to the top and show the badge.
+  Future<Set<String>> getFeaturedPlaceIds() async {
+    try {
+      final rows = await _client
+          .from('featured_places')
+          .select('place_id')
+          .eq('is_active', true);
+      return {for (final r in (rows as List)) r['place_id'] as String};
+    } catch (_) {
+      return {};
+    }
+  }
+
   Future<String?> _signedCommunityPostUrl(String? storagePath) async {
     final path = storagePath?.trim() ?? '';
     if (path.isEmpty) return null;
@@ -1174,7 +1188,7 @@ class RouteviaRepository {
     'kaymakamlık',
   ];
 
-  static bool _isTouristWorthy(PlaceModel p) {
+  bool _isTouristWorthy(PlaceModel p) {
     if (p.lat == null || p.lng == null) return false;
     final name = p.name.toLowerCase().trim();
     if (name.length < 4) return false;
@@ -1182,7 +1196,8 @@ class RouteviaRepository {
     for (final kw in _poisBlacklistKeywords) {
       if (name.contains(kw)) return false;
     }
-    if (p.category == 'lodging') return false;
+    if (_isLodgingLikePlace(p)) return false;
+    if (p.category == 'food' || p.category == 'cafe') return false;
     return true;
   }
 
@@ -1240,6 +1255,7 @@ class RouteviaRepository {
     bool? allowOutsideDistrict,
     double? startLat,
     double? startLng,
+    int startHour = 9,
     List<String> mustIncludePlaceIds = const [],
   }) async {
     // Compliance mode: generate trip only from compliant POIs dataset.
@@ -1255,6 +1271,7 @@ class RouteviaRepository {
       allowOutsideDistrict: allowOutsideDistrict ?? false,
       startLat: startLat,
       startLng: startLng,
+      startHour: startHour,
     );
     try {
       final persisted = await _saveTripRemote(generated);
@@ -1278,6 +1295,7 @@ class RouteviaRepository {
     bool allowOutsideDistrict = false,
     double? startLat,
     double? startLng,
+    int startHour = 9,
   }) async {
     final provinceRes = await _client
         .from('provinces')
@@ -1550,7 +1568,7 @@ class RouteviaRepository {
       }
     }
 
-    int minute = 10 * 60;
+    int minute = startHour.clamp(6, 14) * 60;
     final dayPlans = <TripDay>[];
     int idx = 0;
 
@@ -1615,7 +1633,7 @@ class RouteviaRepository {
       if (stops.isNotEmpty) {
         dayPlans.add(TripDay(dayNumber: d, stops: stops));
       }
-      minute = 10 * 60;
+      minute = startHour.clamp(6, 14) * 60;
     }
 
     final trip = TripPlan(
@@ -1630,6 +1648,7 @@ class RouteviaRepository {
     );
 
     await _persistTripArtifacts(trip);
+    await _cache.recordVisitedProvince(province.slug, province.name);
     return trip;
   }
 
@@ -2472,11 +2491,15 @@ class RouteviaRepository {
     };
     return items
         .map(
-          (row) => {
-            ...row,
-            'submitter_name':
-                profileById[row['user_id']?.toString() ?? ''] ??
-                'Routevia gezgini',
+          (row) {
+            final rawName =
+                profileById[row['user_id']?.toString() ?? ''] ?? '';
+            // Mask emails and empty names for privacy — never show email addresses
+            final displayName =
+                (rawName.isEmpty || rawName.contains('@'))
+                    ? 'Elit routevia kullanıcısı'
+                    : rawName;
+            return {...row, 'submitter_name': displayName};
           },
         )
         .toList(growable: false);
@@ -3098,29 +3121,35 @@ class RouteviaRepository {
     // Client-side proximity sort handles district prioritisation instead.
     final rows = await _client
         .from('pois')
-        .select('id,name,category,lat,lng,city,district,tags,source')
+        .select('id,name,category,lat,lng,city,district,tags,source,place_community_state(cover_photo)')
         .eq('provenance_verified', true)
         .eq('city', cityName)
         .limit(1000);
 
-    PlaceModel mapRow(Map<String, dynamic> row) => PlaceModel.fromMap({
-      'id': row['id'],
-      'name': row['name'],
-      'slug': row['id'],
-      'category': row['category'],
-      'short_summary': '${row['district'] ?? row['city'] ?? 'Keşif noktası'}',
-      'best_time': 'day',
-      'duration_min': 60,
-      'lat': row['lat'],
-      'lng': row['lng'],
-      'tags': ((row['tags'] as List?) ?? const []).cast<String>(),
-      'source_kind': row['source'],
-      'is_free': true,
-      'media': const [],
-      'app_score': 0,
-      'app_rating': 0,
-      'rating_count': 0,
-    });
+    PlaceModel mapRow(Map<String, dynamic> row) {
+      final state = row['place_community_state'] as Map?;
+      final coverUrl = state?['cover_photo'] as String?;
+      return PlaceModel.fromMap({
+        'id': row['id'],
+        'name': row['name'],
+        'slug': row['id'],
+        'category': row['category'],
+        'short_summary': '${row['district'] ?? row['city'] ?? 'Keşif noktası'}',
+        'best_time': 'day',
+        'duration_min': 60,
+        'lat': row['lat'],
+        'lng': row['lng'],
+        'tags': ((row['tags'] as List?) ?? const []).cast<String>(),
+        'source_kind': row['source'],
+        'is_free': true,
+        'media': (coverUrl != null && coverUrl.isNotEmpty)
+            ? [{'public_url': coverUrl, 'storage_path': '', 'sort_order': 0}]
+            : const <Map<String, dynamic>>[],
+        'app_score': 0,
+        'app_rating': 0,
+        'rating_count': 0,
+      });
+    }
 
     final places = (rows as List)
         .map((e) => mapRow(Map<String, dynamic>.from(e as Map)))
@@ -3150,7 +3179,7 @@ class RouteviaRepository {
       // Fetch all province POIs; district filtering is unreliable server-side
       final localRows = await _client
           .from('pois')
-          .select('id,name,category,lat,lng,city,district,tags,source')
+          .select('id,name,category,lat,lng,city,district,tags,source,place_community_state(cover_photo)')
           .eq('provenance_verified', true)
           .eq('city', cityName)
           .limit(limit);
@@ -3158,25 +3187,31 @@ class RouteviaRepository {
       final local = (localRows as List)
           .map((e) => Map<String, dynamic>.from(e as Map))
           .map(
-            (row) => PlaceModel.fromMap({
-              'id': row['id'],
-              'name': row['name'],
-              'slug': row['id'],
-              'category': row['category'],
-              'short_summary':
-                  '${row['district'] ?? row['city'] ?? 'Keşif noktası'}',
-              'best_time': 'day',
-              'duration_min': 60,
-              'lat': row['lat'],
-              'lng': row['lng'],
-              'tags': ((row['tags'] as List?) ?? const []).cast<String>(),
-              'source_kind': row['source'],
-              'is_free': true,
-              'media': const [],
-              'app_score': 0,
-              'app_rating': 0,
-              'rating_count': 0,
-            }),
+            (row) {
+              final state = row['place_community_state'] as Map?;
+              final coverUrl = state?['cover_photo'] as String?;
+              return PlaceModel.fromMap({
+                'id': row['id'],
+                'name': row['name'],
+                'slug': row['id'],
+                'category': row['category'],
+                'short_summary':
+                    '${row['district'] ?? row['city'] ?? 'Keşif noktası'}',
+                'best_time': 'day',
+                'duration_min': 60,
+                'lat': row['lat'],
+                'lng': row['lng'],
+                'tags': ((row['tags'] as List?) ?? const []).cast<String>(),
+                'source_kind': row['source'],
+                'is_free': true,
+                'media': (coverUrl != null && coverUrl.isNotEmpty)
+                    ? [{'public_url': coverUrl, 'storage_path': '', 'sort_order': 0}]
+                    : const <Map<String, dynamic>>[],
+                'app_score': 0,
+                'app_rating': 0,
+                'rating_count': 0,
+              });
+            },
           )
           .where((p) => !_isLodgingCategory(p.category))
           .where((p) => p.name.trim().isNotEmpty)
@@ -3195,32 +3230,38 @@ class RouteviaRepository {
 
     final nationalRows = await _client
         .from('pois')
-        .select('id,name,category,lat,lng,city,district,tags,source')
+        .select('id,name,category,lat,lng,city,district,tags,source,place_community_state(cover_photo)')
         .eq('provenance_verified', true)
         .limit(limit);
 
     final national = (nationalRows as List)
         .map((e) => Map<String, dynamic>.from(e as Map))
         .map(
-          (row) => PlaceModel.fromMap({
-            'id': row['id'],
-            'name': row['name'],
-            'slug': row['id'],
-            'category': row['category'],
-            'short_summary':
-                '${row['district'] ?? row['city'] ?? 'Keşif noktası'}',
-            'best_time': 'day',
-            'duration_min': 60,
-            'lat': row['lat'],
-            'lng': row['lng'],
-            'tags': ((row['tags'] as List?) ?? const []).cast<String>(),
-            'source_kind': row['source'],
-            'is_free': true,
-            'media': const [],
-            'app_score': 0,
-            'app_rating': 0,
-            'rating_count': 0,
-          }),
+          (row) {
+            final state = row['place_community_state'] as Map?;
+            final coverUrl = state?['cover_photo'] as String?;
+            return PlaceModel.fromMap({
+              'id': row['id'],
+              'name': row['name'],
+              'slug': row['id'],
+              'category': row['category'],
+              'short_summary':
+                  '${row['district'] ?? row['city'] ?? 'Keşif noktası'}',
+              'best_time': 'day',
+              'duration_min': 60,
+              'lat': row['lat'],
+              'lng': row['lng'],
+              'tags': ((row['tags'] as List?) ?? const []).cast<String>(),
+              'source_kind': row['source'],
+              'is_free': true,
+              'media': (coverUrl != null && coverUrl.isNotEmpty)
+                  ? [{'public_url': coverUrl, 'storage_path': '', 'sort_order': 0}]
+                  : const <Map<String, dynamic>>[],
+              'app_score': 0,
+              'app_rating': 0,
+              'rating_count': 0,
+            });
+          },
         )
         .where((p) => !_isLodgingCategory(p.category))
         .where((p) => p.name.trim().isNotEmpty)
