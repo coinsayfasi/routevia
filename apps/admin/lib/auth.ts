@@ -2,7 +2,10 @@ import { redirect } from "next/navigation";
 import { createSupabaseAdminClient, createSupabaseServerClient } from "@/lib/supabase/server";
 
 export async function requireAdmin() {
-  if (process.env.ROUTEVIA_ADMIN_BYPASS === "true") {
+  if (
+    process.env.NODE_ENV !== "production" &&
+    process.env.ROUTEVIA_ADMIN_BYPASS === "true"
+  ) {
     return {
       user: {
         id: "local-admin-bypass",
