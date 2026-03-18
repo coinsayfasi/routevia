@@ -14,6 +14,7 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  // Keep legal redirects and crawler assets available on the production domain.
   async redirects() {
     return [
       {
