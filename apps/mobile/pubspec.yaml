@@ -1,13 +1,15 @@
 name: mobile
 description: Routevia mobile app
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.2.5+20
 
 environment:
   sdk: ^3.10.8
 
 dependencies:
   flutter:
+    sdk: flutter
+  flutter_localizations:
     sdk: flutter
   cupertino_icons: ^1.0.8
   flutter_riverpod: ^2.6.1
@@ -26,16 +28,21 @@ dependencies:
   url_launcher: ^6.3.2
   share_plus: ^11.1.0
   app_links: ^6.4.0
-  in_app_purchase: ^3.2.3
+  purchases_flutter: ^8.4.0
   image_picker: ^1.2.0
   google_mobile_ads: ^7.0.0
+  firebase_core: ^4.1.1
+  firebase_messaging: ^16.0.1
+  firebase_crashlytics: ^5.0.1
+  flutter_native_splash: ^2.4.6
+  flutter_local_notifications: ^18.0.0
+  connectivity_plus: ^6.1.4
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.4
-  flutter_native_splash: ^2.4.6
 
 flutter:
   uses-material-design: true

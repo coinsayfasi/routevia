@@ -19,6 +19,8 @@ class RouteviaRepository {
   final LocalCache _cache;
   final Map<String, _NearbyCacheEntry> _nearbyCache = {};
   DateTime? _lastSessionValidationAt;
+  // Mutex: prevents concurrent refreshSession() calls that corrupt session state.
+  Future<void>? _refreshLock;
 
   bool _isDefinitiveRefreshTokenFailure(Object error) {
     final msg = error.toString().toLowerCase();
@@ -137,7 +139,7 @@ class RouteviaRepository {
     final matchesBrand = values.any(
       (value) => brandNeedles.any((needle) => value.contains(needle)),
     );
-    return matchesBrand || (hasRetailTag && matchesBrand);
+    return matchesBrand || hasRetailTag;
   }
 
   bool _hasSuppressedVenueSignal({
@@ -156,7 +158,6 @@ class RouteviaRepository {
       'concerthall',
       'livemusicvenue',
       'eventvenue',
-      'nightclub',
       'nightclub',
       'auditorium',
       'bar',
@@ -357,17 +358,30 @@ class RouteviaRepository {
     }
   }
 
-  Future<String?> _signedCommunityPostUrl(String? storagePath) async {
+  Future<String?> _signedCommunityPostUrl(
+    String? storagePath, {
+    int width = 900,
+    int quality = 80,
+  }) async {
     final path = storagePath?.trim() ?? '';
     if (path.isEmpty) return null;
     try {
       return await _runAuthed(
-        () => _client.storage
-            .from('community-posts')
-            .createSignedUrl(path, 60 * 60 * 24 * 7),
+        () => _client.storage.from('community-posts').createSignedUrl(
+              path,
+              60 * 60 * 24 * 7,
+              transform: TransformOptions(width: width, quality: quality),
+            ),
       );
     } catch (_) {
-      return null;
+      // Fall back to non-transformed URL if transform fails (e.g. non-image file)
+      try {
+        return await _runAuthed(
+          () => _client.storage.from('community-posts').createSignedUrl(path, 60 * 60 * 24 * 7),
+        );
+      } catch (_) {
+        return null;
+      }
     }
   }
 
@@ -445,27 +459,38 @@ class RouteviaRepository {
       }
     }
 
+    // Fetch all gallery + cover signed URLs in parallel instead of sequentially.
+    // Gallery images are served at card size; covers at detail size.
+    final galleryUrlFutures = galleryRows.map(
+      (row) => _signedCommunityPostUrl(row['storage_path']?.toString(), width: 400, quality: 72),
+    ).toList();
+    final coverUrlFutures = rows.map(
+      (row) => _signedCommunityPostUrl(row['cover_storage_path']?.toString(), width: 900, quality: 80),
+    ).toList();
+    final allUrls = await Future.wait([...galleryUrlFutures, ...coverUrlFutures]);
+    final galleryUrls = allUrls.sublist(0, galleryRows.length);
+    final coverUrls = allUrls.sublist(galleryRows.length);
+
     final galleryByPostId = <String, List<Map<String, dynamic>>>{};
-    for (final row in galleryRows) {
+    for (var i = 0; i < galleryRows.length; i++) {
+      final row = galleryRows[i];
       final postId = row['post_id']?.toString() ?? '';
       if (postId.isEmpty) continue;
       galleryByPostId.putIfAbsent(postId, () => <Map<String, dynamic>>[]).add({
         ...row,
-        'image_url': await _signedCommunityPostUrl(
-          row['storage_path']?.toString(),
-        ),
+        'image_url': galleryUrls[i],
       });
     }
 
     final items = <CommunityPostModel>[];
-    for (final row in rows) {
+    for (var i = 0; i < rows.length; i++) {
+      final row = rows[i];
       final userId = row['user_id']?.toString() ?? '';
       final routeId = row['related_route_id']?.toString();
-      final coverStoragePath = row['cover_storage_path']?.toString();
       items.add(
         CommunityPostModel.fromMap({
           ...row,
-          'cover_image_url': await _signedCommunityPostUrl(coverStoragePath),
+          'cover_image_url': coverUrls[i],
           'submitter_name':
               profileById[userId]?['display_name']?.toString() ??
               'Routevia gezgini',
@@ -480,8 +505,11 @@ class RouteviaRepository {
   }
 
   Future<void> _persistTripArtifacts(TripPlan trip) async {
-    await _cache.saveLastTrip(trip.toMap());
-    await _cache.saveTripHistoryEntry(trip.toMap());
+    final map = trip.toMap();
+    await Future.wait([
+      _cache.saveLastTrip(map),
+      _cache.saveTripHistoryEntry(map),
+    ]);
   }
 
   Future<TripPlan> _saveTripRemote(TripPlan trip) async {
@@ -501,10 +529,10 @@ class RouteviaRepository {
             'preferences': trip.preferences,
           })
           .select('id')
-          .single(),
+          .maybeSingle(),
     );
 
-    final tripId = (tripInsert['id'] as String?) ?? trip.tripId;
+    final tripId = (tripInsert?['id'] as String?) ?? trip.tripId;
 
     try {
       final dayPayload = trip.daysPlan
@@ -567,6 +595,23 @@ class RouteviaRepository {
   }
 
   Future<void> _ensureFreshSession() async {
+    // If a refresh is already in flight, piggyback on it instead of firing a
+    // concurrent refreshSession() which can corrupt the token pair.
+    if (_refreshLock != null) {
+      try {
+        await _refreshLock;
+      } catch (_) {}
+      return;
+    }
+    _refreshLock = _doEnsureFreshSession();
+    try {
+      await _refreshLock;
+    } finally {
+      _refreshLock = null;
+    }
+  }
+
+  Future<void> _doEnsureFreshSession() async {
     final session = _client.auth.currentSession;
     if (session == null) return;
     final expiresAt = session.expiresAt;
@@ -794,12 +839,17 @@ class RouteviaRepository {
     await _ensureFreshSession();
     final user = _client.auth.currentUser;
     if (user == null) return;
+    // ignoreDuplicates: true → sadece profil yoksa oluştur, varsa dokunma.
+    // Bu sayede concurrent çağrılar onboarding_completed gibi alanları sıfırlamaz.
     await _runAuthed(
-      () => _client.from('profiles').upsert({
-        'id': user.id,
-        'display_name': user.email,
-        'onboarding_completed': false,
-      }),
+      () => _client.from('profiles').upsert(
+        {
+          'id': user.id,
+          'display_name': user.email,
+          'onboarding_completed': false,
+        },
+        ignoreDuplicates: true,
+      ),
     );
   }
 
@@ -810,7 +860,7 @@ class RouteviaRepository {
       () => _client
           .from('profiles')
           .select(
-            'id,display_name,role,onboarding_completed,pref_tags,pref_pace,allow_location,allow_notifications,referral_code',
+            'id,display_name,role,onboarding_completed,pref_tags,pref_pace,allow_location,allow_notifications',
           )
           .eq('id', user.id)
           .maybeSingle(),
@@ -901,7 +951,7 @@ class RouteviaRepository {
       final response = await _client
           .from('provinces_with_coords')
           .select('id,name,slug,lat,lng')
-          .order('plate_no');
+          .order('name');
       final items = (response as List)
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
@@ -914,7 +964,7 @@ class RouteviaRepository {
       final fallback = await _client
           .from('provinces')
           .select('id,name,slug')
-          .order('plate_no');
+          .order('name');
       final items = (fallback as List)
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
@@ -923,7 +973,8 @@ class RouteviaRepository {
       // fall through to local fallback
     }
 
-    return kFallbackProvinces;
+    return [...kFallbackProvinces]
+      ..sort((a, b) => (a['slug'] as String).compareTo(b['slug'] as String));
   }
 
   Future<List<Map<String, dynamic>>> listDistrictsByProvinceSlug(
@@ -1197,7 +1248,6 @@ class RouteviaRepository {
       if (name.contains(kw)) return false;
     }
     if (_isLodgingLikePlace(p)) return false;
-    if (p.category == 'food' || p.category == 'cafe') return false;
     return true;
   }
 
@@ -1334,19 +1384,37 @@ class RouteviaRepository {
 
     final minNeeded = _stopsPerDayForPace(pace) * days;
 
+    // Category-based realistic visit durations (minutes)
+    int categoryDuration(String? cat) => switch (cat) {
+          'museum' => 90,
+          'historical' => 75,
+          'nature' => 90,
+          'beach' => 90,
+          'waterfall' => 60,
+          'canyon' => 75,
+          'viewpoint' => 35,
+          'tour' => 90,
+          'activity' => 75,
+          'market' => 45,
+          'food' => 60,
+          'cafe' => 45,
+          _ => 60,
+        };
+
     Future<List<PlaceModel>> fetchFiltered(dynamic q) async {
       final raw = (await (q as dynamic).limit(500)) as List;
       return raw
           .map((e) => Map<String, dynamic>.from(e as Map))
-          .map(
-            (row) => PlaceModel.fromMap({
+          .map((row) {
+            final cat = row['category'] as String? ?? '';
+            return PlaceModel.fromMap({
               'id': row['id'],
               'name': row['name'],
               'slug': row['id'],
-              'category': row['category'],
-              'short_summary': '${row['city'] ?? 'Keşif noktası'}',
+              'category': cat,
+              'short_summary': '${row['district'] ?? row['city'] ?? 'Keşif noktası'}',
               'best_time': 'day',
-              'duration_min': 60,
+              'duration_min': categoryDuration(cat),
               'lat': row['lat'],
               'lng': row['lng'],
               'tags': ((row['tags'] as List?) ?? const []).cast<String>(),
@@ -1356,8 +1424,8 @@ class RouteviaRepository {
               'app_score': 0,
               'app_rating': 0,
               'rating_count': 0,
-            }),
-          )
+            });
+          })
           .where(_isTouristWorthy)
           .toList();
     }
@@ -1435,9 +1503,41 @@ class RouteviaRepository {
       places = [...places, ...extras.take(200)];
     }
 
-    // Final dedup
+    // Final dedup by ID
     final seenIds = <String>{};
     places = places.where((p) => seenIds.add(p.id)).toList();
+
+    // Also dedup by normalized name — catches same physical place with different DB IDs
+    // (e.g., duplicated OSM imports, place_clean vs pois overlap)
+    final seenNormNames = <String>{};
+    places = places.where((p) {
+      final norm = p.name
+          .toLowerCase()
+          .replaceAll('ç', 'c').replaceAll('ğ', 'g').replaceAll('ı', 'i')
+          .replaceAll('ö', 'o').replaceAll('ş', 's').replaceAll('ü', 'u')
+          .replaceAll(RegExp(r'[^a-z0-9]'), '');
+      return seenNormNames.add(norm);
+    }).toList();
+
+    // ── Must-see boosting: push province-level must-see places to the front ──
+    // This ensures must-see landmarks (Ayasofya, Efes, Pamukkale etc.) are
+    // always included in generated routes when they're in the pool.
+    final mustSeeKeywords = kMustSeePlaceKeywordsByProvince[provinceSlug] ?? const [];
+    if (mustSeeKeywords.isNotEmpty) {
+      String normMustSee(String s) => s
+          .toLowerCase()
+          .replaceAll('ç', 'c').replaceAll('ğ', 'g').replaceAll('ı', 'i')
+          .replaceAll('ö', 'o').replaceAll('ş', 's').replaceAll('ü', 'u')
+          .replaceAll(RegExp(r'[^a-z0-9]'), '');
+      final normalizedKeywords = mustSeeKeywords.map(normMustSee).toSet();
+      bool isMustSee(PlaceModel p) {
+        final norm = normMustSee(p.name);
+        return normalizedKeywords.any((kw) => norm.contains(kw) || kw.contains(norm));
+      }
+      final mustSees = places.where(isMustSee).toList();
+      final rest = places.where((p) => !isMustSee(p)).toList();
+      places = [...mustSees, ...rest];
+    }
 
     if (startLat != null && startLng != null && maxRadiusKm != null) {
       final inRadius = places.where((p) {
@@ -1460,161 +1560,121 @@ class RouteviaRepository {
     }
 
     final perDay = _stopsPerDayForPace(pace);
-    final needed = (days * perDay).clamp(1, places.length);
-    // Use shortSummary as district key (it's set to district ?? city name)
-    final byDistrict = <String, List<PlaceModel>>{};
-    for (final p in places) {
-      final districtKey = p.shortSummary.isNotEmpty ? p.shortSummary : 'other';
-      byDistrict.putIfAbsent(districtKey, () => <PlaceModel>[]).add(p);
-    }
-    final districtPools = byDistrict.values.toList()
-      ..sort((a, b) => b.length.compareTo(a.length));
-    final interleaved = <PlaceModel>[];
-    var ptr = 0;
-    while (interleaved.length < places.length) {
-      var advanced = false;
-      for (final pool in districtPools) {
-        if (ptr < pool.length) {
-          interleaved.add(pool[ptr]);
-          advanced = true;
-        }
-      }
-      if (!advanced) break;
-      ptr += 1;
-    }
-    final districtPriority = <String, double>{};
-    if (startLat != null && startLng != null) {
-      final districtAnchors = <String, ({double lat, double lng, int count})>{};
-      for (final place in places) {
-        if (place.lat == null || place.lng == null) continue;
-        final districtKey = place.shortSummary.isNotEmpty
-            ? place.shortSummary
-            : 'other';
-        final current = districtAnchors[districtKey];
-        if (current == null) {
-          districtAnchors[districtKey] = (
-            lat: place.lat!,
-            lng: place.lng!,
-            count: 1,
-          );
-        } else {
-          districtAnchors[districtKey] = (
-            lat: current.lat + place.lat!,
-            lng: current.lng + place.lng!,
-            count: current.count + 1,
-          );
-        }
-      }
-      for (final entry in districtAnchors.entries) {
-        final avgLat = entry.value.lat / entry.value.count;
-        final avgLng = entry.value.lng / entry.value.count;
-        districtPriority[entry.key] = _distanceKmRepo(
-          startLat,
-          startLng,
-          avgLat,
-          avgLng,
-        );
-      }
-    }
 
-    final orderedDistrictPools = byDistrict.entries.toList()
-      ..sort((a, b) {
-        final da = districtPriority[a.key];
-        final db = districtPriority[b.key];
-        if (da != null || db != null) {
-          if (da == null) return 1;
-          if (db == null) return -1;
-          final cmp = da.compareTo(db);
-          if (cmp != 0) return cmp;
-        }
-        return b.value.length.compareTo(a.value.length);
+    // ── Sort all available places by proximity to user ─────────────────────
+    final sortedByProx = List<PlaceModel>.from(places);
+    if (startLat != null && startLng != null) {
+      sortedByProx.sort((a, b) {
+        final da = _distanceKmRepo(startLat, startLng, a.lat ?? 0, a.lng ?? 0);
+        final db = _distanceKmRepo(startLat, startLng, b.lat ?? 0, b.lng ?? 0);
+        return da.compareTo(db);
       });
-
-    final selected = <PlaceModel>[];
-    if (startLat != null && startLng != null) {
-      for (final place in _sortByProximity(
-        places,
-        originLat: startLat,
-        originLng: startLng,
-      )) {
-        if (selected.any((item) => item.id == place.id)) continue;
-        if (!_isTouristWorthy(place)) continue;
-        selected.add(place);
-        if (selected.length >= needed) break;
-      }
-    } else {
-      for (final entry in orderedDistrictPools) {
-        final districtPlaces = _sortByProximity(
-          entry.value,
-          originLat: startLat,
-          originLng: startLng,
-        );
-        for (final place in districtPlaces) {
-          if (selected.any((item) => item.id == place.id)) continue;
-          if (!_isTouristWorthy(place)) continue;
-          selected.add(place);
-          if (selected.length >= needed) break;
-        }
-        if (selected.length >= needed) break;
-      }
     }
 
-    if (selected.length < needed) {
-      for (final place in interleaved) {
-        if (selected.any((item) => item.id == place.id)) continue;
-        if (!_isTouristWorthy(place)) continue;
-        selected.add(place);
-        if (selected.length >= needed) break;
-      }
+    // ── Category buckets (already proximity-ordered) ───────────────────────
+    const catCultural = {'museum', 'historical', 'tour'};
+    const catOutdoor = {'nature', 'beach', 'waterfall', 'canyon', 'viewpoint'};
+    const catActive = {'activity', 'market'};
+    const catDining = {'food', 'cafe'};
+
+    final bucketCultural =
+        sortedByProx.where((p) => catCultural.contains(p.category)).toList();
+    final bucketOutdoor =
+        sortedByProx.where((p) => catOutdoor.contains(p.category)).toList();
+    final bucketActive =
+        sortedByProx.where((p) => catActive.contains(p.category)).toList();
+    final bucketDining =
+        sortedByProx.where((p) => catDining.contains(p.category)).toList();
+
+    // Global used-ID set — no place repeated across days
+    final usedIds = <String>{};
+
+    // Must-see keyword set for this province (for bucket priority)
+    final mustSeeKeywordsForBucket = (kMustSeePlaceKeywordsByProvince[provinceSlug] ?? const []).map((s) => s
+        .toLowerCase()
+        .replaceAll('ç', 'c').replaceAll('ğ', 'g').replaceAll('ı', 'i')
+        .replaceAll('ö', 'o').replaceAll('ş', 's').replaceAll('ü', 'u')
+        .replaceAll(RegExp(r'[^a-z0-9]'), '')).toSet();
+
+    bool isMustSeePlace(PlaceModel p) {
+      if (mustSeeKeywordsForBucket.isEmpty) return false;
+      final norm = p.name.toLowerCase()
+          .replaceAll('ç', 'c').replaceAll('ğ', 'g').replaceAll('ı', 'i')
+          .replaceAll('ö', 'o').replaceAll('ş', 's').replaceAll('ü', 'u')
+          .replaceAll(RegExp(r'[^a-z0-9]'), '');
+      return mustSeeKeywordsForBucket.any((kw) => norm.contains(kw) || kw.contains(norm));
     }
 
+    // Pick from a bucket skipping used IDs. Must-see places always win;
+    // otherwise shuffles top-K candidates for variety across runs.
+    PlaceModel? pickFrom(List<PlaceModel> bucket, {int topK = 6}) {
+      final unused = bucket.where((p) => !usedIds.contains(p.id)).toList();
+      if (unused.isEmpty) return null;
+      // Must-see places always win over regular picks — pick one if available
+      final mustSeeCandidate = unused.where(isMustSeePlace).firstOrNull;
+      if (mustSeeCandidate != null) return mustSeeCandidate;
+      // Otherwise shuffle top-K for variety
+      final candidates = unused.take(topK).toList()..shuffle();
+      return candidates.first;
+    }
+
+    // Pick any unused place ordered by proximity (fallback filler)
+    PlaceModel? pickAny() {
+      for (final p in sortedByProx) {
+        if (!usedIds.contains(p.id)) return p;
+      }
+      return null;
+    }
+
+    void use(PlaceModel p) => usedIds.add(p.id);
+
+    // ── Day composition ────────────────────────────────────────────────────
     int minute = startHour.clamp(6, 14) * 60;
     final dayPlans = <TripDay>[];
-    int idx = 0;
 
     for (int d = 1; d <= days; d++) {
-      final stops = <TripStop>[];
-      final dayPool = <PlaceModel>[];
-      while (idx < selected.length && dayPool.length < perDay * 2) {
-        dayPool.add(selected[idx++]);
-      }
-      var foodLike = 0;
-      final mustScenic = dayPool.where((p) {
-        const scenic = {
-          'nature',
-          'historical',
-          'viewpoint',
-          'beach',
-          'waterfall',
-          'canyon',
-          'tour',
-          'museum',
-        };
-        return scenic.contains(p.category);
-      }).toList();
       final composed = <PlaceModel>[];
-      if (mustScenic.isNotEmpty) composed.add(mustScenic.first);
-      for (final p in dayPool) {
-        if (composed.length >= perDay) break;
-        final isFood = {'food', 'cafe'}.contains(p.category);
-        if (isFood && foodLike >= 1) continue;
-        if (composed.any((x) => x.id == p.id)) continue;
-        composed.add(p);
-        if (isFood) foodLike += 1;
+
+      // Slot: Cultural (museum / historical / tour)
+      final c1 = pickFrom(bucketCultural);
+      if (c1 != null) { composed.add(c1); use(c1); }
+
+      // Slot: Outdoor (nature / beach / viewpoint / waterfall / canyon)
+      final o1 = pickFrom(bucketOutdoor);
+      if (o1 != null) { composed.add(o1); use(o1); }
+
+      // Slot: Activity / market — or a second outdoor / cultural if unavailable
+      final a1 = pickFrom(bucketActive) ?? pickFrom(bucketOutdoor) ?? pickFrom(bucketCultural);
+      if (a1 != null) { composed.add(a1); use(a1); }
+
+      // Slot: Dining (max 1 food/cafe per day)
+      final d1 = pickFrom(bucketDining);
+      if (d1 != null) { composed.add(d1); use(d1); }
+
+      // Slot: Second cultural or outdoor if pace calls for more stops
+      if (composed.length < perDay) {
+        final c2 = pickFrom(bucketCultural) ?? pickFrom(bucketOutdoor);
+        if (c2 != null) { composed.add(c2); use(c2); }
       }
-      while (composed.length < perDay && idx < selected.length) {
-        final p = selected[idx++];
-        if (composed.any((x) => x.id == p.id)) continue;
+
+      // Fill any remaining slots with nearest unused place
+      while (composed.length < perDay) {
+        final p = pickAny();
+        if (p == null) break;
+        use(p);
         composed.add(p);
       }
 
-      // Sort stops within this day by nearest-neighbor for a logical route
+      if (composed.isEmpty) break;
+
+      // Sort this day's stops by nearest-neighbor greedy (logical walking route)
       final composedSorted = _sortByProximity(
         composed,
         originLat: d == 1 ? startLat : null,
         originLng: d == 1 ? startLng : null,
       );
 
+      final stops = <TripStop>[];
       for (int i = 0; i < composedSorted.length && i < perDay; i++) {
         final p = composedSorted[i];
         final hh = (minute ~/ 60).toString().padLeft(2, '0');
@@ -2049,8 +2109,9 @@ class RouteviaRepository {
               'cover_storage_path,content_body,tags,status,admin_note,submitted_at,'
               'published_at,reviewed_at,created_at,updated_at,estimated_read_minutes',
             )
-            .single(),
+            .maybeSingle(),
       );
+      if (inserted == null) throw Exception('Gönderi kaydedilemedi.');
       row = Map<String, dynamic>.from(inserted as Map);
     } else {
       final updated = await _runAuthed(
@@ -2064,8 +2125,9 @@ class RouteviaRepository {
               'cover_storage_path,content_body,tags,status,admin_note,submitted_at,'
               'published_at,reviewed_at,created_at,updated_at,estimated_read_minutes',
             )
-            .single(),
+            .maybeSingle(),
       );
+      if (updated == null) throw Exception('Gönderi güncellenemedi.');
       row = Map<String, dynamic>.from(updated as Map);
     }
 
@@ -2438,8 +2500,9 @@ class RouteviaRepository {
             'status': 'pending',
           })
           .select('id,status,submitted_at')
-          .single(),
+          .maybeSingle(),
     );
+    if (inserted == null) throw Exception('Moderasyon kaydı oluşturulamadı.');
     final status = inserted['status']?.toString() ?? '';
     if (status != 'pending') {
       throw Exception('Moderasyon kaydı oluşturulamadı.');
@@ -2933,9 +2996,9 @@ class RouteviaRepository {
     final imageUrl = _client.storage
         .from('place-photos')
         .getPublicUrl(objectPath);
-    late final dynamic inserted;
+    late final Map<String, dynamic> inserted;
     try {
-      inserted = await _runAuthed(
+      final result = await _runAuthed(
         () => _client
             .from('place_photos')
             .insert({
@@ -2950,8 +3013,10 @@ class RouteviaRepository {
             .select(
               'id,place_id,user_id,image_url,storage_path,status,likes_count,reports_count,created_at,updated_at',
             )
-            .single(),
+            .maybeSingle(),
       );
+      if (result == null) throw Exception('Fotoğraf DB kaydı oluşturulamadı.');
+      inserted = Map<String, dynamic>.from(result as Map);
     } catch (e) {
       try {
         await _runAuthed(
@@ -2977,7 +3042,7 @@ class RouteviaRepository {
       );
     } catch (_) {}
 
-    return PlacePhotoModel.fromMap(Map<String, dynamic>.from(inserted as Map));
+    return PlacePhotoModel.fromMap(inserted);
   }
 
   Future<void> addPlaceCheckin(String placeId) async {
@@ -3656,14 +3721,13 @@ class RouteviaRepository {
     var premium = false;
     try {
       final entitlements = await getEntitlements();
-      premium = entitlements.any(
-        (e) =>
-            (e['entitlement_key'] as String?) == 'pro_preview_7d' &&
-            DateTime.tryParse(
-                  (e['expires_at'] as String?) ?? '',
-                )?.isAfter(DateTime.now().toUtc()) ==
-                true,
-      );
+      final now = DateTime.now().toUtc();
+      premium = entitlements.any((e) {
+        final key = e['entitlement_key'] as String?;
+        if (key != 'routevia_pro') return false;
+        final ex = DateTime.tryParse((e['expires_at'] as String?) ?? '');
+        return ex != null && ex.isAfter(now);
+      });
     } catch (_) {
       premium = false;
     }
@@ -4321,136 +4385,6 @@ class RouteviaRepository {
     return data['place_id'] as String;
   }
 
-  Future<Map<String, dynamic>> adminReferralReport({
-    int days = 30,
-    int limit = 300,
-  }) async {
-    await _ensureFreshSession();
-    final since = DateTime.now()
-        .toUtc()
-        .subtract(Duration(days: days))
-        .toIso8601String();
-
-    final referralsRes = await _runAuthed(
-      () => _client
-          .from('referrals')
-          .select('id,referrer_user_id,referee_user_id,code,created_at')
-          .gte('created_at', since)
-          .order('created_at', ascending: false)
-          .limit(limit),
-    );
-
-    final referrals = (referralsRes as List)
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
-
-    final userIds = <String>{
-      ...referrals
-          .map((r) => r['referrer_user_id'] as String?)
-          .whereType<String>(),
-      ...referrals
-          .map((r) => r['referee_user_id'] as String?)
-          .whereType<String>(),
-    }.toList();
-
-    final profiles = userIds.isEmpty
-        ? <Map<String, dynamic>>[]
-        : ((await _runAuthed(
-                    () => _client
-                        .from('profiles')
-                        .select('id,display_name,referral_code')
-                        .inFilter('id', userIds),
-                  ))
-                  as List)
-              .map((e) => Map<String, dynamic>.from(e as Map))
-              .toList();
-
-    final profileById = <String, Map<String, dynamic>>{
-      for (final p in profiles) p['id'] as String: p,
-    };
-
-    final entitlementsRes = await _runAuthed(
-      () => _client
-          .from('user_entitlements')
-          .select('user_id,entitlement_key,expires_at,created_at')
-          .eq('entitlement_key', 'pro_preview_7d')
-          .gte('created_at', since)
-          .order('created_at', ascending: false)
-          .limit(limit * 2),
-    );
-    final entitlements = (entitlementsRes as List)
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
-
-    final eventsRes = await _runAuthed(
-      () => _client
-          .from('app_events')
-          .select('event_name,created_at,payload,user_id')
-          .gte('created_at', since)
-          .inFilter('event_name', const [
-            'referral_shared',
-            'referral_redeemed',
-          ])
-          .order('created_at', ascending: false)
-          .limit(limit * 3),
-    );
-    final events = (eventsRes as List)
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
-
-    final codeCounts = <String, int>{};
-    final codeByDay = <String, Set<String>>{};
-    for (final r in referrals) {
-      final code = (r['code'] as String?) ?? '-';
-      codeCounts[code] = (codeCounts[code] ?? 0) + 1;
-      final day = ((r['created_at'] as String?) ?? '').substring(0, 10);
-      final key = '$code::$day';
-      codeByDay.putIfAbsent(key, () => <String>{});
-      codeByDay[key]!.add(r['referee_user_id'] as String? ?? '');
-    }
-
-    final suspicious =
-        codeByDay.entries.where((e) => e.value.length >= 5).map((e) {
-          final split = e.key.split('::');
-          return {
-            'code': split.first,
-            'day': split.last,
-            'redeem_count': e.value.length,
-          };
-        }).toList()..sort(
-          (a, b) =>
-              (b['redeem_count'] as int).compareTo(a['redeem_count'] as int),
-        );
-
-    final enrichedReferrals = referrals.map((r) {
-      final referrer = profileById[r['referrer_user_id']];
-      final referee = profileById[r['referee_user_id']];
-      return {
-        ...r,
-        'referrer_name': referrer?['display_name'],
-        'referee_name': referee?['display_name'],
-      };
-    }).toList();
-
-    return {
-      'summary': {
-        'days': days,
-        'referrals_count': referrals.length,
-        'unique_codes': codeCounts.length,
-        'entitlements_count': entitlements.length,
-        'events_count': events.length,
-      },
-      'top_codes':
-          codeCounts.entries
-              .map((e) => {'code': e.key, 'count': e.value})
-              .toList()
-            ..sort((a, b) => (b['count'] as int).compareTo(a['count'] as int)),
-      'suspicious': suspicious,
-      'referrals': enrichedReferrals,
-      'entitlements': entitlements,
-      'events': events,
-    };
-  }
 
   Future<List<Map<String, dynamic>>> adminSuggestions({
     String status = 'pending',
@@ -4704,8 +4638,9 @@ class RouteviaRepository {
           .from('provinces')
           .select('id')
           .eq('slug', provinceSlug)
-          .single(),
+          .maybeSingle(),
     );
+    if (province == null) throw Exception('İl bulunamadı: $provinceSlug');
     String? districtId;
     if (districtSlug != null && districtSlug.trim().isNotEmpty) {
       final district = await _runAuthed(
@@ -4737,8 +4672,9 @@ class RouteviaRepository {
             'status': 'pending',
           })
           .select('id,status,created_at')
-          .single(),
+          .maybeSingle(),
     );
+    if (inserted == null) throw Exception('Öneri gönderilemedi.');
     return Map<String, dynamic>.from(inserted as Map);
   }
 
@@ -4763,59 +4699,6 @@ class RouteviaRepository {
           );
       return _client.storage.from('place-photos').getPublicUrl(objectPath);
     });
-  }
-
-  Future<String> createReferralCode() async {
-    await _ensureFreshSession();
-    final user = _client.auth.currentUser;
-    if (user == null) {
-      throw Exception('jwt expired');
-    }
-    final existing = await _runAuthed(
-      () => _client
-          .from('profiles')
-          .select('referral_code')
-          .eq('id', user.id)
-          .maybeSingle(),
-    );
-    final existingCode =
-        (existing as Map?)?['referral_code']?.toString().trim() ?? '';
-    if (existingCode.isNotEmpty) {
-      return existingCode;
-    }
-    final result = await _runAuthed(
-      () =>
-          _client.rpc('generate_referral_code', params: {'p_user_id': user.id}),
-    );
-    final code = result?.toString().trim() ?? '';
-    if (code.isEmpty) {
-      throw Exception('Davet kodu oluşturulamadı.');
-    }
-    return code;
-  }
-
-  Future<bool> validateReferralCode(String code) async {
-    final normalized = code.trim().toUpperCase();
-    if (!RegExp(r'^[A-Z0-9]{8}$').hasMatch(normalized)) return false;
-    final result = await _client.rpc(
-      'validate_referral_code',
-      params: {'p_code': normalized},
-    );
-    return result == true;
-  }
-
-  Future<Map<String, dynamic>> redeemReferral(String code) async {
-    final normalized = code.trim().toUpperCase();
-    final isValid = await validateReferralCode(normalized);
-    if (!isValid) {
-      throw Exception('Davet kodu bulunamadı.');
-    }
-    final result = await _invokeFunction(
-      'redeem_referral',
-      body: {'code': normalized},
-      requireAuth: true,
-    );
-    return Map<String, dynamic>.from(result.data as Map);
   }
 
   Future<List<Map<String, dynamic>>> adminGetCoordinateQueue({
@@ -5983,6 +5866,27 @@ class RouteviaRepository {
         'get_destination_image',
         body: {'city': cityName},
       );
+      final data = result.data;
+      if (data is Map) return Map<String, dynamic>.from(data);
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Fetches a Pexels image for a specific place (falls back to province-level).
+  /// Non-fatal — returns null if not found. Result cached server-side.
+  Future<Map<String, dynamic>?> getPlaceImage({
+    required String placeName,
+    required String provinceName,
+    String category = '',
+  }) async {
+    try {
+      final result = await _invokeFunction('get_destination_image', body: {
+        'city': provinceName,
+        'place_name': placeName,
+        'category': category,
+      });
       final data = result.data;
       if (data is Map) return Map<String, dynamic>.from(data);
       return null;

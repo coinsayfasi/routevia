@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -14,7 +13,6 @@ import '../../core/error_utils.dart';
 import '../../core/i18n.dart';
 import '../../core/premium_gate.dart';
 import '../../core/theme.dart';
-import '../../core/widgets/ad_banner.dart';
 import '../../data/fallback_provinces.dart';
 import '../../data/providers.dart';
 import '../../data/must_see_places.dart';
@@ -24,6 +22,7 @@ import '../../models/trip_models.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 import '../../core/widgets/safe_network_image.dart';
+import '../../core/widgets/place_pexels_image.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HomeScreen
@@ -60,7 +59,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   bool _popularServiceError = false;
   bool _isAdmin = false;
   bool _premiumPreviewActive = false;
-  DateTime? _premiumPreviewExpiry;
   String _pickMode = 'all';
 
   // Data
@@ -293,41 +291,69 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   List<PlaceModel> _allDiscoveryCandidates() {
-    final seen = <String>{};
+    final seenIds = <String>{};
+    final seenNames = <String>{};
     return [..._popularPlaces, ..._scenicPicks, ..._foodPicks]
         .where((p) => !_isFakePlaceholder(p) && !_isLodgingLikePlace(p))
-        .where((p) => seen.add(p.id))
+        .where((p) {
+          if (!seenIds.add(p.id)) return false;
+          // Also deduplicate by normalized name to catch DB duplicates with different IDs
+          return seenNames.add(_normalizeLookupText(p.name));
+        })
         .toList(growable: false);
   }
 
   List<PlaceModel> _displayTopPicks() {
-    final picks = _activeTopPicks();
+    // Exclude places already shown in personal suggestions (cross-section dedup)
+    final personalNames = _personalizedDailyPicks()
+        .map((p) => _normalizeLookupText(p.name))
+        .toSet();
+    final picks = _activeTopPicks()
+        .where((p) => !personalNames.contains(_normalizeLookupText(p.name)))
+        .toList(growable: false);
+    // Must-see places first in top picks
+    final mustSee = picks.where((p) => _mustSeeBoostForPersonal(p) > 0).toList();
+    final rest = picks.where((p) => _mustSeeBoostForPersonal(p) == 0).toList();
     final limit = _pickMode == 'all' ? 18 : 12;
-    return picks.take(limit).toList(growable: false);
+    return [...mustSee, ...rest].take(limit).toList(growable: false);
   }
 
   List<Map<String, dynamic>> _filteredSmartSeasonItems({int limit = 12}) {
+    // Build a cross-section dedup set from top picks and personal picks
+    // so the same place never appears in two different card sections.
+    final crossSectionSeen = <String>{};
+    for (final p in _allDiscoveryCandidates()) {
+      crossSectionSeen.add(_normalizeLookupText(p.name));
+    }
+
     final deduped = <String>{};
-    final filtered = _smartSeason
-        .where((item) {
-          final category = item['category']?.toString() ?? '';
-          final name = item['name']?.toString() ?? '';
-          final tags = ((item['tags'] as List?) ?? const []).cast<Object?>();
-          if (_hasLodgingSignal(name: name, category: category, tags: tags)) {
-            return false;
-          }
-          final lat = (item['lat'] as num?)?.toDouble();
-          final lng = (item['lng'] as num?)?.toDouble();
-          if (lat == null || lng == null) return false;
-          final key =
-              '${_normalizeLookupText(name)}:${lat.toStringAsFixed(3)}:${lng.toStringAsFixed(3)}';
-          return deduped.add(key);
-        })
-        .toList(growable: false);
-    filtered.sort((a, b) {
-      final boostA = _mustSeeBoostForSmartItem(a);
-      final boostB = _mustSeeBoostForSmartItem(b);
-      if (boostA != boostB) return boostB.compareTo(boostA);
+    final mustSeeItems = <Map<String, dynamic>>[];
+    final regularItems = <Map<String, dynamic>>[];
+
+    for (final item in _smartSeason) {
+      final category = item['category']?.toString() ?? '';
+      final name = item['name']?.toString() ?? '';
+      final tags = ((item['tags'] as List?) ?? const []).cast<Object?>();
+      if (_hasLodgingSignal(name: name, category: category, tags: tags)) continue;
+      final lat = (item['lat'] as num?)?.toDouble();
+      final lng = (item['lng'] as num?)?.toDouble();
+      if (lat == null || lng == null) continue;
+      final coordKey =
+          '${_normalizeLookupText(name)}:${lat.toStringAsFixed(3)}:${lng.toStringAsFixed(3)}';
+      if (!deduped.add(coordKey)) continue;
+      // Skip if already shown in top picks or personal suggestions
+      if (crossSectionSeen.contains(_normalizeLookupText(name))) continue;
+
+      final isMustSee = _mustSeeBoostForSmartItem(item) > 0;
+      if (isMustSee) {
+        mustSeeItems.add(item);
+      } else {
+        regularItems.add(item);
+      }
+    }
+
+    // Must-see always first, then sort regulars by score
+    regularItems.sort((a, b) {
       final scoreA =
           ((a['trust_score'] as num?)?.toDouble() ?? 0) * 0.6 +
           ((a['season_score'] as num?)?.toDouble() ?? 0) * 0.4;
@@ -336,7 +362,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ((b['season_score'] as num?)?.toDouble() ?? 0) * 0.4;
       return scoreB.compareTo(scoreA);
     });
-    return filtered.take(limit).toList(growable: false);
+
+    return [...mustSeeItems, ...regularItems].take(limit).toList(growable: false);
   }
 
   int _mustSeeBoostForSmartItem(Map<String, dynamic> item) {
@@ -576,23 +603,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     Map<String, dynamic>? profile;
     String? startupWarning;
     try {
-      try {
-        provinces = await repo.listProvinces();
-      } catch (_) {
+      // Fire provinces + admin check + profile in parallel
+      final startupResults = await Future.wait([
+        repo.listProvinces().catchError((_) => const <Map<String, dynamic>>[]),
+        repo.isCurrentUserAdmin().catchError((_) => false),
+        repo.getMyProfile().catchError((_) => null),
+      ]);
+      provinces = startupResults[0] as List<Map<String, dynamic>>;
+      isAdmin = startupResults[1] as bool;
+      profile = startupResults[2] as Map<String, dynamic>?;
+      if (provinces.isEmpty) {
         startupWarning =
             'İl verileri yüklenemedi. İnternet bağlantısını kontrol et.';
       }
-      if (provinces.isEmpty) {
-        startupWarning ??=
-            'İl verileri geçici olarak boş geldi. Lütfen tekrar dene.';
-      }
-
-      try {
-        isAdmin = await repo.isCurrentUserAdmin();
-      } catch (_) {}
-      try {
-        profile = await repo.getMyProfile();
-      } catch (_) {}
 
       if (provinces.isEmpty) {
         if (!mounted) return;
@@ -626,9 +649,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       }
 
       if (!mounted) return;
-      final preferredProvince = await cache.getPreferredProvinceSlug();
-      final preferredDistrictId = await cache.getPreferredDistrictId();
-      final locationSetupSkipped = await cache.getLocationSetupSkipped();
+      // Read all three cache keys in parallel (single box open)
+      final cacheResults = await Future.wait([
+        cache.getPreferredProvinceSlug(),
+        cache.getPreferredDistrictId(),
+        cache.getLocationSetupSkipped(),
+      ]);
+      final preferredProvince = cacheResults[0] as String?;
+      final preferredDistrictId = cacheResults[1] as String?;
+      final locationSetupSkipped = cacheResults[2] as bool;
       String? initialProvince = preferredProvince;
 
       if (position != null) {
@@ -674,13 +703,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       if (Supabase.instance.client.auth.currentSession != null &&
           !onboardingCompleted &&
           !localOnboardingCompleted) {
-        final pendingCode = await ref
-            .read(localCacheProvider)
-            .getPendingReferralCode();
         if (!mounted) return;
-        context.go(
-          pendingCode == null ? '/onboarding' : '/onboarding?ref=$pendingCode',
-        );
+        context.go('/onboarding');
         return;
       }
 
@@ -697,7 +721,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       final now = DateTime.now().toUtc();
       for (final e in entitlements) {
         final key = e['entitlement_key'] as String?;
-        if (key == 'pro_preview_7d' || key == 'routevia_pro') {
+        if (key == 'routevia_pro') {
           final ex = DateTime.tryParse((e['expires_at'] as String?) ?? '');
           if (ex != null && ex.isAfter(now)) {
             isPro = true;
@@ -719,7 +743,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             : null;
         _isAdmin = isAdmin;
         _premiumPreviewActive = isPro || isAdmin;
-        _premiumPreviewExpiry = expiry;
       });
 
       await _loadPopularForProvince();
@@ -786,13 +809,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       final featuredIds = results[1] as Set<String>;
       if (mounted) setState(() => _featuredPlaceIds = featuredIds);
       if (places.isEmpty) {
+        final provinceCoords = await repo.getProvinceBySlug(slug);
         final fallbackBundle = await repo.nearbyPlacesBundle(
           lat:
-              (await repo.getProvinceBySlug(slug))?['lat']?.toDouble() ??
+              (provinceCoords?['lat'] as num?)?.toDouble() ??
               _position?.latitude ??
               37.87,
           lng:
-              (await repo.getProvinceBySlug(slug))?['lng']?.toDouble() ??
+              (provinceCoords?['lng'] as num?)?.toDouble() ??
               _position?.longitude ??
               32.50,
           radiusKm: _planRadiusKm,
@@ -855,17 +879,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       unawaited(_loadWeather());
     } catch (_) {
       serviceError = true;
-      var places = await _fallbackTopPicks(
-        repo,
-        slug,
-        districtName: districtName,
-      );
-      if (places.isEmpty) {
-        places = await repo.listProvinceOrNationalTopPicks(
-          provinceSlug: slug,
+      var places = <PlaceModel>[];
+      try {
+        places = await _fallbackTopPicks(
+          repo,
+          slug,
           districtName: districtName,
-          limit: 24,
         );
+        if (places.isEmpty) {
+          places = await repo.listProvinceOrNationalTopPicks(
+            provinceSlug: slug,
+            districtName: districtName,
+            limit: 24,
+          );
+        }
+      } catch (_) {
+        places = const [];
       }
       if (!mounted) return;
       setState(() {
@@ -1223,7 +1252,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       return;
     }
     if (_provinces.isEmpty) {
-      await _loadInitial();
+      // Sadece il listesini yeniden yükle — _loadInitial() çağırmaktan kaçın,
+      // çünkü o fonksiyon onboarding/location-setup yönlendirmesi içeriyor.
+      try {
+        final provinces =
+            await ref.read(repositoryProvider).listProvinces();
+        if (!mounted) return;
+        if (provinces.isNotEmpty) {
+          setState(() => _provinces = provinces);
+        }
+      } catch (_) {}
       if (!mounted) return;
       if (_provinces.isEmpty) {
         _showSnack('İller yüklenemedi. İnternet bağlantısını kontrol et.');
@@ -1259,6 +1297,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _districts = districts;
       _districtId = null;
     });
+    // Seçimi cache'e kaydet — sonraki _loadInitial() location-setup
+    // redirect'ini tetiklememesi için preferredProvince null olmamalı.
+    unawaited(
+      ref.read(localCacheProvider).setPreferredProvinceSlug(selected).catchError((_) {}),
+    );
     await _loadPopularForProvince();
     unawaited(_loadCoverImage().catchError((_) {}));
   }
@@ -1284,9 +1327,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (!mounted) return;
     if (selected == _allDistrictValue) {
       setState(() => _districtId = null);
+      unawaited(ref.read(localCacheProvider).setPreferredDistrictId(null).catchError((_) {}));
       await _loadPopularForProvince();
     } else if (selected != null) {
       setState(() => _districtId = selected);
+      unawaited(ref.read(localCacheProvider).setPreferredDistrictId(selected).catchError((_) {}));
       await _loadPopularForProvince();
     }
   }
@@ -1344,130 +1389,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  Future<void> _openGrowthSheet() async {
-    final isLoggedIn = Supabase.instance.client.auth.currentSession != null;
-    if (!isLoggedIn) {
-      if (!mounted) return;
-      _showSnack('Davet kodu için önce giriş yapmalısın.');
-      context.push('/auth');
-      return;
-    }
-
-    final repo = ref.read(repositoryProvider);
-    String? referralCode;
-
-    // 1) Try to read existing code from profile first (no extra RPC)
-    try {
-      final profile = await repo.getMyProfile();
-      referralCode = (profile?['referral_code'] as String?)?.trim();
-      if (referralCode?.isEmpty ?? true) referralCode = null;
-    } catch (_) {}
-
-    // 2) Only create if still null
-    if (referralCode == null) {
-      try {
-        referralCode = await repo.createReferralCode();
-      } catch (e) {
-        if (mounted) _showSnack(friendlyError(e));
-      }
-    }
-
-    if (!mounted) return;
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                context.tr('Büyüme Merkezi', 'Growth Center'),
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20),
-              ),
-              const SizedBox(height: 16),
-              if (_premiumPreviewActive) ...[
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF00C2A8), Color(0xFF0B9E8A)],
-                    ),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.workspace_premium,
-                        color: Colors.white,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          context.tr(
-                            '7 günlük Pro davet erişimi aktif${_premiumPreviewExpiry == null ? '' : ' • ${_premiumPreviewExpiry!.day}.${_premiumPreviewExpiry!.month}.${_premiumPreviewExpiry!.year}'}',
-                            '7-day Pro invite access is active${_premiumPreviewExpiry == null ? '' : ' • ${_premiumPreviewExpiry!.day}.${_premiumPreviewExpiry!.month}.${_premiumPreviewExpiry!.year}'}',
-                          ),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 12),
-              ],
-              _GrowthTile(
-                icon: Icons.group_add_outlined,
-                title: context.tr('Arkadaşını Davet Et', 'Invite a Friend'),
-                subtitle: referralCode == null
-                    ? context.tr(
-                        'Kod hazırlanamadı',
-                        'Code could not be prepared',
-                      )
-                    : context.tr(
-                        'Kodun: $referralCode',
-                        'Your code: $referralCode',
-                      ),
-                trailing: const Icon(Icons.share_outlined),
-                onTap: referralCode == null
-                    ? null
-                    : () async {
-                        Navigator.of(ctx).pop();
-                        final text =
-                            '${context.tr('Routevia ile gezi planını 1 tıkla yap. Davet kodum:', 'Plan your trip with Routevia in one tap. My invite code:')} $referralCode\n'
-                            'routevia://ref/$referralCode';
-                        await SharePlus.instance.share(ShareParams(text: text));
-                        await repo.logAppEvent(
-                          'referral_shared',
-                          payload: {'code': referralCode},
-                        );
-                      },
-              ),
-              const SizedBox(height: 8),
-              _GrowthTile(
-                icon: Icons.feedback_outlined,
-                title: context.tr('Geri Bildirim Gönder', 'Send Feedback'),
-                subtitle: context.tr('Seni dinliyoruz', 'We are listening'),
-                onTap: () async {
-                  Navigator.of(ctx).pop();
-                  await _openFeedbackDialog();
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 
   Future<void> _openFeedbackDialog() async {
     final controller = TextEditingController();
@@ -1555,13 +1476,81 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     controller.dispose();
   }
 
+  // ── Quick Plan FAB ────────────────────────────────────────────────────────
+  bool _quickPlanBuilding = false;
+
+  Future<void> _launchQuickPlan() async {
+    if (_quickPlanBuilding) return;
+    final slug = _provinceSlug;
+    if (slug == null) {
+      _showSnack('Önce bir il seç.');
+      return;
+    }
+    final premiumState = ref.read(premiumStateProvider).valueOrNull;
+    if (premiumState != null && !premiumState.canGeneratePlan) {
+      // ignore: use_build_context_synchronously
+      if (mounted) showPremiumGate(context, feature: 'Günlük plan limiti doldu');
+      return;
+    }
+    setState(() => _quickPlanBuilding = true);
+    try {
+      final repo = ref.read(repositoryProvider);
+      final plan = await repo.generateTripPlan(
+        provinceSlug: slug,
+        days: 1,
+        transportMode: _position != null ? 'walk' : 'transit',
+        pace: 'fast',
+        personaMode: _persona,
+        preferences: _prefs.toList(),
+        maxRadiusKm: 8,
+        allowOutsideDistrict: true,
+        startLat: _position?.latitude,
+        startLng: _position?.longitude,
+        startHour: DateTime.now().hour.clamp(8, 20),
+      );
+      if (!mounted) return;
+      context.push('/day-plan', extra: plan);
+    } catch (e) {
+      if (!mounted) return;
+      _showSnack(friendlyError(e));
+    } finally {
+      if (mounted) setState(() => _quickPlanBuilding = false);
+    }
+  }
+
   // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
+    // Nav bar bottom clearance: SafeArea.minimum(12) + NavigationBar(72) + margin(8)
+    final navClearance = MediaQuery.of(context).padding.bottom.clamp(12.0, double.infinity) + 72.0 + 8.0;
     return Scaffold(
       backgroundColor: RouteviaColors.background,
-      bottomNavigationBar: const AdBannerWidget(),
+      floatingActionButton: _dataLoading || _provinceSlug == null
+          ? null
+          : Padding(
+              padding: EdgeInsets.only(bottom: navClearance),
+              child: FloatingActionButton.extended(
+                onPressed: _quickPlanBuilding ? null : _launchQuickPlan,
+                backgroundColor: const Color(0xFF0B3B68),
+                foregroundColor: Colors.white,
+                elevation: 6,
+                icon: _quickPlanBuilding
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.bolt_rounded),
+                label: const Text(
+                  'Şimdi Çıkalım',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ),
       body: _dataLoading
           ? _buildLoadingBody()
           : CustomScrollView(
@@ -1595,7 +1584,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         const SizedBox(height: 24),
                       ],
                       _buildPromoBanner(),
-                      const SizedBox(height: 32),
+                      // Enough space so last item clears the floating nav bar
+                      SizedBox(
+                        height: MediaQuery.of(context).padding.bottom.clamp(12.0, double.infinity) + 72.0 + 24.0,
+                      ),
                     ],
                   ),
                 ),
@@ -1681,9 +1673,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
       actions: [
         IconButton(
-          onPressed: _openGrowthSheet,
-          icon: const Icon(Icons.workspace_premium_outlined),
-          tooltip: 'Büyüme',
+          onPressed: _openFeedbackDialog,
+          icon: const Icon(Icons.feedback_outlined),
+          tooltip: context.tr('Geri Bildirim', 'Feedback'),
           style: IconButton.styleFrom(
             foregroundColor: RouteviaColors.textSecondary,
           ),
@@ -2164,8 +2156,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           Expanded(
             child: Text(
               context.tr(
-                '7 günlük Pro davet erişimi aktif${_premiumPreviewExpiry == null ? '' : ' • ${_premiumPreviewExpiry!.day}.${_premiumPreviewExpiry!.month}.${_premiumPreviewExpiry!.year}'}',
-                '7-day Pro invite access is active${_premiumPreviewExpiry == null ? '' : ' • ${_premiumPreviewExpiry!.day}.${_premiumPreviewExpiry!.month}.${_premiumPreviewExpiry!.year}'}',
+                'Routevia Pro aktif',
+                'Routevia Pro active',
               ),
               style: const TextStyle(
                 color: Colors.white,
@@ -2190,7 +2182,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             Expanded(
               child: _QuickActionCard(
                 icon: Icons.map_rounded,
-                label: 'Harita',
+                label: context.tr('Harita', 'Map'),
                 gradient: const LinearGradient(
                   colors: [Color(0xFF00C2A8), Color(0xFF0096A8)],
                   begin: Alignment.topLeft,
@@ -2470,6 +2462,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
+  // Emoji map for smart season cards (no BuildContext needed)
+  static const _categoryEmojisMap = {
+    'nature': '🌿',
+    'historical': '🏰',
+    'museum': '🏛️',
+    'viewpoint': '🔭',
+    'beach': '🏖️',
+    'waterfall': '💧',
+    'canyon': '🏔️',
+    'food': '🍽️',
+    'cafe': '☕',
+    'mall': '🛍️',
+    'lodging': '🏨',
+    'activity': '🎯',
+    'tour': '🗺️',
+  };
+
   // Helper to translate category key to Turkish label
   String _categoryLabels(String cat) =>
       {
@@ -2575,7 +2584,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ),
         const SizedBox(height: 14),
         SizedBox(
-          height: 200,
+          height: 236,
           child: _popularLoading
               ? const Center(
                   child: CircularProgressIndicator(
@@ -2718,7 +2727,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ),
         const SizedBox(height: 10),
         SizedBox(
-          height: 214,
+          height: 244,
           child: ListView.separated(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             scrollDirection: Axis.horizontal,
@@ -2731,6 +2740,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               final routeviaScore = ((trustScore * 0.6) + (seasonScore * 0.4))
                   .clamp(0, 100)
                   .toStringAsFixed(0);
+              final isMustSee = _mustSeeBoostForSmartItem(s) > 0;
+              final category = s['category'] as String? ?? 'activity';
+              final durationMin = switch (category) {
+                'museum' => 90,
+                'historical' => 75,
+                'nature' || 'beach' => 90,
+                'waterfall' => 60,
+                'viewpoint' => 35,
+                'food' => 60,
+                'cafe' => 45,
+                _ => 60,
+              };
               return GestureDetector(
                 onTap: () => context.push(
                   '/map-explore',
@@ -2744,16 +2765,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   },
                 ),
                 child: Container(
-                  width: 276,
+                  width: 284,
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: RouteviaColors.border),
-                    boxShadow: const [
+                    border: Border.all(
+                      color: isMustSee
+                          ? const Color(0xFFFFD600).withValues(alpha: 0.6)
+                          : RouteviaColors.border,
+                      width: isMustSee ? 1.5 : 1.0,
+                    ),
+                    boxShadow: [
                       BoxShadow(
-                        color: Color(0x120F172A),
+                        color: isMustSee
+                            ? const Color(0x22FFD600)
+                            : const Color(0x120F172A),
                         blurRadius: 20,
-                        offset: Offset(0, 10),
+                        offset: const Offset(0, 10),
                       ),
                     ],
                   ),
@@ -2767,7 +2795,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         child: Stack(
                           children: [
                             SizedBox(
-                              height: 116,
+                              height: 126,
                               width: double.infinity,
                               child:
                                   (s['cover_photo'] as String?)?.isNotEmpty ==
@@ -2776,55 +2804,59 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                       url: s['cover_photo'] as String?,
                                       fit: BoxFit.cover,
                                     )
-                                  : Container(
-                                      decoration: const BoxDecoration(
-                                        gradient: LinearGradient(
-                                          colors: [
-                                            Color(0xFF0B1F3A),
-                                            Color(0xFF164E63),
-                                          ],
-                                          begin: Alignment.topLeft,
-                                          end: Alignment.bottomRight,
+                                  : PlacePexelsImage(
+                                      placeName: (s['name'] as String?) ?? '',
+                                      provinceName: _selectedProvinceName,
+                                      category: category,
+                                      fallbackWidget: Container(
+                                        decoration: BoxDecoration(
+                                          gradient: LinearGradient(
+                                            colors: [
+                                              const Color(0xFF0B1F3A),
+                                              RouteviaColors.teal.withValues(alpha: 0.6),
+                                            ],
+                                            begin: Alignment.topLeft,
+                                            end: Alignment.bottomRight,
+                                          ),
                                         ),
-                                      ),
-                                      child: const Center(
-                                        child: Icon(
-                                          Icons.travel_explore_rounded,
-                                          color: Colors.white70,
-                                          size: 34,
+                                        child: Center(
+                                          child: Text(
+                                            _categoryEmojisMap[category] ?? '📍',
+                                            style: const TextStyle(fontSize: 44),
+                                          ),
                                         ),
                                       ),
                                     ),
                             ),
+                            // Dark gradient overlay
                             Container(
-                              height: 116,
+                              height: 126,
                               decoration: const BoxDecoration(
                                 gradient: LinearGradient(
                                   colors: [
                                     Colors.transparent,
-                                    Color(0xB30F172A),
+                                    Color(0xCC0F172A),
                                   ],
                                   begin: Alignment.topCenter,
                                   end: Alignment.bottomCenter,
                                 ),
                               ),
                             ),
+                            // Category chip top-left
                             Positioned(
-                              left: 12,
-                              top: 12,
+                              left: 10,
+                              top: 10,
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 5,
+                                  horizontal: 9,
+                                  vertical: 4,
                                 ),
                                 decoration: BoxDecoration(
                                   color: Colors.white.withValues(alpha: 0.92),
                                   borderRadius: BorderRadius.circular(999),
                                 ),
                                 child: Text(
-                                  _categoryLabels(
-                                    s['category'] as String? ?? 'activity',
-                                  ),
+                                  _categoryLabels(category),
                                   style: const TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w700,
@@ -2833,10 +2865,49 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                 ),
                               ),
                             ),
+                            // Must-see badge top-right
+                            if (isMustSee)
+                              Positioned(
+                                top: 10,
+                                right: 10,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFFD600),
+                                    borderRadius: BorderRadius.circular(999),
+                                    boxShadow: const [
+                                      BoxShadow(
+                                        color: Color(0x44000000),
+                                        blurRadius: 6,
+                                        offset: Offset(0, 2),
+                                      ),
+                                    ],
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text('⭐', style: TextStyle(fontSize: 10)),
+                                      SizedBox(width: 3),
+                                      Text(
+                                        'Mutlaka Gör',
+                                        style: TextStyle(
+                                          color: Color(0xFF1A1A1A),
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            // Place name bottom
                             Positioned(
-                              left: 12,
-                              right: 12,
-                              bottom: 12,
+                              left: 10,
+                              right: 10,
+                              bottom: 10,
                               child: Text(
                                 (s['name'] as String?) ?? '-',
                                 maxLines: 2,
@@ -2844,7 +2915,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.w800,
-                                  fontSize: 17,
+                                  fontSize: 16,
                                   height: 1.2,
                                 ),
                               ),
@@ -2854,7 +2925,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ),
                       Expanded(
                         child: Padding(
-                          padding: const EdgeInsets.all(14),
+                          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -2863,26 +2934,53 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
-                                  fontSize: 12.5,
+                                  fontSize: 12,
                                   color: RouteviaColors.textSecondary,
                                   height: 1.35,
                                 ),
                               ),
                               const Spacer(),
-                              _ScorePill(
-                                icon: Icons.auto_awesome_rounded,
-                                color: const Color(0xFF0F766E),
-                                label: 'Routevia $routeviaScore / 100',
+                              Row(
+                                children: [
+                                  _ScorePill(
+                                    icon: Icons.auto_awesome_rounded,
+                                    color: const Color(0xFF0F766E),
+                                    label: '$routeviaScore / 100',
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF0F9FF),
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.schedule_rounded, size: 11, color: Color(0xFF0369A1)),
+                                        const SizedBox(width: 3),
+                                        Text(
+                                          '~$durationMin dk',
+                                          style: const TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w700,
+                                            color: Color(0xFF0369A1),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(height: 10),
+                              const SizedBox(height: 8),
                               Row(
                                 children: [
                                   const Icon(
                                     Icons.map_outlined,
-                                    size: 14,
+                                    size: 13,
                                     color: RouteviaColors.textSecondary,
                                   ),
-                                  const SizedBox(width: 5),
+                                  const SizedBox(width: 4),
                                   Expanded(
                                     child: Text(
                                       (s['city'] as String?)?.isNotEmpty == true
@@ -2892,13 +2990,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
                                         color: RouteviaColors.textSecondary,
-                                        fontSize: 12,
+                                        fontSize: 11,
                                       ),
                                     ),
                                   ),
                                   const Icon(
                                     Icons.arrow_forward_rounded,
-                                    size: 16,
+                                    size: 15,
                                     color: RouteviaColors.primary,
                                   ),
                                 ],
@@ -4454,51 +4552,60 @@ class _TopPickCard extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: SizedBox(
-        width: 200,
+        width: isMustSee ? 224 : 200,
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(20),
-            boxShadow: const [
+            boxShadow: [
               BoxShadow(
-                color: Color(0x18000000),
-                blurRadius: 16,
-                offset: Offset(0, 6),
+                color: isMustSee ? const Color(0x44FFD600) : const Color(0x18000000),
+                blurRadius: isMustSee ? 20 : 16,
+                offset: const Offset(0, 6),
               ),
             ],
+            border: isMustSee
+                ? Border.all(color: const Color(0xFFFFD600), width: 1.5)
+                : null,
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(20),
             child: Stack(
               fit: StackFit.expand,
               children: [
-                // Background image or category gradient
+                // Background image or lazy-loaded Pexels image with gradient fallback
                 imageUrl != null
                     ? SafeNetworkImage(url: imageUrl, fit: BoxFit.cover)
-                    : Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          // Vibrant category gradient
-                          Container(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [
-                                  catColor.withValues(alpha: 0.85),
-                                  catColor.withValues(alpha: 0.55),
-                                  const Color(0xFF0B1F3A),
-                                ],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
+                    : PlacePexelsImage(
+                        placeName: place.name,
+                        provinceName: locationLabel,
+                        category: displayCategory,
+                        fit: BoxFit.cover,
+                        fallbackWidget: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            // Vibrant category gradient
+                            Container(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [
+                                    catColor.withValues(alpha: 0.85),
+                                    catColor.withValues(alpha: 0.55),
+                                    const Color(0xFF0B1F3A),
+                                  ],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
                               ),
                             ),
-                          ),
-                          // Large emoji centered
-                          Center(
-                            child: Text(
-                              _categoryEmojis[displayCategory] ?? '📍',
-                              style: const TextStyle(fontSize: 56),
+                            // Large emoji centered
+                            Center(
+                              child: Text(
+                                _categoryEmojis[displayCategory] ?? '📍',
+                                style: const TextStyle(fontSize: 56),
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                 // Gradient overlay
                 Container(
@@ -4756,75 +4863,6 @@ class _SettingsSection extends StatelessWidget {
         const SizedBox(height: 10),
         child,
       ],
-    );
-  }
-}
-
-class _GrowthTile extends StatelessWidget {
-  const _GrowthTile({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    this.trailing,
-    this.onTap,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final Widget? trailing;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: RouteviaColors.surfaceVariant,
-          borderRadius: BorderRadius.circular(14),
-          border: const Border.fromBorderSide(
-            BorderSide(color: RouteviaColors.border),
-          ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: RouteviaColors.teal.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon, size: 18, color: RouteviaColors.teal),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14,
-                      color: RouteviaColors.textPrimary,
-                    ),
-                  ),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: RouteviaColors.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            ?trailing,
-          ],
-        ),
-      ),
     );
   }
 }
