@@ -56,7 +56,7 @@ jobs:
           '
 
       - name: Run district auto-fix pass
-        run: node tools/fix_poi_districts_nominatim.mjs --max-updates=120 --delay-ms=1100
+        run: node tools/fix_poi_districts_nominatim.mjs --max-updates=1000 --delay-ms=1100
 
       - name: Build district quality report
         run: |
@@ -78,6 +78,7 @@ jobs:
           '
 
       - name: Upload nightly report artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: nightly-poi-district-quality
