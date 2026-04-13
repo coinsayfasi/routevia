@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.yunusgunes.routevia",
+      "sha256_cert_fingerprints": [
+        "C2:9C:CB:A4:55:FC:79:D9:45:7A:37:2E:F5:50:7A:A2:6D:BE:BA:9B:59:61:C2:A7:89:F8:7C:C4:37:90:53:59"
+      ]
+    }
+  }
+]
