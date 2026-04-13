@@ -26,6 +26,12 @@ export async function requireAdmin() {
     redirect("/login");
   }
 
+  // Email whitelist — ikinci güvenlik katmanı
+  const allowedEmail = process.env.ADMIN_ALLOWED_EMAIL?.trim().toLowerCase();
+  if (allowedEmail && user.email?.toLowerCase() !== allowedEmail) {
+    redirect("/login");
+  }
+
   const admin = await createSupabaseAdminClient();
   const { data, error } = await admin
     .from("profiles")
