@@ -11,6 +11,7 @@ import 'src/app.dart';
 import 'src/core/constants.dart';
 import 'src/core/firebase_runtime.dart';
 import 'src/data/local_cache.dart';
+import 'src/features/premium/purchase_service.dart';
 
 Future<void> main() async {
   runZonedGuarded(
@@ -28,10 +29,11 @@ Future<void> main() async {
       FlutterError.onError = (details) {
         FlutterError.presentError(details);
       };
+      // PlatformDispatcher handler: set here as default; firebase_runtime
+      // overwrites it later with Crashlytics. This fallback fires only
+      // before Firebase is initialized.
       PlatformDispatcher.instance.onError = (error, stack) {
-        debugPrint('Uncaught platform error: $error');
-        debugPrintStack(stackTrace: stack);
-        unawaited(FirebaseRuntime.recordError(error, stack, fatal: true));
+        debugPrint('Uncaught platform error (pre-firebase): $error');
         return true;
       };
       runApp(const ProviderScope(child: _BootstrapApp()));
@@ -39,6 +41,9 @@ Future<void> main() async {
     (error, stack) {
       debugPrint('Uncaught zone error: $error');
       debugPrintStack(stackTrace: stack);
+      // Forward zone errors to Crashlytics as NON-fatal.
+      // Network/tile connection aborts are expected on mobile — don't crash.
+      unawaited(FirebaseRuntime.recordError(error, stack, fatal: false));
     },
   );
 }
@@ -50,40 +55,13 @@ class _BootstrapApp extends StatefulWidget {
   State<_BootstrapApp> createState() => _BootstrapAppState();
 }
 
-class _BootstrapAppState extends State<_BootstrapApp>
-    with TickerProviderStateMixin {
+class _BootstrapAppState extends State<_BootstrapApp> {
   late Future<void> _bootstrapFuture;
-  late AnimationController _glowController;
-  late AnimationController _fadeController;
-  late Animation<double> _glowAnim;
-  late Animation<double> _fadeAnim;
 
   @override
   void initState() {
     super.initState();
-
-    _glowController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 2200),
-    )..repeat(reverse: true);
-    _glowAnim = Tween<double>(begin: 0.5, end: 1.0).animate(
-      CurvedAnimation(parent: _glowController, curve: Curves.easeInOut),
-    );
-
-    _fadeController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 900),
-    )..forward();
-    _fadeAnim = CurvedAnimation(parent: _fadeController, curve: Curves.easeOut);
-
     _bootstrapFuture = _bootstrap();
-  }
-
-  @override
-  void dispose() {
-    _glowController.dispose();
-    _fadeController.dispose();
-    super.dispose();
   }
 
   Future<void> _bootstrap() async {
@@ -137,6 +115,16 @@ class _BootstrapAppState extends State<_BootstrapApp>
     } catch (e) {
       debugPrint('[bootstrap] Firebase push registration fail: $e');
     }
+
+    try {
+      await PurchaseService.configure();
+      final session = Supabase.instance.client.auth.currentSession;
+      if (session != null) {
+        await PurchaseService.loginUser(session.user.id);
+      }
+    } catch (e) {
+      debugPrint('[bootstrap] RevenueCat init fail: $e');
+    }
   }
 
   @override
@@ -156,80 +144,38 @@ class _BootstrapAppState extends State<_BootstrapApp>
   }
 
   Widget _buildSplash() {
-    return MaterialApp(
+    // Reuse the exact native splash image (splash_bg.png) as the Flutter splash
+    // so the OS-splash → Flutter handoff is seamless (no flash/jump). No fade-in:
+    // the first Flutter frame matches the native one pixel-for-pixel. Only a
+    // subtle progress bar is overlaid to signal loading.
+    return const MaterialApp(
       debugShowCheckedModeBanner: false,
       home: Scaffold(
-        body: FadeTransition(
-          opacity: _fadeAnim,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      Color(0xFF07162F),
-                      Color(0xFF0B1F3A),
-                      Color(0xFF123464),
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image(
+              image: AssetImage('assets/branding/splash_bg.png'),
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 56,
+              child: Center(
+                child: SizedBox(
+                  width: 132,
+                  child: LinearProgressIndicator(
+                    minHeight: 3,
+                    borderRadius: BorderRadius.all(Radius.circular(8)),
+                    valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF64D1F4)),
+                    backgroundColor: Color(0x334A6B97),
                   ),
                 ),
               ),
-              Positioned(
-                top: -120,
-                right: -80,
-                child: AnimatedBuilder(
-                  animation: _glowAnim,
-                  builder: (_, _) => Container(
-                    width: 340,
-                    height: 340,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: RadialGradient(
-                        colors: [
-                          Color.fromRGBO(125, 211, 252, 0.14 * _glowAnim.value),
-                          Colors.transparent,
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Center(
-                child: Container(
-                  width: 176,
-                  height: 176,
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.06),
-                    borderRadius: BorderRadius.circular(34),
-                    border: Border.all(color: const Color(0x55D7E5FF)),
-                  ),
-                  child: Image.asset('assets/branding/app_icon_1024.png'),
-                ),
-              ),
-              const Positioned(
-                left: 0,
-                right: 0,
-                bottom: 72,
-                child: Center(
-                  child: SizedBox(
-                    width: 132,
-                    child: LinearProgressIndicator(
-                      minHeight: 3,
-                      borderRadius: BorderRadius.all(Radius.circular(8)),
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        Color(0xFF64D1F4),
-                      ),
-                      backgroundColor: Color(0x334A6B97),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -285,6 +231,7 @@ class _BootstrapAppState extends State<_BootstrapApp>
                   width: double.infinity,
                   child: FilledButton(
                     onPressed: () {
+                      if (!mounted) return;
                       setState(() => _bootstrapFuture = _bootstrap());
                     },
                     style: FilledButton.styleFrom(
