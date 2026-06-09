@@ -26,3 +26,8 @@ tools/ingest_worker/node_modules/
 # Supabase local
 supabase/.temp/
 apps/mobile/coinsayfasi.github.io/
+.vercel
+
+# Firebase config (client keys — keep out of git)
+apps/mobile/android/app/google-services.json
+apps/mobile/ios/Runner/GoogleService-Info.plist
