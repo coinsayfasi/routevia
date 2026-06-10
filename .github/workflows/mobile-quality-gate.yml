@@ -20,6 +20,9 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
+          # Pin to the version the app is built/shipped with to avoid
+          # version-skew lint failures (e.g. new deprecations on bleeding-edge).
+          flutter-version: 3.38.9
           channel: stable
           cache: true
 
