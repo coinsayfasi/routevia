@@ -1,7 +1,7 @@
 name: mobile
 description: Routevia mobile app
 publish_to: 'none'
-version: 1.2.5+20
+version: 1.2.37+97
 
 environment:
   sdk: ^3.10.8
@@ -19,6 +19,7 @@ dependencies:
   hive_flutter: ^1.1.0
   supabase_flutter: ^2.10.3
   geolocator: ^14.0.2
+  http: ^1.2.2
   cached_network_image: ^3.4.1
   flutter_cache_manager: ^3.4.1
   flutter_map: ^7.0.2
@@ -37,6 +38,7 @@ dependencies:
   flutter_native_splash: ^2.4.6
   flutter_local_notifications: ^18.0.0
   connectivity_plus: ^6.1.4
+  app_tracking_transparency: ^2.0.6+1
 
 dev_dependencies:
   flutter_test:
