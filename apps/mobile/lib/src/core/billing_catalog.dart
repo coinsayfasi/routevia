@@ -1,9 +1,11 @@
 import 'package:flutter/foundation.dart';
 
 class BillingCatalog {
-  // Aylık "pahalı çapa" → yıllık kelepir algısı. Yıllık = ~4 ay bedava (~%37).
-  static const targetMonthlyPriceLabel = '39,99 TL / ay';
-  static const targetYearlyPriceLabel = '299,88 TL / yıl';
+  // Yedek etiketler — yalnızca store fiyatı yüklenemezse gösterilir.
+  // Gerçek fiyat store'dan canlı çekilir (priceString). Bu değerler App Store
+  // / Play'deki USD base fiyatla hizalı: aylık $1.99, yıllık $14.99 (~%37, ~4 ay bedava).
+  static const targetMonthlyPriceLabel = r'$1.99 / ay';
+  static const targetYearlyPriceLabel = r'$14.99 / yıl';
 
   /// Store'da tanımlı introductory offer (ücretsiz deneme) gün sayısı.
   /// Paywall'da öne çıkarmak için kullanılır; gerçek deneme App Store
