@@ -1,10 +1,7 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:in_app_purchase/in_app_purchase.dart';
-import 'package:share_plus/share_plus.dart';
+import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/billing_catalog.dart';
@@ -23,67 +20,84 @@ class PremiumScreen extends ConsumerStatefulWidget {
 }
 
 class _PremiumScreenState extends ConsumerState<PremiumScreen> {
-  final PurchaseService _purchaseService = PurchaseService();
-
   bool _loading = true;
   bool _purchaseBusy = false;
-  List<ProductDetails> _products = const [];
-  List<String> _notFoundProductIds = const [];
-  StreamSubscription<List<PurchaseDetails>>? _purchaseSub;
+  Offerings? _offerings;
   String? _billingNote;
-  bool _storeAvailable = false;
-  String? _referralCode;
 
   @override
   void initState() {
     super.initState();
-    _purchaseSub = _purchaseService.purchaseStream.listen(_handlePurchases);
     _load();
   }
 
-  @override
-  void dispose() {
-    _purchaseSub?.cancel();
-    super.dispose();
+  Future<void> _load() async {
+    Offerings? offerings;
+
+    await PurchaseService.getOfferings()
+        .then((o) => offerings = o)
+        .catchError((_) => null);
+
+    if (!mounted) return;
+    setState(() {
+      _offerings = offerings;
+      _loading = false;
+    });
   }
 
-  Future<void> _load() async {
-    final repo = ref.read(repositoryProvider);
-    try {
-      final results = await Future.wait([
-        _purchaseService.loadCatalog(),
-        repo.getMyProfile(),
-      ]);
-      final catalog = results[0] as PurchaseCatalogState;
-      final profile = results[1] as Map<String, dynamic>?;
-      if (!mounted) return;
-      setState(() {
-        _products = catalog.products;
-        _notFoundProductIds = catalog.notFoundIds;
-        _storeAvailable = catalog.storeAvailable;
-        _referralCode = profile?['referral_code'] as String?;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _billingNote = friendlyError(e));
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
+  /// Yıllık ve aylık paketi karşılaştırıp kaç ay ücretsiz olduğunu döner.
+  /// Örn: Yıllık 299 TL, Aylık 29.99 TL → 29.99*12=359.88, tasarruf=60.88 → ~2 ay ücretsiz
+  String? _annualSavingsLabel(Package annual, Package? monthly) {
+    if (monthly == null) return null;
+    final annualPrice = annual.storeProduct.price;
+    final monthlyPrice = monthly.storeProduct.price;
+    if (monthlyPrice <= 0) return null;
+    final saved = (monthlyPrice * 12) - annualPrice;
+    if (saved <= 0) return null;
+    final freeMonths = (saved / monthlyPrice).round();
+    if (freeMonths <= 0) return null;
+    return context.tr('$freeMonths ay ücretsiz', '$freeMonths months free');
+  }
+
+  /// Yıllık planın aylığa kıyasla yüzde tasarrufu (ör. %37). Rozet için.
+  int? _annualSavingsPercent(Package annual, Package? monthly) {
+    if (monthly == null) return null;
+    final annualPrice = annual.storeProduct.price;
+    final monthlyPrice = monthly.storeProduct.price;
+    if (monthlyPrice <= 0) return null;
+    final fullYear = monthlyPrice * 12;
+    final pct = ((fullYear - annualPrice) / fullYear * 100).round();
+    return pct > 0 ? pct : null;
+  }
+
+  /// Yıllık planın aya bölünmüş eşdeğeri (ör. "ayda ~25 TL").
+  String? _annualPerMonthLabel(Package annual) {
+    final price = annual.storeProduct.price;
+    if (price <= 0) return null;
+    final perMonth = (price / 12);
+    final cur = annual.storeProduct.priceString.replaceAll(RegExp(r'[\d.,\s]'), '').trim();
+    final num = perMonth.toStringAsFixed(2).replaceAll('.', ',');
+    final body = cur.isEmpty ? '$num/ay' : '$cur$num/ay';
+    return context.tr('ayda yalnızca $body', 'just $body/mo');
   }
 
   Future<void> _openSupport() async {
-    final uri = Uri.parse(
-      'mailto:${AppConstants.supportEmail}?subject=Routevia%20Premium',
-    );
+    final uri = Uri.parse('mailto:${AppConstants.supportEmail}?subject=Routevia%20Premium');
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
-  Future<void> _buy(ProductDetails product) async {
-    setState(() => _purchaseBusy = true);
+  Future<void> _buy(Package package) async {
+    setState(() {
+      _purchaseBusy = true;
+      _billingNote = null;
+    });
     try {
-      await _purchaseService.buy(product);
+      final info = await PurchaseService.purchasePackage(package);
+      final client = ref.read(supabaseClientProvider);
+      await PurchaseService.syncEntitlementToSupabase(client, info);
+      ref.read(premiumStateProvider.notifier).refresh();
       if (!mounted) return;
-      setState(() => _billingNote = context.tr('Store satin alma akisi baslatildi.', 'Store purchase flow started.'));
+      setState(() => _billingNote = context.tr('Premium aktif edildi!', 'Premium activated!'));
     } catch (e) {
       if (!mounted) return;
       setState(() => _billingNote = friendlyError(e));
@@ -92,114 +106,42 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
     }
   }
 
-  Future<void> _restorePurchases() async {
-    setState(() => _purchaseBusy = true);
+  Future<void> _restore() async {
+    setState(() {
+      _purchaseBusy = true;
+      _billingNote = null;
+    });
     try {
-      await _purchaseService.restore();
+      final info = await PurchaseService.restorePurchases();
+      final client = ref.read(supabaseClientProvider);
+      await PurchaseService.syncEntitlementToSupabase(client, info);
+      ref.read(premiumStateProvider.notifier).refresh();
       if (!mounted) return;
-      setState(() => _billingNote = context.tr('Restore istegi store tarafina gonderildi.', 'Restore request sent to the store.'));
+      final hasPro = PurchaseService.hasPro(info);
+      setState(() => _billingNote = hasPro
+          ? context.tr('Satın alma geri yüklendi!', 'Purchase restored!')
+          : context.tr('Aktif abonelik bulunamadı.', 'No active subscription found.'));
     } catch (e) {
       if (!mounted) return;
       setState(() => _billingNote = friendlyError(e));
     } finally {
       if (mounted) setState(() => _purchaseBusy = false);
     }
-  }
-
-  Future<void> _handlePurchases(List<PurchaseDetails> purchases) async {
-    if (purchases.isEmpty || !mounted) return;
-    final repo = ref.read(repositoryProvider);
-    final client = ref.read(supabaseClientProvider);
-    for (final purchase in purchases) {
-      await _purchaseService.complete(purchase);
-      final payload = {
-        'product_id': purchase.productID,
-        'status': purchase.status.name,
-        'transaction_date': purchase.transactionDate,
-        'pending_complete_purchase': purchase.pendingCompletePurchase,
-      };
-      try {
-        await repo.logAppEvent('billing_purchase_update', payload: payload);
-      } catch (_) {}
-      if (!mounted) return;
-      switch (purchase.status) {
-        case PurchaseStatus.purchased:
-        case PurchaseStatus.restored:
-          try {
-            final result =
-                await PurchaseService.verifyPurchase(client, purchase);
-            if (result['ok'] == true) {
-              ref.read(premiumStateProvider.notifier).refresh();
-              setState(() {
-                _billingNote = context.tr(
-                  'Premium aktif edildi! Bitis: ${result['expires_at'] ?? '-'}',
-                  'Premium activated! Expiry: ${result['expires_at'] ?? '-'}',
-                );
-              });
-            } else {
-              setState(() {
-                _billingNote = context.tr(
-                  'Dogrulama basarisiz: ${result['error'] ?? 'Bilinmeyen hata'}',
-                  'Verification failed: ${result['error'] ?? 'Unknown error'}',
-                );
-              });
-            }
-          } catch (e) {
-            setState(() {
-              _billingNote = friendlyError(e);
-            });
-          }
-          break;
-        case PurchaseStatus.pending:
-          setState(() => _billingNote = context.tr('Odeme islemi store tarafinda beklemede.', 'Payment is pending on the store side.'));
-          break;
-        case PurchaseStatus.error:
-          setState(() => _billingNote = context.tr(
-                'Store hata verdi: ${purchase.error?.message ?? "Bilinmeyen hata"}',
-                'Store returned an error: ${purchase.error?.message ?? "Unknown error"}',
-              ));
-          break;
-        case PurchaseStatus.canceled:
-          setState(() => _billingNote = context.tr('Satin alma islemi iptal edildi.', 'Purchase was canceled.'));
-          break;
-      }
-    }
-  }
-
-  Future<void> _shareReferral() async {
-    if (_referralCode == null || _referralCode!.isEmpty) {
-      try {
-        final code = await ref.read(repositoryProvider).createReferralCode();
-        if (!mounted) return;
-        setState(() => _referralCode = code);
-      } catch (e) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(friendlyError(e))),
-        );
-        return;
-      }
-    }
-    await SharePlus.instance.share(
-      ShareParams(
-        text:
-            'Routevia\'da gezilerini planla! Davet kodum: $_referralCode\n'
-            'Uygulamada ac: routevia://ref/$_referralCode\n'
-            'Kodun elle girisi: $_referralCode',
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
     final premiumAsync = ref.watch(premiumStateProvider);
     final premium = premiumAsync.valueOrNull;
+    // Treat loading state as potentially pro to avoid briefly enabling purchase
     final isPro = premium?.isPro ?? false;
-    final storeReady = _storeAvailable && _products.isNotEmpty;
-    final storeComingSoon = _storeAvailable && _products.isEmpty;
-    final missingKnownProducts = _notFoundProductIds
-        .where(BillingCatalog.storeProductIds.contains)
-        .toList();
+    final premiumLoading = premiumAsync.isLoading;
+
+    final currentOffering = _offerings?.current;
+    final packages = currentOffering?.availablePackages ?? [];
+    final monthly = packages.where((p) => p.packageType == PackageType.monthly).firstOrNull;
+    final annual = packages.where((p) => p.packageType == PackageType.annual).firstOrNull;
+    final displayPackages = [annual, monthly].whereType<Package>().toList();
 
     return Scaffold(
       appBar: AppBar(title: const Text('Routevia Pro')),
@@ -208,7 +150,7 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
           : ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 48),
               children: [
-                // ── Hero Card ──────────────────────────────────────────
+                // ── Hero ──────────────────────────────────────────────────
                 Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
@@ -224,57 +166,91 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
                     children: [
                       Row(
                         children: [
-                          const Icon(
-                            Icons.workspace_premium,
-                            color: RouteviaColors.amber,
-                            size: 32,
-                          ),
+                          const Icon(Icons.workspace_premium, color: RouteviaColors.amber, size: 32),
                           const SizedBox(width: 10),
                           const Expanded(
-                            child: Text(
-                              'Routevia Pro',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w800,
-                                fontSize: 24,
-                              ),
-                            ),
+                            child: Text('Routevia Pro',
+                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 24)),
                           ),
                           if (isPro)
                             Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 6),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                               decoration: BoxDecoration(
                                 color: const Color(0xFF14532D),
                                 borderRadius: BorderRadius.circular(999),
                               ),
-                              child: const Text(
-                                'Aktif',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 13,
-                                ),
-                              ),
+                              child: Text(context.tr('Aktif', 'Active'),
+                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
                             ),
                         ],
                       ),
                       const SizedBox(height: 12),
                       Text(
                         isPro
-                            ? 'Premium erisimin aktif.${premium?.expiresAt != null ? ' Bitis: ${premium!.expiresAt!.day}.${premium.expiresAt!.month}.${premium.expiresAt!.year}' : ''}'
-                            : storeReady
-                            ? 'Sinirsiz plan, trend harita, offline paketler ve daha fazlasi.'
-                            : 'Pro altyapisi hazir. Store acilana kadar davet ve destek akisi ile erisim verilebilir.',
-                        style:
-                            const TextStyle(color: Colors.white70, height: 1.5),
+                            ? context.tr(
+                                'Premium erişimin aktif.${premium?.expiresAt != null ? ' Bitiş: ${premium?.expiresAt?.day}.${premium?.expiresAt?.month}.${premium?.expiresAt?.year}' : ''}',
+                                'Your premium access is active.${premium?.expiresAt != null ? ' Expires: ${premium?.expiresAt?.day}.${premium?.expiresAt?.month}.${premium?.expiresAt?.year}' : ''}',
+                              )
+                            : context.tr('Sınırsız plan, trend harita, offline paketler ve daha fazlası.', 'Unlimited plans, trend map, offline packs and more.'),
+                        style: const TextStyle(color: Colors.white70, height: 1.5),
                       ),
+                      if (!isPro) ...[
+                        const SizedBox(height: 14),
+                        // ── Trial badge (en güçlü dönüşüm tetikleyicisi) ──
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: RouteviaColors.amber.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: RouteviaColors.amber.withValues(alpha: 0.55)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.bolt, color: RouteviaColors.amber, size: 18),
+                              const SizedBox(width: 6),
+                              Text(
+                                context.tr(
+                                  '${BillingCatalog.trialDays} gün ücretsiz dene · istediğin an iptal',
+                                  '${BillingCatalog.trialDays}-day free trial · cancel anytime',
+                                ),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        // ── Sosyal kanıt ──
+                        Row(
+                          children: [
+                            const Icon(Icons.star, color: RouteviaColors.amber, size: 15),
+                            const Icon(Icons.star, color: RouteviaColors.amber, size: 15),
+                            const Icon(Icons.star, color: RouteviaColors.amber, size: 15),
+                            const Icon(Icons.star, color: RouteviaColors.amber, size: 15),
+                            const Icon(Icons.star, color: RouteviaColors.amber, size: 15),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                context.tr(
+                                  'Binlerce gezgin Routevia Pro ile keşfediyor',
+                                  'Thousands of travelers explore with Routevia Pro',
+                                ),
+                                style: const TextStyle(color: Colors.white70, fontSize: 12.5),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
                 const SizedBox(height: 20),
 
-                // ── Billing Note ───────────────────────────────────────
+                // ── Billing Note ──────────────────────────────────────────
                 if (_billingNote != null) ...[
                   Container(
                     padding: const EdgeInsets.all(14),
@@ -285,384 +261,306 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.info_outline,
-                            size: 20, color: Color(0xFF0369A1)),
+                        const Icon(Icons.info_outline, size: 20, color: Color(0xFF0369A1)),
                         const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(_billingNote!,
-                              style: const TextStyle(height: 1.45)),
-                        ),
+                        Expanded(child: Text(_billingNote!, style: const TextStyle(height: 1.45))),
                       ],
                     ),
                   ),
                   const SizedBox(height: 16),
                 ],
 
-                // ── Feature Comparison ─────────────────────────────────
-                Text(
-                  context.tr('Ozellik Karsilastirmasi', 'Feature Comparison'),
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
-                ),
+                // ── Feature List ──────────────────────────────────────────
+                Text(context.tr('Özellik Karşılaştırması', 'Feature Comparison'),
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
                 const SizedBox(height: 12),
-                ..._featureRows.map(
-                  (row) => Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: RouteviaColors.border),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(row.icon,
-                            size: 20, color: RouteviaColors.navyLight),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(row.label,
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w600)),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF1F5F9),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            row.free,
-                            style: const TextStyle(
-                                fontSize: 12,
-                                color: RouteviaColors.textSecondary),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF0FDF4),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            row.pro,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Color(0xFF166534),
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-
-                // ── Price Cards (from store or fallback) ───────────────
-                if (storeReady) ...[
-                  Text(
-                    context.tr('Planlar', 'Plans'),
-                    style:
-                        TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
-                  ),
-                  const SizedBox(height: 12),
-                  ..._products.map(
-                    (product) => Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.all(16),
+                ..._buildFeatureRows(context).map((row) => Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                       decoration: BoxDecoration(
                         color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: RouteviaColors.border),
                       ),
                       child: Row(
                         children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  product.title,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 16,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  product.price,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    color: RouteviaColors.tealDark,
-                                    fontSize: 18,
-                                  ),
-                                ),
-                              ],
+                          Icon(row.icon, size: 20, color: RouteviaColors.navyLight),
+                          const SizedBox(width: 10),
+                          Expanded(child: Text(row.label, style: const TextStyle(fontWeight: FontWeight.w600))),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(6),
                             ),
+                            child: Text(row.free,
+                                style: const TextStyle(fontSize: 12, color: RouteviaColors.textSecondary)),
                           ),
-                          FilledButton(
-                            onPressed: (_purchaseBusy || isPro)
-                                ? null
-                                : () => _buy(product),
-                            child: Text(isPro ? context.tr('Aktif', 'Active') : context.tr('Satin Al', 'Buy')),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF0FDF4),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(row.pro,
+                                style: const TextStyle(
+                                    fontSize: 12, color: Color(0xFF166534), fontWeight: FontWeight.w700)),
                           ),
                         ],
                       ),
+                    )),
+                const SizedBox(height: 20),
+
+                // ── Plans or Active Membership ─────────────────────────
+                if (premiumLoading) ...[
+                  const Center(child: Padding(
+                    padding: EdgeInsets.symmetric(vertical: 24),
+                    child: CircularProgressIndicator(),
+                  )),
+                ] else if (isPro) ...[
+                  // ── Active membership card ────────────────────────────
+                  Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF0FDF4),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFBBF7D0), width: 2),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.check_circle, color: Color(0xFF166534), size: 22),
+                            const SizedBox(width: 8),
+                            Text(context.tr('Aktif Üyelik', 'Active Subscription'),
+                                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: Color(0xFF166534))),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          () {
+                            final exp = premium?.expiresAt;
+                            if (exp == null) return context.tr('Pro erişiminiz aktif.', 'Your Pro access is active.');
+                            return context.tr(
+                              'Pro erişiminiz ${exp.day}.${exp.month}.${exp.year} tarihine kadar aktif.',
+                              'Your Pro access is active until ${exp.day}.${exp.month}.${exp.year}.',
+                            );
+                          }(),
+                          style: const TextStyle(color: RouteviaColors.textSecondary, height: 1.45),
+                        ),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: _openSupport,
+                          icon: const Icon(Icons.mail_outline, size: 18),
+                          label: Text(context.tr('Destek / Abonelik Yönetimi', 'Support / Subscription Management')),
+                        ),
+                      ],
                     ),
                   ),
                 ] else ...[
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: RouteviaColors.border),
-                    ),
-                    child: Row(
-                      children: [
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Routevia Pro Aylik',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 16,
-                                ),
-                              ),
-                              SizedBox(height: 4),
-                              Text(
-                                BillingCatalog.targetMonthlyPriceLabel,
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  color: RouteviaColors.tealDark,
-                                  fontSize: 18,
-                                ),
-                              ),
-                            ],
+                  Text(context.tr('Planlar', 'Plans'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+                  const SizedBox(height: 12),
+                  if (displayPackages.isNotEmpty) ...[
+                    ...displayPackages.map((package) {
+                      final isAnnual = package.packageType == PackageType.annual;
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: isAnnual ? RouteviaColors.tealDark : RouteviaColors.border,
+                            width: isAnnual ? 2 : 1,
                           ),
                         ),
-                        OutlinedButton(
-                          onPressed: null,
-                          child: Text(context.tr('Store Bekleniyor', 'Store Pending')),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: RouteviaColors.border),
-                    ),
-                    child: Row(
-                      children: [
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Routevia Pro Yillik',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 16,
-                                ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Text(
+                                        isAnnual ? context.tr('Yıllık Plan', 'Annual Plan') : context.tr('Aylık Plan', 'Monthly Plan'),
+                                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                                      ),
+                                      if (isAnnual) ...[
+                                        const SizedBox(width: 8),
+                                        Builder(builder: (_) {
+                                          final pct = _annualSavingsPercent(package, monthly);
+                                          return Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                            decoration: BoxDecoration(
+                                              color: RouteviaColors.tealDark,
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: Text(
+                                                pct != null
+                                                    ? context.tr('%$pct İNDİRİM', '$pct% OFF')
+                                                    : context.tr('En İyi', 'Best Value'),
+                                                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+                                          );
+                                        }),
+                                      ],
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    package.storeProduct.priceString,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w700, color: RouteviaColors.tealDark, fontSize: 18),
+                                  ),
+                                  if (isAnnual) ...[
+                                    Builder(builder: (_) {
+                                      final perMonth = _annualPerMonthLabel(package);
+                                      if (perMonth == null) return const SizedBox.shrink();
+                                      return Text(perMonth,
+                                          style: const TextStyle(fontSize: 12.5, color: RouteviaColors.textSecondary, fontWeight: FontWeight.w600));
+                                    }),
+                                    Builder(builder: (_) {
+                                      final label = _annualSavingsLabel(package, monthly);
+                                      if (label == null) return const SizedBox.shrink();
+                                      return Text(context.tr('$label · ${BillingCatalog.trialDays} gün ücretsiz', '$label · ${BillingCatalog.trialDays}-day free'),
+                                          style: const TextStyle(fontSize: 12, color: Color(0xFF166534), fontWeight: FontWeight.w600));
+                                    }),
+                                  ],
+                                ],
                               ),
-                              SizedBox(height: 4),
-                              Text(
-                                BillingCatalog.targetYearlyPriceLabel,
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  color: RouteviaColors.tealDark,
-                                  fontSize: 18,
-                                ),
-                              ),
-                            ],
-                          ),
+                            ),
+                            FilledButton(
+                              onPressed: _purchaseBusy ? null : () => _buy(package),
+                              child: _purchaseBusy
+                                  ? const SizedBox(width: 18, height: 18,
+                                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                  : Text(context.tr('Ücretsiz Başla', 'Start Free')),
+                            ),
+                          ],
                         ),
-                        OutlinedButton(
-                          onPressed: null,
-                          child: Text(context.tr('Store Bekleniyor', 'Store Pending')),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFFBEB),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFFFDE68A)),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.schedule,
-                            color: Color(0xFFD97706), size: 20),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            !_storeAvailable
-                                ? context.tr('Store su an erisilebilir degil. Bu asamada davet ve destek uzerinden Pro erisimi kullanilabilir.', 'Store is currently unavailable. During this phase, Pro can be accessed through invite and support flows.')
-                                : storeComingSoon
-                                ? context.tr('Store baglandi ancak Pro paketleri henuz yayinda degil. Kapali testte davet ve destek akisi aktif.', 'Store is connected but Pro products are not live yet. Invite and support flows remain active during closed testing.')
-                                : context.tr('Pro paketleri henuz hazir degil.', 'Pro plans are not ready yet.'),
-                            style: const TextStyle(height: 1.45),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (kDebugMode && missingKnownProducts.isNotEmpty) ...[
-                    const SizedBox(height: 10),
+                      );
+                    }),
+                  ] else ...[
+                    // Fallback fiyat kartları (store bağlı değilse)
+                    _fallbackPriceCard(context.tr('Yıllık Plan', 'Annual Plan'), BillingCatalog.targetYearlyPriceLabel, true),
+                    const SizedBox(height: 12),
+                    _fallbackPriceCard(context.tr('Aylık Plan', 'Monthly Plan'), BillingCatalog.targetMonthlyPriceLabel, false),
+                    const SizedBox(height: 12),
                     Container(
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
+                        color: const Color(0xFFFFFBEB),
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        border: Border.all(color: const Color(0xFFFDE68A)),
                       ),
-                      child: Text(
-                        'Beklenen urun IDleri: ${missingKnownProducts.join(', ')}',
-                        style: const TextStyle(
-                          color: RouteviaColors.textSecondary,
-                          fontSize: 12,
-                          height: 1.45,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-                const SizedBox(height: 12),
-
-                // ── Restore + Support ──────────────────────────────────
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: (_purchaseBusy || !storeReady)
-                            ? null
-                            : _restorePurchases,
-                        icon: const Icon(Icons.restore, size: 18),
-                        label: Text(context.tr('Geri Yukle', 'Restore')),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _openSupport,
-                        icon: const Icon(Icons.mail_outline, size: 18),
-                        label: Text(context.tr('Destek', 'Support')),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-
-                // ── Referral Section ───────────────────────────────────
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF0FDF4),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFFBBF7D0)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Row(
+                      child: Row(
                         children: [
-                          Icon(Icons.card_giftcard,
-                              color: Color(0xFF166534), size: 22),
-                          SizedBox(width: 8),
-                          Text(
-                            'Arkadasini Davet Et',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 16,
+                          const Icon(Icons.schedule, color: Color(0xFFD97706), size: 20),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              context.tr(
+                                'Store bağlantısı kuruluyor. Yakında satın alma aktif olacak.',
+                                'Store connection being established. Purchase will be available soon.',
+                              ),
+                              style: const TextStyle(height: 1.45),
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'Davet kodunu paylas, arkadasin katildiginda ikiniz de 7 gun ucretsiz Pro erisimi kazanin.',
-                        style: TextStyle(
-                            color: RouteviaColors.textSecondary, height: 1.45),
-                      ),
-                      const SizedBox(height: 12),
-                      if (_referralCode != null &&
-                          _referralCode!.isNotEmpty) ...[
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(10),
-                            border:
-                                Border.all(color: const Color(0xFFBBF7D0)),
-                          ),
-                          child: Text(
-                            _referralCode!,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 20,
-                              letterSpacing: 3,
-                              color: Color(0xFF166534),
-                            ),
-                          ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  // ── Restore + Support ───────────────────────────────────
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _purchaseBusy ? null : _restore,
+                          icon: const Icon(Icons.restore, size: 18),
+                          label: Text(context.tr('Geri Yükle', 'Restore Purchase')),
                         ),
-                        const SizedBox(height: 10),
-                      ],
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: _shareReferral,
-                          icon: const Icon(Icons.share, size: 18),
-                          label: Text(
-                            context.tr('Davet Kodunu Paylas', 'Share Invite Code'),
-                          ),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF166534),
-                          ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _openSupport,
+                          icon: const Icon(Icons.mail_outline, size: 18),
+                          label: Text(context.tr('Destek', 'Support')),
                         ),
                       ),
                     ],
                   ),
-                ),
+                  const SizedBox(height: 20),
+                  // ── Subscription Disclosure ──────────────────────────────
+                  // Apple 3.1.2 zorunlu (iOS), Google Play Billing (Android)
+                  Text(
+                    defaultTargetPlatform == TargetPlatform.android
+                        ? context.tr(
+                            'Ödeme, satın alma onayında Google Play hesabınızdan tahsil edilir. Abonelik, mevcut dönemin bitiminden en az 24 saat önce iptal edilmediği sürece otomatik olarak yenilenir. Yenileme ücreti, mevcut dönem bitiminden 24 saat öncesinde hesabınızdan alınır. Abonelikler satın alma sonrasında Google Play > Abonelikler üzerinden yönetilebilir ve iptal edilebilir.',
+                            'Payment will be charged to your Google Play account at confirmation of purchase. Subscription automatically renews unless cancelled at least 24 hours before the end of the current period. Renewal is charged within 24 hours prior to the end of the current period. Subscriptions may be managed and cancelled in Google Play > Subscriptions after purchase.',
+                          )
+                        : context.tr(
+                            'Ödeme, satın alma onayında Apple ID hesabınızdan tahsil edilir. Abonelik, mevcut dönemin bitiminden en az 24 saat önce iptal edilmediği sürece otomatik olarak yenilenir. Yenileme ücreti, mevcut dönem bitiminden 24 saat öncesinde hesabınızdan alınır. Abonelikler satın alma sonrasında Hesap Ayarları üzerinden yönetilebilir ve otomatik yenileme kapatılabilir.',
+                            'Payment will be charged to your Apple ID account at confirmation of purchase. Subscription automatically renews unless cancelled at least 24 hours before the end of the current period. Renewal is charged within 24 hours prior to the end of the current period. Subscriptions may be managed and auto-renewal turned off in Account Settings after purchase.',
+                          ),
+                    style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8), height: 1.5),
+                  ),
+                ],
               ],
             ),
     );
   }
+
+  Widget _fallbackPriceCard(String title, String price, bool highlight) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: highlight ? RouteviaColors.tealDark : RouteviaColors.border,
+          width: highlight ? 2 : 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                const SizedBox(height: 4),
+                Text(price,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w700, color: RouteviaColors.tealDark, fontSize: 18)),
+              ],
+            ),
+          ),
+          OutlinedButton(onPressed: null, child: Text(context.tr('Yakında', 'Coming Soon'))),
+        ],
+      ),
+    );
+  }
+
 }
 
 class _FeatureRow {
   const _FeatureRow(this.icon, this.label, this.free, this.pro);
-
   final IconData icon;
   final String label;
   final String free;
   final String pro;
 }
 
-const _featureRows = <_FeatureRow>[
-  _FeatureRow(Icons.map_outlined, 'Plan uretimi', '3/gun', 'Sinirsiz'),
-  _FeatureRow(
-    Icons.route_outlined,
-    'Akilli gun akisi',
-    'Temel',
-    'Gelismis',
-  ),
-  _FeatureRow(
-      Icons.local_fire_department, 'Trend harita', 'Kilitli', 'Acik'),
-  _FeatureRow(Icons.offline_pin, 'Offline paketler', 'Kilitli', 'Acik'),
-  _FeatureRow(Icons.tune, 'Gelismis filtreler', 'Kilitli', 'Acik'),
-  _FeatureRow(Icons.bar_chart, 'Gezgin istatistikleri', 'Ozet', 'Detayli'),
+List<_FeatureRow> _buildFeatureRows(BuildContext context) => [
+  _FeatureRow(Icons.map_outlined, context.tr('Günlük plan üretimi', 'Daily plan generation'), context.tr('3 plan/gün', '3 plans/day'), context.tr('Sınırsız', 'Unlimited')),
+  _FeatureRow(Icons.local_fire_department, context.tr('Trend harita 🔥', 'Trend map 🔥'), context.tr('Kilitli', 'Locked'), context.tr('Açık', 'Open')),
+  _FeatureRow(Icons.offline_pin, context.tr('Offline paketler', 'Offline packs'), context.tr('Kilitli', 'Locked'), context.tr('Açık', 'Open')),
+  _FeatureRow(Icons.route_outlined, context.tr('Rota optimizasyonu', 'Route optimization'), context.tr('Temel', 'Basic'), context.tr('Gelişmiş', 'Advanced')),
+  _FeatureRow(Icons.bar_chart, context.tr('Gezgin istatistikleri', 'Explorer stats'), context.tr('Özet', 'Summary'), context.tr('Detaylı', 'Detailed')),
+  _FeatureRow(Icons.notifications_active, context.tr('Yakınlık bildirimleri', 'Proximity notifications'), context.tr('Kilitli', 'Locked'), context.tr('Açık', 'Open')),
+  _FeatureRow(Icons.cloud_upload, context.tr('Fotoğraf yükleme', 'Photo upload'), context.tr('Kilitli', 'Locked'), context.tr('Açık', 'Open')),
 ];

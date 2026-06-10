@@ -3,11 +3,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/providers.dart';
+import 'billing_catalog.dart';
 import 'theme.dart';
 
 /// Returns `true` when the user has an active Pro or preview entitlement.
+/// Returns `false` only after the premium state has fully loaded — never gates
+/// during loading to avoid false lock-outs for Pro users.
 bool isPro(WidgetRef ref) {
   final state = ref.watch(premiumStateProvider);
+  if (state.isLoading) return true; // optimistic while loading
   return state.valueOrNull?.isPro ?? false;
 }
 
@@ -52,8 +56,8 @@ class _PremiumGateSheet extends StatelessWidget {
             const SizedBox(height: 14),
             Text(
               feature != null
-                  ? '$feature Pro ile kullanilabilir'
-                  : 'Bu ozellik Routevia Pro ile acilir',
+                  ? '$feature Pro ile kullanılabilir'
+                  : 'Bu özellik Routevia Pro ile açılır',
               textAlign: TextAlign.center,
               style: const TextStyle(
                 fontWeight: FontWeight.w800,
@@ -62,11 +66,32 @@ class _PremiumGateSheet extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Sinirsiz plan, trend harita, offline paketler, gezgin istatistikleri ve daha fazlasi.',
+              'Sınırsız plan, trend harita, offline paket, rota optimizasyonu ve daha fazlası.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: RouteviaColors.textSecondary,
                 height: 1.45,
+              ),
+            ),
+            const SizedBox(height: 12),
+            // ── Trial vurgusu ──
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: RouteviaColors.amber.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: RouteviaColors.amber.withValues(alpha: 0.5)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.bolt, color: RouteviaColors.amber, size: 16),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${BillingCatalog.trialDays} gün ücretsiz · istediğin an iptal',
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 20),
@@ -77,13 +102,13 @@ class _PremiumGateSheet extends StatelessWidget {
                   Navigator.pop(context);
                   context.push('/premium');
                 },
-                child: const Text('Pro\'yu Kesfet'),
+                child: Text('${BillingCatalog.trialDays} Gün Ücretsiz Dene'),
               ),
             ),
             const SizedBox(height: 8),
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Simdilik Degil'),
+              child: const Text('Şimdilik Değil'),
             ),
           ],
         ),

@@ -1,8 +1,25 @@
 import 'package:flutter/foundation.dart';
 
 class BillingCatalog {
-  static const targetMonthlyPriceLabel = '49,99 TL / ay';
-  static const targetYearlyPriceLabel = '500 TL / yil';
+  // Aylık "pahalı çapa" → yıllık kelepir algısı. Yıllık = ~4 ay bedava (~%37).
+  static const targetMonthlyPriceLabel = '39,99 TL / ay';
+  static const targetYearlyPriceLabel = '299,88 TL / yıl';
+
+  /// Store'da tanımlı introductory offer (ücretsiz deneme) gün sayısı.
+  /// Paywall'da öne çıkarmak için kullanılır; gerçek deneme App Store
+  /// Connect / Play Console abonelik teklifinde tanımlanır.
+  static const trialDays = 7;
+
+  // RevenueCat public SDK keys (client-side, not secret).
+  // Override at build time with --dart-define=REVENUECAT_ANDROID_KEY=... if needed.
+  static const revenueCatAndroidKey = String.fromEnvironment(
+    'REVENUECAT_ANDROID_KEY',
+    defaultValue: 'goog_ONadPOUwUlJgPbUZBNYnGWrOXID',
+  );
+  static const revenueCatIosKey = String.fromEnvironment(
+    'REVENUECAT_IOS_KEY',
+    defaultValue: 'appl_gUNzxrVaJkVSdckKHKOkGzYdKWK',
+  );
   static const _defaultMonthlyProductId = String.fromEnvironment(
     'IAP_PRO_MONTHLY',
     defaultValue: 'routevia_pro_monthly',
