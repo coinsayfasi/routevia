@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -45,20 +46,6 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
     });
   }
 
-  /// Yıllık ve aylık paketi karşılaştırıp kaç ay ücretsiz olduğunu döner.
-  /// Örn: Yıllık 299 TL, Aylık 29.99 TL → 29.99*12=359.88, tasarruf=60.88 → ~2 ay ücretsiz
-  String? _annualSavingsLabel(Package annual, Package? monthly) {
-    if (monthly == null) return null;
-    final annualPrice = annual.storeProduct.price;
-    final monthlyPrice = monthly.storeProduct.price;
-    if (monthlyPrice <= 0) return null;
-    final saved = (monthlyPrice * 12) - annualPrice;
-    if (saved <= 0) return null;
-    final freeMonths = (saved / monthlyPrice).round();
-    if (freeMonths <= 0) return null;
-    return context.tr('$freeMonths ay ücretsiz', '$freeMonths months free');
-  }
-
   /// Yıllık planın aylığa kıyasla yüzde tasarrufu (ör. %37). Rozet için.
   int? _annualSavingsPercent(Package annual, Package? monthly) {
     if (monthly == null) return null;
@@ -98,6 +85,15 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
       ref.read(premiumStateProvider.notifier).refresh();
       if (!mounted) return;
       setState(() => _billingNote = context.tr('Premium aktif edildi!', 'Premium activated!'));
+    } on PlatformException catch (e) {
+      if (!mounted) return;
+      // Kullanıcı satın almadan vazgeçtiyse hata gösterme — sessizce kapat.
+      if (PurchasesErrorHelper.getErrorCode(e) ==
+          PurchasesErrorCode.purchaseCancelledError) {
+        setState(() => _billingNote = null);
+        return;
+      }
+      setState(() => _billingNote = friendlyError(e));
     } catch (e) {
       if (!mounted) return;
       setState(() => _billingNote = friendlyError(e));
@@ -414,20 +410,24 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
                                     style: const TextStyle(
                                         fontWeight: FontWeight.w700, color: RouteviaColors.tealDark, fontSize: 18),
                                   ),
-                                  if (isAnnual) ...[
+                                  if (isAnnual)
                                     Builder(builder: (_) {
                                       final perMonth = _annualPerMonthLabel(package);
                                       if (perMonth == null) return const SizedBox.shrink();
                                       return Text(perMonth,
                                           style: const TextStyle(fontSize: 12.5, color: RouteviaColors.textSecondary, fontWeight: FontWeight.w600));
                                     }),
-                                    Builder(builder: (_) {
-                                      final label = _annualSavingsLabel(package, monthly);
-                                      if (label == null) return const SizedBox.shrink();
-                                      return Text(context.tr('$label · ${BillingCatalog.trialDays} gün ücretsiz', '$label · ${BillingCatalog.trialDays}-day free'),
-                                          style: const TextStyle(fontSize: 12, color: Color(0xFF166534), fontWeight: FontWeight.w600));
-                                    }),
-                                  ],
+                                  // Trial satırı her iki planda da görünür (aylık + yıllık).
+                                  Text(
+                                    context.tr(
+                                      '${BillingCatalog.trialDays} gün ücretsiz, sonra ${package.storeProduct.priceString}',
+                                      '${BillingCatalog.trialDays} days free, then ${package.storeProduct.priceString}',
+                                    ),
+                                    style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Color(0xFF166534),
+                                        fontWeight: FontWeight.w600),
+                                  ),
                                 ],
                               ),
                             ),

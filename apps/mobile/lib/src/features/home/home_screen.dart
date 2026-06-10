@@ -1669,7 +1669,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       _buildHeroCard(),
                       const SizedBox(height: 20),
                       _buildLocationSelector(),
-                      if (!_premiumPreviewActive) _buildProUpsellCard(),
+                      if (!_premiumPreviewActive && !isPro(ref))
+                        _buildProUpsellCard(),
                       _buildRotaAiBar(),
                       _buildDestinationCover(),
                       const SizedBox(height: 12),
