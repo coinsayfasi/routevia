@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/billing_catalog.dart';
+import '../features/premium/purchase_service.dart';
 import 'local_cache.dart';
 import 'routevia_repository.dart';
 
@@ -52,23 +53,25 @@ class PremiumStateNotifier extends AsyncNotifier<PremiumState> {
     List<Map<String, dynamic>> features = const [];
     bool isAdminUser = false;
     if (Supabase.instance.client.auth.currentSession != null) {
-      try {
-        entitlements = await repo.getEntitlements();
-      } catch (_) {}
-      try {
-        features = await repo.getPremiumFeatures();
-      } catch (_) {}
-      try {
-        isAdminUser = await repo.isCurrentUserAdmin();
-      } catch (_) {}
+      // Run all three independent network calls in parallel
+      final results = await Future.wait([
+        repo.getEntitlements().catchError((_) => const <Map<String, dynamic>>[]),
+        repo.getPremiumFeatures().catchError((_) => const <Map<String, dynamic>>[]),
+        repo.isCurrentUserAdmin().catchError((_) => false),
+      ]);
+      entitlements = results[0] as List<Map<String, dynamic>>;
+      features = results[1] as List<Map<String, dynamic>>;
+      isAdminUser = results[2] as bool;
     }
 
     DateTime? latestExpiry;
     bool isPro = isAdminUser; // Admin her zaman pro
     final now = DateTime.now().toUtc();
+
+    // Supabase entitlements (admin grants, vs.)
     for (final e in entitlements) {
       final key = e['entitlement_key'] as String?;
-      if (key == 'pro_preview_7d' || key == BillingCatalog.entitlementPro) {
+      if (key == BillingCatalog.entitlementPro) {
         final ex = DateTime.tryParse((e['expires_at'] as String?) ?? '');
         if (ex != null && ex.isAfter(now)) {
           isPro = true;
@@ -78,6 +81,18 @@ class PremiumStateNotifier extends AsyncNotifier<PremiumState> {
         }
       }
     }
+
+    // RevenueCat entitlements (gerçek satın alma)
+    try {
+      final customerInfo = await PurchaseService.getCustomerInfo();
+      if (PurchaseService.hasPro(customerInfo)) {
+        isPro = true;
+        final rcExpiry = PurchaseService.proExpiryDate(customerInfo);
+        if (rcExpiry != null && (latestExpiry == null || rcExpiry.isAfter(latestExpiry))) {
+          latestExpiry = rcExpiry;
+        }
+      }
+    } catch (_) {}
 
     final dailyCount = await cache.getDailyPlanCount();
 

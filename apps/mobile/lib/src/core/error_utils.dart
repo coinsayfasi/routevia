@@ -9,6 +9,12 @@ String friendlyError(dynamic e) {
       msg.contains('rls')) {
     return 'Bu işlem için yetkiniz yok.';
   }
+  // Function-specific errors must be checked BEFORE generic auth patterns,
+  // because a FunctionException with status 401 also contains "unauthorized"
+  // which would otherwise be misclassified as a session-expiry error.
+  if (msg.contains('admin_send_push')) {
+    return 'Bildirim gönderimi şu an tamamlanamadı.';
+  }
   if (msg.contains('jwt') ||
       msg.contains('invalid claim') ||
       msg.contains('not authenticated') ||
@@ -56,9 +62,6 @@ String friendlyError(dynamic e) {
   }
   if (msg.contains('delete_account')) {
     return 'Hesap silme işlemi şu an tamamlanamadı.';
-  }
-  if (msg.contains('admin_send_push')) {
-    return 'Bildirim gönderimi şu an tamamlanamadı.';
   }
   if (msg.contains('secilen il bulunamadi')) {
     return 'Seçilen il verisi bulunamadı. Lütfen tekrar seçin.';

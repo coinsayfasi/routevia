@@ -83,6 +83,7 @@ class _TrendMapScreenState extends ConsumerState<TrendMapScreen>
   @override
   void dispose() {
     _tabController.dispose();
+    _mapController.dispose();
     super.dispose();
   }
 
@@ -291,7 +292,10 @@ class _TrendMapScreenState extends ConsumerState<TrendMapScreen>
                     TileLayer(
                       urlTemplate:
                           'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      userAgentPackageName: 'com.routevia.mobile',
+                      userAgentPackageName: 'com.yunusgunes.routevia',
+                      errorTileCallback: (tile, error, stackTrace) {
+                        debugPrint('[trend_map] tile error ignored: $error');
+                      },
                     ),
                     CircleLayer(circles: circles),
                     MarkerLayer(markers: markers),

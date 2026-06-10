@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/error_utils.dart';
 import '../../data/providers.dart';
 
 class DeepLinkResolverScreen extends ConsumerStatefulWidget {
@@ -29,36 +30,23 @@ class _DeepLinkResolverScreenState
     Future.microtask(_resolve);
   }
 
+  static final _uuidRegex = RegExp(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+    caseSensitive: false,
+  );
+
   Future<void> _resolve() async {
     try {
       final repo = ref.read(repositoryProvider);
       if (widget.kind == 'place') {
+        if (!_uuidRegex.hasMatch(widget.value)) {
+          if (!mounted) return;
+          setState(() => _message = 'Geçersiz bağlantı formatı.');
+          return;
+        }
         final place = await repo.fetchPlaceDetail(widget.value);
         if (!mounted) return;
         context.go('/place', extra: place);
-        return;
-      }
-
-      if (widget.kind == 'ref') {
-        final code = widget.value.trim().toUpperCase();
-        final session = repo.client.auth.currentSession;
-        if (session == null) {
-          await ref.read(localCacheProvider).setPendingReferralCode(code);
-          if (!mounted) return;
-          context.go('/auth');
-          return;
-        }
-        await repo.redeemReferral(code);
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Davet kodu uygulandı. 7 günlük Pro davet erişimi aktif.',
-            ),
-          ),
-        );
-        ref.invalidate(premiumStateProvider);
-        context.go('/home?tab=0');
         return;
       }
 
@@ -72,7 +60,7 @@ class _DeepLinkResolverScreenState
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() => _message = 'Bağlantı açılamadı: $e');
+      setState(() => _message = friendlyError(e));
     }
   }
 

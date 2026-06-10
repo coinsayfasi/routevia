@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/error_utils.dart';
+import '../../core/i18n.dart';
 import '../../core/premium_gate.dart';
 import '../../core/theme.dart';
 import '../../data/providers.dart';
@@ -43,10 +44,14 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final pro = isPro(ref);
+    final premiumAsync = ref.watch(premiumStateProvider);
+    // Don't show the gate while premium state is still loading — avoids false lock
+    final pro = premiumAsync.valueOrNull?.isPro ?? false;
+    final premiumLoading = premiumAsync.isLoading;
+    final showProGate = !premiumLoading && !pro;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Gezgin İstatistikleri')),
+      appBar: AppBar(title: Text(context.tr('Gezgin İstatistikleri', 'Explorer Stats'))),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -63,7 +68,7 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
                             style: const TextStyle(color: Color(0xFF475569))),
                         const SizedBox(height: 16),
                         FilledButton(
-                            onPressed: _load, child: const Text('Tekrar Dene')),
+                            onPressed: _load, child: Text(context.tr('Tekrar Dene', 'Try Again'))),
                       ],
                     ),
                   ),
@@ -87,17 +92,17 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
                         ),
                         _StatCard(
                           icon: Icons.favorite,
-                          label: 'Favori',
+                          label: context.tr('Favori', 'Favorite'),
                           value: '${_stats['favorites'] ?? 0}',
                         ),
                         _StatCard(
                           icon: Icons.rate_review,
-                          label: 'Yorum',
+                          label: context.tr('Yorum', 'Review'),
                           value: '${_stats['reviews'] ?? 0}',
                         ),
                         _StatCard(
                           icon: Icons.map,
-                          label: 'Gezi',
+                          label: context.tr('Gezi', 'Trip'),
                           value: '${_stats['trips'] ?? 0}',
                         ),
                       ],
@@ -122,7 +127,7 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  '${_stats['cities_visited'] ?? 0} il ziyaret edildi',
+                                  '${_stats['cities_visited'] ?? 0} ${context.tr('il ziyaret edildi', 'provinces visited')}',
                                   style: const TextStyle(
                                     fontWeight: FontWeight.w800,
                                     fontSize: 16,
@@ -130,7 +135,7 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
                                 ),
                                 if (_stats['top_city'] != null)
                                   Text(
-                                    'En çok: ${_stats['top_city']}',
+                                    '${context.tr('En çok:', 'Most visited:')} ${_stats['top_city']}',
                                     style: const TextStyle(
                                         color: RouteviaColors.textSecondary),
                                   ),
@@ -143,7 +148,7 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
                     const SizedBox(height: 20),
 
                     // ── Category Breakdown (Pro only detailed) ─────────
-                    if (!pro) ...[
+                    if (showProGate) ...[
                       Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
@@ -156,26 +161,36 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
                             const Icon(Icons.lock_outline,
                                 color: RouteviaColors.textTertiary, size: 32),
                             const SizedBox(height: 8),
-                            const Text(
-                              'Detaylı kategori dağılımı ve gelişmiş istatistikler Pro ile açılır.',
+                            Text(
+                              context.tr(
+                                'Detaylı kategori dağılımı ve gelişmiş istatistikler Pro ile açılır.',
+                                'Detailed category breakdown and advanced stats are unlocked with Pro.',
+                              ),
                               textAlign: TextAlign.center,
-                              style: TextStyle(
+                              style: const TextStyle(
                                   color: RouteviaColors.textSecondary,
                                   height: 1.45),
                             ),
                             const SizedBox(height: 12),
                             FilledButton(
                               onPressed: () => showPremiumGate(context,
-                                  feature: 'Detaylı istatistikler'),
-                              child: const Text("Pro'yu Keşfet"),
+                                  feature: context.tr('Detaylı istatistikler', 'Detailed stats')),
+                              child: Text(context.tr("Pro'yu Keşfet", "Explore Pro")),
                             ),
                           ],
                         ),
                       ),
+                    ] else if (premiumLoading) ...[
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(vertical: 20),
+                          child: CircularProgressIndicator(),
+                        ),
+                      ),
                     ] else ...[
-                      const Text(
-                        'Kategori Dağılımı',
-                        style: TextStyle(
+                      Text(
+                        context.tr('Kategori Dağılımı', 'Category Breakdown'),
+                        style: const TextStyle(
                             fontWeight: FontWeight.w800, fontSize: 17),
                       ),
                       const SizedBox(height: 12),
@@ -186,7 +201,7 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
     );
   }
 
-  static const _categoryLabels = <String, String>{
+  static const _categoryLabelsTr = <String, String>{
     'historical': 'Tarihi',
     'nature': 'Doğa',
     'food': 'Yeme & İçme',
@@ -209,24 +224,50 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
     'other': 'Diğer',
   };
 
-  String _categoryLabel(String key) =>
-      _categoryLabels[key.toLowerCase()] ?? key;
+  static const _categoryLabelsEn = <String, String>{
+    'historical': 'Historical',
+    'nature': 'Nature',
+    'food': 'Food & Drink',
+    'restaurant': 'Restaurant',
+    'cafe': 'Cafe',
+    'museum': 'Museum',
+    'beach': 'Beach',
+    'park': 'Park',
+    'shopping': 'Shopping',
+    'accommodation': 'Accommodation',
+    'entertainment': 'Entertainment',
+    'sport': 'Sport',
+    'religious': 'Religious Site',
+    'viewpoint': 'Viewpoint',
+    'waterfall': 'Waterfall',
+    'lake': 'Lake',
+    'mountain': 'Mountain',
+    'village': 'Village',
+    'thermal': 'Thermal',
+    'other': 'Other',
+  };
+
+  String _categoryLabel(String key) {
+    final isEnglish = context.isEnglish;
+    final map = isEnglish ? _categoryLabelsEn : _categoryLabelsTr;
+    return map[key.toLowerCase()] ?? key;
+  }
 
   Widget _buildCategoryBreakdown() {
     final raw = _stats['category_breakdown'];
     if (raw is! Map || raw.isEmpty) {
-      return const Text(
-        'Henüz yeterli veri yok.',
-        style: TextStyle(color: RouteviaColors.textSecondary),
+      return Text(
+        context.tr('Henüz yeterli veri yok.', 'Not enough data yet.'),
+        style: const TextStyle(color: RouteviaColors.textSecondary),
       );
     }
     final breakdown = Map<String, dynamic>.from(raw);
     final total =
         breakdown.values.fold<int>(0, (s, v) => s + ((v as num?)?.toInt() ?? 0));
     if (total == 0) {
-      return const Text(
-        'Henüz yeterli veri yok.',
-        style: TextStyle(color: RouteviaColors.textSecondary),
+      return Text(
+        context.tr('Henüz yeterli veri yok.', 'Not enough data yet.'),
+        style: const TextStyle(color: RouteviaColors.textSecondary),
       );
     }
 
@@ -301,12 +342,13 @@ class _ExplorerScoreCard extends StatelessWidget {
 
   final Map<String, dynamic> stats;
 
+  // (minScore, maxScore, trLabel, enLabel, emoji)
   static const _levels = [
-    (0,    99,   'Yeni Gezgin',   '🧭'),
-    (100,  299,  'Gezgin',        '🚶'),
-    (300,  699,  'Kaşif',         '🗺️'),
-    (700,  1499, 'Usta Kaşif',    '🏆'),
-    (1500, 9999, 'Efsane Gezgin', '⭐'),
+    (0,    99,   'Yeni Gezgin',   'New Explorer',      '🧭'),
+    (100,  299,  'Gezgin',        'Explorer',          '🚶'),
+    (300,  699,  'Kaşif',         'Discoverer',        '🗺️'),
+    (700,  1499, 'Usta Kaşif',    'Master Explorer',   '🏆'),
+    (1500, 9999, 'Efsane Gezgin', 'Legendary Explorer','⭐'),
   ];
 
   int _score() {
@@ -321,13 +363,14 @@ class _ExplorerScoreCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final score = _score();
+    final isEnglish = context.isEnglish;
 
     // Find current and next level
     int currentMin = 0;
-    String label = 'Yeni Gezgin';
+    String label = isEnglish ? 'New Explorer' : 'Yeni Gezgin';
     String emoji = '🧭';
     int nextMin = 100;
-    String nextLabel = 'Gezgin';
+    String nextLabel = isEnglish ? 'Explorer' : 'Gezgin';
     String nextEmoji = '🚶';
     bool isMaxLevel = false;
 
@@ -335,12 +378,12 @@ class _ExplorerScoreCard extends StatelessWidget {
       final l = _levels[i];
       if (score >= l.$1) {
         currentMin = l.$1;
-        label = l.$3;
-        emoji = l.$4;
+        label = isEnglish ? l.$4 : l.$3;
+        emoji = l.$5;
         if (i + 1 < _levels.length) {
           nextMin = _levels[i + 1].$1;
-          nextLabel = _levels[i + 1].$3;
-          nextEmoji = _levels[i + 1].$4;
+          nextLabel = isEnglish ? _levels[i + 1].$4 : _levels[i + 1].$3;
+          nextEmoji = _levels[i + 1].$5;
           isMaxLevel = false;
         } else {
           isMaxLevel = true;
@@ -382,7 +425,7 @@ class _ExplorerScoreCard extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      '$score Keşif Puanı',
+                      '$score ${context.tr('Keşif Puanı', 'Explorer Points')}',
                       style: const TextStyle(
                         color: Color(0xFFBFD0E2),
                         fontSize: 13,
@@ -399,14 +442,14 @@ class _ExplorerScoreCard extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  'Sonraki: $nextLabel $nextEmoji',
+                  '${context.tr('Sonraki:', 'Next:')} $nextLabel $nextEmoji',
                   style: const TextStyle(
                     color: Color(0xFFBFD0E2),
                     fontSize: 11,
                   ),
                 ),
                 Text(
-                  '${nextMin - score} puan kaldı',
+                  '${nextMin - score} ${context.tr('puan kaldı', 'points left')}',
                   style: const TextStyle(
                     color: Color(0xFFBFD0E2),
                     fontSize: 11,
@@ -426,9 +469,12 @@ class _ExplorerScoreCard extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 10),
-          const Text(
-            'Check-in ×10  •  Favori ×5  •  Yorum ×15  •  Gezi ×20  •  Şehir ×25',
-            style: TextStyle(
+          Text(
+            context.tr(
+              'Check-in ×10  •  Favori ×5  •  Yorum ×15  •  Gezi ×20  •  Şehir ×25',
+              'Check-in ×10  •  Favorite ×5  •  Review ×15  •  Trip ×20  •  City ×25',
+            ),
+            style: const TextStyle(
               color: Color(0xFF7BA8CF),
               fontSize: 10,
             ),

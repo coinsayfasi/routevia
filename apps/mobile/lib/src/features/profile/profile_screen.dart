@@ -1,16 +1,16 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/error_utils.dart';
+import '../../core/i18n.dart';
 import '../../core/theme.dart';
+import '../../data/local_cache.dart';
 import '../../data/providers.dart';
-import '../../core/billing_catalog.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -21,16 +21,21 @@ class ProfileScreen extends ConsumerStatefulWidget {
 
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   bool _loading = true;
-  bool _generatingReferral = false;
   bool _savingPace = false;
   String? _error;
   Map<String, dynamic>? _profile;
-  List<Map<String, dynamic>> _entitlements = const [];
+  Map<String, String> _visitedProvinces = const {};
 
   @override
   void initState() {
     super.initState();
     _load();
+    _loadVisitedProvinces();
+  }
+
+  Future<void> _loadVisitedProvinces() async {
+    final visited = await LocalCache().getVisitedProvinces();
+    if (mounted) setState(() => _visitedProvinces = visited);
   }
 
   Future<void> _load() async {
@@ -39,19 +44,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     try {
       final isLoggedIn = Supabase.instance.client.auth.currentSession != null;
       final p = isLoggedIn ? await repo.getMyProfile() : null;
-      List<Map<String, dynamic>> e = const [];
-      if (isLoggedIn) {
-        try {
-          e = await repo.getEntitlements();
-        } catch (_) {
-          e = const [];
-        }
-      }
       if (!mounted) return;
       setState(() {
         _error = null;
         _profile = p;
-        _entitlements = e;
       });
     } catch (e) {
       if (!mounted) return;
@@ -68,27 +64,25 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   Future<void> _deleteAccount() async {
-    final isEnglish = Localizations.localeOf(context).languageCode == 'en';
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(isEnglish ? 'Delete Account' : 'Hesabimi Sil'),
-        content: Text(
-          isEnglish
-              ? 'Your account and all data will be permanently deleted. This action cannot be undone.'
-              : 'Hesabin ve tum verilerin kalici olarak silinecek. Bu islem geri alinamaz.',
-        ),
+        title: Text(ctx.tr('Hesabımı Sil', 'Delete Account')),
+        content: Text(ctx.tr(
+          'Hesabın ve tüm verilerin kalıcı olarak silinecek. Bu işlem geri alınamaz.',
+          'Your account and all data will be permanently deleted. This action cannot be undone.',
+        )),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text(isEnglish ? 'Cancel' : 'Vazgec'),
+            child: Text(ctx.tr('Vazgeç', 'Cancel')),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: const Color(0xFFB42318),
             ),
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: Text(isEnglish ? 'Yes, delete' : 'Evet, Sil'),
+            child: Text(ctx.tr('Evet, Sil', 'Yes, delete')),
           ),
         ],
       ),
@@ -111,22 +105,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
-  Future<void> _generateReferralCode() async {
-    if (!mounted) return;
-    setState(() => _generatingReferral = true);
-    try {
-      await ref.read(repositoryProvider).createReferralCode();
-      await _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
-    } finally {
-      if (mounted) setState(() => _generatingReferral = false);
-    }
-  }
-
   Future<void> _updatePace(String pace) async {
     if (_savingPace) return;
     final normalized = pace.trim().toLowerCase();
@@ -137,11 +115,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           .updateProfilePreferences(prefPace: normalized);
       if (!mounted) return;
       setState(() {
-        _profile = {...?_profile, 'pref_pace': normalized};
+        // Preserve all existing fields; only overwrite pref_pace
+        _profile = _profile != null ? {..._profile!, 'pref_pace': normalized} : {'pref_pace': normalized};
       });
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Tercih modu güncellendi.')));
+      ).showSnackBar(SnackBar(content: Text(context.tr('Tercih modu güncellendi.', 'Preference updated.'))));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -152,85 +131,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
-  Widget _buildReferralTile(bool isLoggedIn) {
-    final code = _profile?['referral_code'] as String?;
-    final hasCode = code != null && code.isNotEmpty;
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: RouteviaColors.border),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.card_giftcard, color: RouteviaColors.navyLight),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Davet Kodu',
-                  style: TextStyle(
-                    color: RouteviaColors.textSecondary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                if (hasCode)
-                  Text(
-                    code,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 15,
-                      letterSpacing: 1.2,
-                    ),
-                  )
-                else
-                  const Text(
-                    'Henüz kod oluşturmadınız',
-                    style: TextStyle(
-                      color: RouteviaColors.textSecondary,
-                      fontSize: 13,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          if (hasCode)
-            IconButton(
-              icon: const Icon(Icons.copy, size: 20),
-              tooltip: 'Kopyala',
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: code));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Davet kodu kopyalandı.')),
-                );
-              },
-            )
-          else if (isLoggedIn)
-            _generatingReferral
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : TextButton(
-                    onPressed: _generateReferralCode,
-                    child: const Text('Oluştur'),
-                  ),
-        ],
-      ),
-    );
-  }
-
   String _paceLabel(String value, bool isEnglish) {
     switch (value.trim().toLowerCase()) {
       case 'slow':
-        return isEnglish ? 'Slow' : 'Yavas';
+        return isEnglish ? 'Slow' : 'Yavaş';
       case 'fast':
-        return isEnglish ? 'Fast' : 'Hizli';
+        return isEnglish ? 'Fast' : 'Hızlı';
       default:
         return isEnglish ? 'Medium' : 'Orta';
     }
@@ -240,22 +146,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   Widget build(BuildContext context) {
     final isEnglish = Localizations.localeOf(context).languageCode == 'en';
     final isLoggedIn = Supabase.instance.client.auth.currentSession != null;
-    final email = Supabase.instance.client.auth.currentUser?.email ?? 'Misafir';
-    DateTime? premiumExpiry;
-    bool premiumActive = false;
-    final now = DateTime.now().toUtc();
-    for (final e in _entitlements) {
-      final key = e['entitlement_key'] as String?;
-      if (key == 'pro_preview_7d' || key == BillingCatalog.entitlementPro) {
-        final ex = DateTime.tryParse((e['expires_at'] as String?) ?? '');
-        if (ex != null && ex.isAfter(now)) {
-          premiumActive = true;
-          if (premiumExpiry == null || ex.isAfter(premiumExpiry)) {
-            premiumExpiry = ex;
-          }
-        }
-      }
-    }
+    final email = Supabase.instance.client.auth.currentUser?.email ?? context.tr('Misafir', 'Guest');
+    final premiumState = ref.watch(premiumStateProvider).valueOrNull;
+    final premiumActive = premiumState?.isPro ?? false;
+    final premiumExpiry = premiumState?.expiresAt;
 
     return Scaffold(
       appBar: AppBar(title: Text(isEnglish ? 'Profile' : 'Profil')),
@@ -328,12 +222,19 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           ),
                           TextButton(
                             onPressed: _load,
-                            child: const Text('Tekrar Dene'),
+                            child: Text(context.tr('Tekrar Dene', 'Try Again')),
                           ),
                         ],
                       ),
                     ),
                   ),
+                if (_visitedProvinces.isNotEmpty) ...[
+                  _CityDiscoveryCard(
+                    visitedProvinces: _visitedProvinces,
+                    isEnglish: isEnglish,
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -347,7 +248,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     children: [
                       Text(
                         _profile?['display_name']?.toString() ??
-                            'Routevia Kullanici',
+                            context.tr('Routevia Kullanıcı', 'Routevia User'),
                         style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.w800,
@@ -374,7 +275,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                               borderRadius: BorderRadius.circular(999),
                             ),
                             child: Text(
-                              premiumActive ? 'PRO aktif' : 'Ucretsiz plan',
+                              premiumActive ? context.tr('PRO aktif', 'PRO active') : context.tr('Ücretsiz plan', 'Free plan'),
                               // keep short labels in both locales
                               style: const TextStyle(
                                 color: Colors.white,
@@ -634,8 +535,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   ),
                 ),
                 const SizedBox(height: 10),
-                _buildReferralTile(isLoggedIn),
-                const SizedBox(height: 14),
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
@@ -748,6 +647,122 @@ class _ActionRow extends StatelessWidget {
       title: Text(title),
       trailing: const Icon(Icons.chevron_right),
       onTap: onTap,
+    );
+  }
+}
+
+// ── City Discovery Card ───────────────────────────────────────────────────────
+
+// Famous Turkish provinces to suggest as "next" destination
+const _suggestCandidates = [
+  ('istanbul', 'İstanbul'),
+  ('izmir', 'İzmir'),
+  ('antalya', 'Antalya'),
+  ('mugla', 'Muğla'),
+  ('cappadocia', 'Kapadokya'),
+  ('trabzon', 'Trabzon'),
+  ('bursa', 'Bursa'),
+  ('ankara', 'Ankara'),
+  ('canakkale', 'Çanakkale'),
+  ('konya', 'Konya'),
+];
+
+class _CityDiscoveryCard extends StatelessWidget {
+  const _CityDiscoveryCard({
+    required this.visitedProvinces,
+    required this.isEnglish,
+  });
+
+  final Map<String, String> visitedProvinces;
+  final bool isEnglish;
+
+  @override
+  Widget build(BuildContext context) {
+    final count = visitedProvinces.length;
+    final notVisited = _suggestCandidates
+        .where((c) => !visitedProvinces.containsKey(c.$1))
+        .toList();
+    final nextName = notVisited.isNotEmpty ? notVisited.first.$2 : null;
+
+    final title = isEnglish
+        ? '$count ${count == 1 ? 'city' : 'cities'} explored'
+        : '$count şehir keşfettin';
+    final subtitle = nextName != null
+        ? (isEnglish
+            ? 'Next destination: $nextName'
+            : 'Sıradaki hedef: $nextName')
+        : (isEnglish
+            ? 'You\'re an explorer! Keep going.'
+            : 'Harika! Keşfetmeye devam et.');
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF064E3B), Color(0xFF065F46)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                '🗺️',
+                style: const TextStyle(fontSize: 22),
+              ),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (visitedProvinces.length >= 3)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFD600),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                isEnglish ? 'Explorer 🏆' : 'Kaşif 🏆',
+                style: const TextStyle(
+                  color: Color(0xFF1A1A1A),
+                  fontWeight: FontWeight.w800,
+                  fontSize: 11,
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

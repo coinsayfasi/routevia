@@ -109,6 +109,9 @@ class PlaceModel {
     this.appRating,
     this.ratingCount,
     this.sourceWeight,
+    this.provinceName,
+    this.provinceSlug,
+    this.districtName,
   });
 
   final String id;
@@ -134,6 +137,9 @@ class PlaceModel {
   final double? appRating;
   final int? ratingCount;
   final double? sourceWeight;
+  final String? provinceName;
+  final String? provinceSlug;
+  final String? districtName;
 
   double get routeviaScore => (appScore ?? 0).toDouble();
   double get effectiveRating => (appRating ?? stats?.avgRating ?? 0).toDouble();
@@ -175,6 +181,10 @@ class PlaceModel {
           (map['rating'] as num?)?.toDouble(),
       ratingCount: (map['rating_count'] as num?)?.toInt(),
       sourceWeight: (map['source_weight'] as num?)?.toDouble(),
+      provinceName: map['province_name'] as String? ?? map['city'] as String?,
+      provinceSlug: map['province_slug'] as String?,
+      districtName:
+          map['district_name'] as String? ?? map['district'] as String?,
     );
   }
 
@@ -202,6 +212,9 @@ class PlaceModel {
     double? appRating,
     int? ratingCount,
     double? sourceWeight,
+    String? provinceName,
+    String? provinceSlug,
+    String? districtName,
   }) {
     return PlaceModel(
       id: id ?? this.id,
@@ -227,6 +240,9 @@ class PlaceModel {
       appRating: appRating ?? this.appRating,
       ratingCount: ratingCount ?? this.ratingCount,
       sourceWeight: sourceWeight ?? this.sourceWeight,
+      provinceName: provinceName ?? this.provinceName,
+      provinceSlug: provinceSlug ?? this.provinceSlug,
+      districtName: districtName ?? this.districtName,
     );
   }
 }
@@ -391,15 +407,15 @@ class TripPlan {
 
   factory TripPlan.fromMap(Map<String, dynamic> map) {
     return TripPlan(
-      tripId: map['trip_id'] as String,
-      days: (map['days'] as num).toInt(),
-      transportMode: map['transport_mode'] as String,
-      pace: map['pace'] as String,
-      personaMode: map['persona_mode'] as String,
+      tripId: map['trip_id']?.toString() ?? '',
+      days: (map['days'] as num?)?.toInt() ?? 1,
+      transportMode: map['transport_mode']?.toString() ?? 'car',
+      pace: map['pace']?.toString() ?? 'normal',
+      personaMode: map['persona_mode']?.toString() ?? 'explorer',
       preferences: ((map['preferences'] as List?) ?? const []).cast<String>(),
-      province: ProvinceModel.fromMap(
-        Map<String, dynamic>.from(map['province'] as Map),
-      ),
+      province: map['province'] is Map
+          ? ProvinceModel.fromMap(Map<String, dynamic>.from(map['province'] as Map))
+          : ProvinceModel(id: '', name: '', slug: ''),
       daysPlan: ((map['days_plan'] as List?) ?? const [])
           .map((e) => TripDay.fromMap(Map<String, dynamic>.from(e as Map)))
           .toList(),

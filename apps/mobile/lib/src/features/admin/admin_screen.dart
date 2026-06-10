@@ -38,7 +38,6 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
   List<Map<String, dynamic>> _communityReports = const [];
   List<Map<String, dynamic>> _placeStorySubmissions = const [];
   List<Map<String, dynamic>> _coordinateQueue = const [];
-  Map<String, dynamic> _referralReport = const {};
   final Set<String> _selectedCoordinatePlaceIds = <String>{};
 
   // ── Filter state ───────────────────────────────────────────────────────────
@@ -60,7 +59,6 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
   bool _reviewsLoading = false;
   bool _communityPostsLoading = false;
   bool _feedbackLoading = false;
-  bool _reportLoading = false;
   bool _coordinateQueueLoading = false;
   bool _notifSending = false;
 
@@ -98,7 +96,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 9, vsync: this);
+    _tabController = TabController(length: 8, vsync: this);
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging) return;
       final i = _tabController.index;
@@ -109,8 +107,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
       if (i == 4 && _communityPosts.isEmpty) _loadCommunityPosts();
       if (i == 5 && _feedbackItems.isEmpty) _loadFeedback();
       if (i == 6 && _coordinateQueue.isEmpty) _loadCoordinateQueue();
-      if (i == 7 && _referralReport.isEmpty) _loadReferralReport();
-      // Tab 8 = notifications, no preload needed
+      // Tab 7 = notifications, no preload needed
     });
     _init();
   }
@@ -131,7 +128,6 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
     _loadCommunityPosts(silent: true);
     _loadFeedback(silent: true);
     _loadCoordinateQueue(silent: true);
-    _loadReferralReport(silent: true);
   }
 
   // ── Data loaders ───────────────────────────────────────────────────────────
@@ -273,21 +269,6 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
       if (!silent) _toast(friendlyError(e));
     } finally {
       if (mounted) setState(() => _communityPostsLoading = false);
-    }
-  }
-
-  Future<void> _loadReferralReport({bool silent = false}) async {
-    setState(() => _reportLoading = true);
-    try {
-      final report = await ref
-          .read(repositoryProvider)
-          .adminReferralReport(days: 30, limit: 300);
-      if (!mounted) return;
-      setState(() => _referralReport = report);
-    } catch (e) {
-      if (!silent) _toast(friendlyError(e));
-    } finally {
-      if (mounted) setState(() => _reportLoading = false);
     }
   }
 
@@ -850,13 +831,6 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
             ),
             Tab(
               child: _tabLabel(
-                Icons.analytics_outlined,
-                context.tr('Rapor', 'Report'),
-                null,
-              ),
-            ),
-            Tab(
-              child: _tabLabel(
                 Icons.notifications_outlined,
                 context.tr('Bildirim', 'Notifications'),
                 null,
@@ -875,7 +849,6 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
           _buildCommunityPostsTab(),
           _buildFeedbackTab(),
           _buildCoordinateQueueTab(),
-          _buildReportTab(),
           _buildNotifTab(),
         ],
       ),
@@ -1919,217 +1892,6 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Tab 5: Report
-  // ─────────────────────────────────────────────────────────────────────────
-
-  Widget _buildReportTab() {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-          child: Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'Son 30 gün — Referral Raporu',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
-                ),
-              ),
-              IconButton.filled(
-                onPressed: _loadReferralReport,
-                icon: const Icon(Icons.refresh),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: _reportLoading
-              ? const Center(child: CircularProgressIndicator())
-              : _referralReport.isEmpty
-              ? Center(
-                  child: Text(context.tr('Rapor verisi yok', 'No report data')),
-                )
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
-                  child: _buildReferralContent(),
-                ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildReferralContent() {
-    final summary = Map<String, dynamic>.from(
-      (_referralReport['summary'] as Map?) ?? const {},
-    );
-    final topCodes = ((_referralReport['top_codes'] as List?) ?? const [])
-        .cast<Map>()
-        .map((e) => Map<String, dynamic>.from(e))
-        .take(5)
-        .toList();
-    final suspicious = ((_referralReport['suspicious'] as List?) ?? const [])
-        .cast<Map>()
-        .map((e) => Map<String, dynamic>.from(e))
-        .take(5)
-        .toList();
-    final referrals = ((_referralReport['referrals'] as List?) ?? const [])
-        .cast<Map>()
-        .map((e) => Map<String, dynamic>.from(e))
-        .take(15)
-        .toList();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: 8),
-        // Summary chips
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            _StatChip(
-              label: 'Referral',
-              value: '${summary['referrals_count'] ?? 0}',
-              color: const Color(0xFF0284C7),
-            ),
-            _StatChip(
-              label: 'Kod',
-              value: '${summary['unique_codes'] ?? 0}',
-              color: const Color(0xFF059669),
-            ),
-            _StatChip(
-              label: 'Entitlement',
-              value: '${summary['entitlements_count'] ?? 0}',
-              color: const Color(0xFF7C3AED),
-            ),
-            _StatChip(
-              label: 'Event',
-              value: '${summary['events_count'] ?? 0}',
-              color: const Color(0xFFD97706),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-
-        // Top codes
-        _SectionHeader(
-          icon: Icons.bar_chart_rounded,
-          title: 'En çok kullanılan referral kodları',
-        ),
-        if (topCodes.isEmpty)
-          Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
-            child: Text(
-              context.tr('Veri yok', 'No data'),
-              style: const TextStyle(color: Colors.black45),
-            ),
-          )
-        else
-          ...topCodes.map(
-            (e) => ListTile(
-              dense: true,
-              leading: const Icon(Icons.vpn_key_outlined, size: 18),
-              title: Text(e['code'] as String? ?? '—'),
-              trailing: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 3,
-                ),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE0F2FE),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  '${e['count']} kullanım',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF0284C7),
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-            ),
-          ),
-
-        const SizedBox(height: 16),
-
-        // Suspicious
-        _SectionHeader(
-          icon: Icons.warning_amber_rounded,
-          title: 'Şüpheli pattern',
-          iconColor: const Color(0xFFDC2626),
-        ),
-        if (suspicious.isEmpty)
-          Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
-            child: Row(
-              children: [
-                Icon(Icons.check_circle_outline, size: 16, color: Colors.green),
-                SizedBox(width: 6),
-                Text(
-                  context.tr(
-                    'Şüpheli pattern tespit edilmedi',
-                    'No suspicious pattern detected',
-                  ),
-                ),
-              ],
-            ),
-          )
-        else
-          ...suspicious.map(
-            (e) => ListTile(
-              dense: true,
-              leading: const Icon(
-                Icons.error_outline,
-                size: 18,
-                color: Color(0xFFDC2626),
-              ),
-              title: Text('${e['code']} / ${e['day']}'),
-              trailing: Text(
-                '${e['redeem_count']} kullanım',
-                style: const TextStyle(
-                  color: Color(0xFFDC2626),
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ),
-
-        const SizedBox(height: 16),
-
-        // Recent referrals
-        _SectionHeader(
-          icon: Icons.people_outline_rounded,
-          title: 'Son referral kayıtları',
-        ),
-        if (referrals.isEmpty)
-          Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
-            child: Text(
-              context.tr('Veri yok', 'No data'),
-              style: const TextStyle(color: Colors.black45),
-            ),
-          )
-        else
-          ...referrals.map(
-            (r) => ListTile(
-              dense: true,
-              leading: const Icon(Icons.arrow_forward_outlined, size: 16),
-              title: Text(
-                '${r['referrer_name'] ?? r['referrer_user_id']} → ${r['referee_name'] ?? r['referee_user_id']}',
-                style: const TextStyle(fontSize: 13),
-              ),
-              subtitle: Text(
-                r['code'] as String? ?? '—',
-                style: const TextStyle(fontSize: 11),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
   // Tab 5: Coordinate Queue
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -2518,30 +2280,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
         ),
         const SizedBox(height: 16),
         if (_notifResult != null)
-          Container(
-            margin: const EdgeInsets.only(bottom: 12),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: _notifResult!.startsWith('Hata')
-                  ? const Color(0xFFFEF2F2)
-                  : const Color(0xFFF0FDF4),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: _notifResult!.startsWith('Hata')
-                    ? const Color(0xFFFCA5A5)
-                    : const Color(0xFFBBF7D0),
-              ),
-            ),
-            child: Text(
-              _notifResult!,
-              style: TextStyle(
-                color: _notifResult!.startsWith('Hata')
-                    ? const Color(0xFFB42318)
-                    : const Color(0xFF166534),
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
+          _NotifResultBanner(result: _notifResult!),
         SizedBox(
           width: double.infinity,
           child: FilledButton.icon(
@@ -2587,17 +2326,29 @@ class _AdminScreenState extends ConsumerState<AdminScreen>
       final sent = result['sent'] as int? ?? 0;
       final failed = result['failed'] as int? ?? 0;
       final skipped = result['skipped'] as String?;
-      if (skipped != null) {
-        setState(() => _notifResult = 'Atlandı: $skipped');
+      if (skipped == 'firebase_secrets_missing') {
+        setState(
+          () => _notifResult =
+              'setup:Firebase kimlik bilgileri ayarlanmamış.\n'
+              'Supabase → Edge Functions → Secrets bölümüne şunları ekle:\n'
+              '• FIREBASE_SERVICE_ACCOUNT_JSON\n'
+              '  (ya da ayrı ayrı: FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY)',
+        );
+      } else if (skipped == 'no_push_tokens') {
+        setState(
+          () => _notifResult = 'warn:Kayıtlı push token yok — henüz bildirim izni veren kullanıcı bulunmuyor.',
+        );
+      } else if (skipped != null) {
+        setState(() => _notifResult = 'warn:Atlandı: $skipped');
       } else {
         setState(
           () => _notifResult =
-              'Gönderildi: $sent cihaz${failed > 0 ? ' | Başarısız: $failed' : ''}',
+              'ok:Gönderildi: $sent cihaz${failed > 0 ? ' | Başarısız: $failed' : ''}',
         );
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() => _notifResult = 'Hata: ${friendlyError(e)}');
+      setState(() => _notifResult = 'err:${friendlyError(e)}');
     } finally {
       if (mounted) setState(() => _notifSending = false);
     }
@@ -3885,75 +3636,6 @@ class _PhotoCard extends StatelessWidget {
 // Small helper widgets
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _StatChip extends StatelessWidget {
-  const _StatChip({
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-
-  final String label;
-  final String value;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.2)),
-      ),
-      child: Column(
-        children: [
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              color: color,
-            ),
-          ),
-          Text(
-            label,
-            style: TextStyle(fontSize: 11, color: color.withValues(alpha: 0.8)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({
-    required this.icon,
-    required this.title,
-    this.iconColor,
-  });
-
-  final IconData icon;
-  final String title;
-  final Color? iconColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: iconColor ?? const Color(0xFF0B3B68)),
-          const SizedBox(width: 8),
-          Text(
-            title,
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _FormSectionLabel extends StatelessWidget {
   const _FormSectionLabel(this.text);
 
@@ -3970,6 +3652,58 @@ class _FormSectionLabel extends StatelessWidget {
           fontWeight: FontWeight.w600,
           color: Color(0xFF475569),
         ),
+      ),
+    );
+  }
+}
+
+// Push notification result banner — handles ok / warn / setup / err prefixes.
+class _NotifResultBanner extends StatelessWidget {
+  const _NotifResultBanner({required this.result});
+
+  final String result;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color bg;
+    final Color border;
+    final Color fg;
+    final String label;
+
+    if (result.startsWith('ok:')) {
+      bg = const Color(0xFFF0FDF4);
+      border = const Color(0xFFBBF7D0);
+      fg = const Color(0xFF166534);
+      label = result.substring(3);
+    } else if (result.startsWith('warn:')) {
+      bg = const Color(0xFFFFFBEB);
+      border = const Color(0xFFFDE68A);
+      fg = const Color(0xFF92400E);
+      label = result.substring(5);
+    } else if (result.startsWith('setup:')) {
+      bg = const Color(0xFFFFF7ED);
+      border = const Color(0xFFFED7AA);
+      fg = const Color(0xFF9A3412);
+      label = result.substring(6);
+    } else {
+      // err: or legacy "Hata: ..."
+      bg = const Color(0xFFFEF2F2);
+      border = const Color(0xFFFCA5A5);
+      fg = const Color(0xFFB42318);
+      label = result.startsWith('err:') ? result.substring(4) : result;
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(color: fg, fontWeight: FontWeight.w600, height: 1.5),
       ),
     );
   }

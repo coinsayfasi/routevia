@@ -1,19 +1,26 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/error_utils.dart';
 import '../../core/i18n.dart';
+import '../../core/premium_gate.dart';
 import '../../core/theme.dart';
+import '../../core/ad_service.dart';
 import '../../core/widgets/ad_banner.dart';
+import '../../core/widgets/trip_com_card.dart';
 import '../../data/providers.dart';
+import '../../models/event_models.dart';
 import '../../models/trip_models.dart';
+import '../../core/widgets/place_pexels_image.dart';
 import '../../core/widgets/safe_network_image.dart';
 
 // Reuse same category styling from map_screen
@@ -60,14 +67,20 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
   Map<String, dynamic>? _trustMetric;
   Map<String, dynamic>? _liveStatus;
   List<Map<String, dynamic>> _placeStories = const [];
+  List<EventModel> _relatedEvents = const [];
   bool _posting = false;
   bool _uploadingPhoto = false;
   bool _favoriteActive = false;
+  String? _imageCredit;
+  List<PlaceModel> _similarPlaces = const [];
   bool _checkinActive = false;
   int _rating = 5;
+  String? _personalNote;
   final Set<String> _flags = {};
   final TextEditingController _commentController = TextEditingController();
   final ImagePicker _picker = ImagePicker();
+
+  static const _notesBox = 'place_notes';
 
   bool get _isLoggedIn =>
       ref.read(repositoryProvider).client.auth.currentSession != null;
@@ -76,6 +89,68 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
   void initState() {
     super.initState();
     _load();
+    _loadPersonalNote();
+  }
+
+  Future<void> _loadPersonalNote() async {
+    try {
+      final box = await Hive.openBox<String>(_notesBox);
+      final note = box.get(widget.place.id);
+      if (mounted && note != null && note.isNotEmpty) {
+        setState(() => _personalNote = note);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _savePersonalNote(String text) async {
+    try {
+      final box = await Hive.openBox<String>(_notesBox);
+      if (text.isEmpty) {
+        await box.delete(widget.place.id);
+      } else {
+        await box.put(widget.place.id, text);
+      }
+      if (mounted) setState(() => _personalNote = text.isEmpty ? null : text);
+    } catch (_) {}
+  }
+
+  Future<void> _showNoteDialog() async {
+    final ctrl = TextEditingController(text: _personalNote ?? '');
+    final saved = await showDialog<String?>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Kişisel Notum', style: TextStyle(fontWeight: FontWeight.w800)),
+        content: TextField(
+          controller: ctrl,
+          minLines: 3,
+          maxLines: 8,
+          maxLength: 500,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'Bu yer hakkında kişisel bir not bırak (yalnızca sen görürsün)…',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          if (_personalNote != null)
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(''),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Notu Sil'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(null),
+            child: const Text('Vazgeç'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
+            child: const Text('Kaydet'),
+          ),
+        ],
+      ),
+    );
+    if (saved == null) return; // cancelled
+    await _savePersonalNote(saved);
   }
 
   Future<void> _load() async {
@@ -91,8 +166,10 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
         _photos = photos;
         _detail = detail;
       });
+      unawaited(_loadRelatedEvents(detail.provinceName));
     } catch (_) {
       setState(() => _detail = widget.place);
+      unawaited(_loadRelatedEvents(widget.place.provinceName));
     }
     try {
       final stats = await repo.getPlaceStats(widget.place.id);
@@ -117,6 +194,32 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
       final stories = await repo.getApprovedPlaceStories(widget.place.id);
       if (!mounted) return;
       setState(() => _placeStories = stories);
+    } catch (_) {}
+    try {
+      final similar = await repo.getSimilarPlaces(
+        placeId: widget.place.id,
+        category: widget.place.category,
+        provinceSlug: widget.place.provinceSlug ?? '',
+        limit: 5,
+      );
+      if (!mounted) return;
+      setState(() => _similarPlaces = similar);
+    } catch (_) {}
+  }
+
+  Future<void> _loadRelatedEvents(String? provinceName) async {
+    final normalized = provinceName?.trim() ?? '';
+    if (normalized.isEmpty) return;
+    try {
+      final events = await ref
+          .read(repositoryProvider)
+          .getEvents(
+            provinceName: normalized,
+            month: DateTime.now().month,
+            limit: 8,
+          );
+      if (!mounted) return;
+      setState(() => _relatedEvents = events);
     } catch (_) {}
   }
 
@@ -198,6 +301,10 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
         ),
       );
       context.push('/auth');
+      return;
+    }
+    if (!isPro(ref)) {
+      if (mounted) showPremiumGate(context, feature: 'Fotoğraf yükleme');
       return;
     }
     setState(() => _uploadingPhoto = true);
@@ -610,284 +717,319 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
     final images = place.media;
     final cat = _styleOf(place.category);
 
-    return Scaffold(
-      body: CustomScrollView(
-        slivers: [
-          // ── Hero image app bar ──────────────────────────────────────
-          SliverAppBar(
-            expandedHeight: 280,
-            pinned: true,
-            backgroundColor: RouteviaColors.primary,
-            foregroundColor: Colors.white,
-            flexibleSpace: FlexibleSpaceBar(
-              background: Stack(
-                fit: StackFit.expand,
-                children: [
-                  if (images.isNotEmpty)
-                    PageView(
-                      children: images
-                          .map(
-                            (m) => SafeNetworkImage(
-                              url: m.publicUrl,
-                              fit: BoxFit.cover,
-                            ),
-                          )
-                          .toList(),
-                    )
-                  else
-                    Container(
-                      color: Colors.grey.shade300,
-                      child: const Icon(
-                        Icons.image,
-                        size: 48,
-                        color: Colors.white54,
+    return PopScope(
+      onPopInvokedWithResult: (didPop, result) =>
+          AdService().showInterstitialIfAllowed(),
+      child: Scaffold(
+        bottomNavigationBar: const AdBannerWidget(),
+        body: CustomScrollView(
+          slivers: [
+            // ── Hero image app bar ──────────────────────────────────────
+            SliverAppBar(
+              expandedHeight: 280,
+              pinned: true,
+              backgroundColor: RouteviaColors.primary,
+              foregroundColor: Colors.white,
+              flexibleSpace: FlexibleSpaceBar(
+                background: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (images.isNotEmpty)
+                      PageView(
+                        children: images
+                            .map(
+                              (m) => SafeNetworkImage(
+                                url: m.publicUrl,
+                                fit: BoxFit.cover,
+                                imageSize: ImageSize.detail,
+                              ),
+                            )
+                            .toList(),
+                      )
+                    else
+                      PlacePexelsImage(
+                        placeName: place.name,
+                        provinceName: place.provinceName ?? '',
+                        category: place.category,
+                        fit: BoxFit.cover,
+                        onLoaded: (_, credit) {
+                          if (mounted && credit != null && credit.isNotEmpty) {
+                            setState(() => _imageCredit = credit);
+                          }
+                        },
+                        fallbackWidget: Container(
+                          color: cat.color.withValues(alpha: 0.15),
+                          child: Icon(cat.icon, size: 56, color: cat.color.withValues(alpha: 0.4)),
+                        ),
                       ),
-                    ),
-                  // Gradient overlay
-                  const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Colors.transparent, Colors.black54],
-                        stops: [0.5, 1.0],
-                      ),
-                    ),
-                  ),
-                  // Category badge on image
-                  Positioned(
-                    top: MediaQuery.of(context).padding.top + 48,
-                    right: 16,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: cat.color,
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Colors.black26,
-                            blurRadius: 6,
-                            offset: Offset(0, 2),
+                    // Photo attribution badge
+                    if (_imageCredit != null && images.isEmpty)
+                      Positioned(
+                        right: 10,
+                        top: MediaQuery.of(context).padding.top + 52,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                        ],
+                          child: Text(
+                            '📸 ${_imageCredit!.length > 28 ? '${_imageCredit!.substring(0, 28)}…' : _imageCredit!}',
+                            style: const TextStyle(color: Colors.white, fontSize: 10),
+                          ),
+                        ),
                       ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
+                    // Gradient overlay
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Colors.transparent, Colors.black54],
+                          stops: [0.5, 1.0],
+                        ),
+                      ),
+                    ),
+                    // Category badge on image
+                    Positioned(
+                      top: MediaQuery.of(context).padding.top + 48,
+                      right: 16,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: cat.color,
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Colors.black26,
+                              blurRadius: 6,
+                              offset: Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(cat.icon, size: 16, color: Colors.white),
+                            const SizedBox(width: 6),
+                            Text(
+                              cat.label,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    // Title on image
+                    Positioned(
+                      left: 16,
+                      right: 16,
+                      bottom: 16,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(cat.icon, size: 16, color: Colors.white),
-                          const SizedBox(width: 6),
                           Text(
-                            cat.label,
+                            place.name,
                             style: const TextStyle(
                               color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 13,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 22,
+                              height: 1.2,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          // Rating + duration row
+                          Wrap(
+                            spacing: 8,
+                            children: [
+                              if (place.effectiveRating > 0)
+                                _infoBadge(
+                                  Icons.star,
+                                  '${place.effectiveRating.toStringAsFixed(1)}${place.effectiveRatingCount > 0 ? ' (${place.effectiveRatingCount})' : ''}',
+                                  const Color(0xFFFFD600),
+                                ),
+                              if (place.routeviaScore > 0)
+                                _infoBadge(
+                                  Icons.verified,
+                                  'Routevia ${place.routeviaScore.toStringAsFixed(1)}',
+                                  RouteviaColors.accent,
+                                ),
+                              _infoBadge(
+                                Icons.schedule,
+                                '${place.durationMin} dk',
+                                Colors.white70,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.share),
+                  onPressed: _sharePlace,
+                ),
+              ],
+            ),
+
+            // ── Content ─────────────────────────────────────────────────
+            SliverPadding(
+              padding: const EdgeInsets.all(16),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate([
+                  // Quick actions
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _openNavigation,
+                          icon: const Icon(Icons.navigation, size: 18),
+                          label: const Text('Yol Tarifi'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      _ActionButton(
+                        icon: _checkinActive
+                            ? Icons.check_circle_rounded
+                            : Icons.place,
+                        label: 'Check-in',
+                        foreground: _checkinActive
+                            ? const Color(0xFFDC2626)
+                            : null,
+                        onTap: () => _signal('checkin'),
+                      ),
+                      const SizedBox(width: 8),
+                      _ActionButton(
+                        icon: _favoriteActive
+                            ? Icons.favorite
+                            : Icons.favorite_border,
+                        label: 'Favori',
+                        foreground: _favoriteActive
+                            ? const Color(0xFFDC2626)
+                            : null,
+                        onTap: () => _signal('favorite'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  // Personal note button
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _showNoteDialog,
+                      icon: Icon(
+                        _personalNote != null ? Icons.edit_note : Icons.note_add_outlined,
+                        size: 18,
+                        color: const Color(0xFF0F766E),
+                      ),
+                      label: Text(
+                        _personalNote != null ? 'Notumu Düzenle' : 'Kişisel Not Ekle',
+                        style: const TextStyle(color: Color(0xFF0F766E)),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Color(0xFF0F766E)),
+                      ),
+                    ),
+                  ),
+                  if (_personalNote != null) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF0FDFA),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFF99F6E4)),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(Icons.sticky_note_2_outlined, size: 20, color: Color(0xFF0F766E)),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              _personalNote!,
+                              style: const TextStyle(
+                                color: Color(0xFF134E4A),
+                                height: 1.45,
+                              ),
                             ),
                           ),
                         ],
                       ),
                     ),
+                  ],
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _uploadingPhoto ? null : _uploadPhoto,
+                      icon: Icon(
+                        _uploadingPhoto
+                            ? Icons.hourglass_top
+                            : Icons.add_a_photo,
+                        size: 18,
+                      ),
+                      label: Text(
+                        _uploadingPhoto
+                            ? 'Fotoğraf işleniyor...'
+                            : 'Topluluk Fotoğrafı Yükle',
+                      ),
+                    ),
                   ),
-                  // Title on image
-                  Positioned(
-                    left: 16,
-                    right: 16,
-                    bottom: 16,
-                    child: Column(
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: const Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          place.name,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w900,
-                            fontSize: 22,
-                            height: 1.2,
+                          'Topluluk fotoğrafı notu',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 14,
                           ),
                         ),
-                        const SizedBox(height: 6),
-                        // Rating + duration row
-                        Wrap(
-                          spacing: 8,
-                          children: [
-                            if (place.effectiveRating > 0)
-                              _infoBadge(
-                                Icons.star,
-                                '${place.effectiveRating.toStringAsFixed(1)}${place.effectiveRatingCount > 0 ? ' (${place.effectiveRatingCount})' : ''}',
-                                const Color(0xFFFFD600),
-                              ),
-                            if (place.routeviaScore > 0)
-                              _infoBadge(
-                                Icons.verified,
-                                'Routevia ${place.routeviaScore.toStringAsFixed(1)}',
-                                RouteviaColors.accent,
-                              ),
-                            _infoBadge(
-                              Icons.schedule,
-                              '${place.durationMin} dk',
-                              Colors.white70,
-                            ),
-                          ],
+                        SizedBox(height: 6),
+                        Text(
+                          'Yalnızca kendi çektiğin veya kullanım hakkına sahip olduğun fotoğrafları yükle. Moderasyondan geçen görseller topluluk galerisinde ve seçilirse yerin ana görselinde kullanılabilir.',
+                          style: TextStyle(
+                            color: Color(0xFF475569),
+                            height: 1.45,
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          'Net kadraj, yatay çekim ve mekanın ayırt edici detayları daha hızlı öne çıkar.',
+                          style: TextStyle(
+                            color: Color(0xFF0F766E),
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ],
                     ),
                   ),
-                ],
-              ),
-            ),
-            actions: [
-              IconButton(icon: const Icon(Icons.share), onPressed: _sharePlace),
-            ],
-          ),
-
-          // ── Content ─────────────────────────────────────────────────
-          SliverPadding(
-            padding: const EdgeInsets.all(16),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
-                // Quick actions
-                Row(
-                  children: [
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: _openNavigation,
-                        icon: const Icon(Icons.navigation, size: 18),
-                        label: const Text('Yol Tarifi'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    _ActionButton(
-                      icon: _checkinActive
-                          ? Icons.check_circle_rounded
-                          : Icons.place,
-                      label: 'Check-in',
-                      foreground: _checkinActive
-                          ? const Color(0xFFDC2626)
-                          : null,
-                      onTap: () => _signal('checkin'),
-                    ),
-                    const SizedBox(width: 8),
-                    _ActionButton(
-                      icon: _favoriteActive
-                          ? Icons.favorite
-                          : Icons.favorite_border,
-                      label: 'Favori',
-                      foreground: _favoriteActive
-                          ? const Color(0xFFDC2626)
-                          : null,
-                      onTap: () => _signal('favorite'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: _uploadingPhoto ? null : _uploadPhoto,
-                    icon: Icon(
-                      _uploadingPhoto ? Icons.hourglass_top : Icons.add_a_photo,
-                      size: 18,
-                    ),
-                    label: Text(
-                      _uploadingPhoto
-                          ? 'Fotoğraf işleniyor...'
-                          : 'Topluluk Fotoğrafı Yükle',
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                  ),
-                  child: const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Topluluk fotoğrafı notu',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 14,
-                        ),
-                      ),
-                      SizedBox(height: 6),
-                      Text(
-                        'Yalnızca kendi çektiğin veya kullanım hakkına sahip olduğun fotoğrafları yükle. Moderasyondan geçen görseller topluluk galerisinde ve seçilirse yerin ana görselinde kullanılabilir.',
-                        style: TextStyle(
-                          color: Color(0xFF475569),
-                          height: 1.45,
-                        ),
-                      ),
-                      SizedBox(height: 8),
-                      Text(
-                        'Net kadraj, yatay çekim ve mekanın ayırt edici detayları daha hızlı öne çıkar.',
-                        style: TextStyle(
-                          color: Color(0xFF0F766E),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        context.tr(
-                          'Bu yerin hikâyesini sen tamamla',
-                          'Help complete this place story',
-                        ),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 15,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        context.tr(
-                          'Gittiğin yerle ilgili kısa hikâye, bilinmeyen özellik veya yerel ipucu ekleyebilirsin. Onay sonrası burada görünür.',
-                          'Add a short story, hidden feature, or local tip about this place. It appears here after approval.',
-                        ),
-                        style: const TextStyle(
-                          color: Color(0xFF475569),
-                          height: 1.45,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      FilledButton.tonalIcon(
-                        onPressed: _submitPlaceStory,
-                        icon: const Icon(Icons.auto_stories_outlined, size: 18),
-                        label: Text(
-                          context.tr(
-                            'Hikâye veya Özellik Ekle',
-                            'Add Story or Feature',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (_placeStories.isNotEmpty) ...[
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 10),
                   Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: const Color(0xFFF8FAFC),
                       borderRadius: BorderRadius.circular(18),
                       border: Border.all(color: const Color(0xFFE2E8F0)),
                     ),
@@ -896,555 +1038,849 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
                       children: [
                         Text(
                           context.tr(
-                            'Topluluktan Yer Hikâyeleri',
-                            'Community Place Stories',
+                            'Bu yerin hikâyesini sen tamamla',
+                            'Help complete this place story',
                           ),
                           style: const TextStyle(
                             fontWeight: FontWeight.w800,
                             fontSize: 15,
                           ),
                         ),
+                        const SizedBox(height: 6),
+                        Text(
+                          context.tr(
+                            'Gittiğin yerle ilgili kısa hikâye, bilinmeyen özellik veya yerel ipucu ekleyebilirsin. Onay sonrası burada görünür.',
+                            'Add a short story, hidden feature, or local tip about this place. It appears here after approval.',
+                          ),
+                          style: const TextStyle(
+                            color: Color(0xFF475569),
+                            height: 1.45,
+                          ),
+                        ),
                         const SizedBox(height: 10),
-                        ..._placeStories.map(
-                          (story) => Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  (story['title']
-                                              ?.toString()
-                                              .trim()
-                                              .isNotEmpty ??
-                                          false)
-                                      ? story['title'].toString()
-                                      : context.tr(
-                                          'Topluluk notu',
-                                          'Community note',
-                                        ),
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  story['story_text']?.toString() ?? '',
-                                  style: const TextStyle(
-                                    color: Color(0xFF475569),
-                                    height: 1.45,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  '${story['submitter_name'] ?? 'Routevia gezgini'} • ${story['fact_type'] ?? 'story'}',
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: Color(0xFF94A3B8),
-                                  ),
-                                ),
-                              ],
+                        FilledButton.tonalIcon(
+                          onPressed: _submitPlaceStory,
+                          icon: const Icon(
+                            Icons.auto_stories_outlined,
+                            size: 18,
+                          ),
+                          label: Text(
+                            context.tr(
+                              'Hikâye veya Özellik Ekle',
+                              'Add Story or Feature',
                             ),
                           ),
                         ),
                       ],
                     ),
                   ),
-                ],
-                const SizedBox(height: 16),
-
-                // Summary — sadece gerçek açıklama varsa göster (ilçe adı gibi kısa değerler atlanır)
-                if (place.shortSummary.length > 25) ...[
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFFE8ECF0)),
-                    ),
-                    child: Text(
-                      place.shortSummary,
-                      style: const TextStyle(fontSize: 15, height: 1.5),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-
-                // Source attribution
-                _SourceBadge(place: place),
-                const SizedBox(height: 12),
-                if (_trustMetric != null) ...[
-                  _TrustCard(metric: _trustMetric!, live: _liveStatus),
-                  const SizedBox(height: 12),
-                ],
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 54,
-                        height: 54,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFFF7ED),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Center(
-                          child: Text(
-                            ((_stats?.avgRating ?? 0) > 0)
-                                ? _stats!.avgRating.toStringAsFixed(1)
-                                : '-',
+                  if (_placeStories.isNotEmpty) ...[
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            context.tr(
+                              'Topluluktan Yer Hikâyeleri',
+                              'Community Place Stories',
+                            ),
                             style: const TextStyle(
-                              fontWeight: FontWeight.w900,
-                              fontSize: 20,
-                              color: Color(0xFFD97706),
+                              fontWeight: FontWeight.w800,
+                              fontSize: 15,
                             ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Routevia Topluluk Skoru',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 15,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              _summaryText(_stats),
-                              style: const TextStyle(
-                                color: Color(0xFF475569),
-                                height: 1.4,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 12),
-                if (_photos.isNotEmpty) ...[
-                  SizedBox(
-                    height: 96,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: _photos.length,
-                      separatorBuilder: (_, _) => const SizedBox(width: 10),
-                      itemBuilder: (context, index) {
-                        final photo = _photos[index];
-                        return ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: Stack(
-                            children: [
-                              SizedBox(
-                                width: 132,
-                                child: SafeNetworkImage(
-                                  url: photo.imageUrl,
-                                  fit: BoxFit.cover,
-                                ),
-                              ),
-                              if (!photo.isApproved)
-                                Positioned(
-                                  left: 8,
-                                  right: 8,
-                                  bottom: 8,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 4,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Colors.black87,
-                                      borderRadius: BorderRadius.circular(999),
-                                    ),
-                                    child: Text(
-                                      photo.status == 'pending'
-                                          ? 'Onay bekliyor'
-                                          : 'Gizlendi',
-                                      textAlign: TextAlign.center,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-
-                // Stats row
-                if (_stats != null) ...[
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      if (_stats!.familyCount > 0)
-                        _StatChip(
-                          Icons.family_restroom,
-                          'Aile Dostu',
-                          _stats!.familyCount,
-                        ),
-                      if (_stats!.photoSpotCount > 0)
-                        _StatChip(
-                          Icons.camera_alt,
-                          'Foto Noktası',
-                          _stats!.photoSpotCount,
-                        ),
-                      if (_stats!.sunsetWorthyCount > 0)
-                        _StatChip(
-                          Icons.wb_twilight,
-                          'Gün Batımı',
-                          _stats!.sunsetWorthyCount,
-                        ),
-                      if (_stats!.crowdedCount > 0)
-                        _StatChip(
-                          Icons.groups,
-                          'Kalabalık',
-                          _stats!.crowdedCount,
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                ],
-
-                // Tags
-                if (place.tags.isNotEmpty) ...[
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: place.tags
-                        .map(
-                          (t) => Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 5,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF1F5F9),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              '#$t',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF64748B),
-                              ),
-                            ),
-                          ),
-                        )
-                        .toList(),
-                  ),
-                  const SizedBox(height: 16),
-                ],
-
-                // Content sections
-                _SectionCard(
-                  icon: Icons.history_edu,
-                  title: 'Tarih',
-                  items: place.historyBullets,
-                  color: const Color(0xFFF57F17),
-                ),
-                _SectionCard(
-                  icon: Icons.restaurant_menu,
-                  title: 'Yeme / İçme',
-                  items: place.eatDrinkBullets,
-                  color: const Color(0xFFD84315),
-                ),
-                _SectionCard(
-                  icon: Icons.lightbulb_outline,
-                  title: 'İpuçları',
-                  items: place.tipsBullets,
-                  color: RouteviaColors.accent,
-                ),
-
-                const SizedBox(height: 20),
-                const Divider(),
-                const SizedBox(height: 12),
-
-                // Review section
-                const Text(
-                  'Değerlendirme Yap',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
-                ),
-                const SizedBox(height: 12),
-                if (!_isLoggedIn) ...[
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEEF6FF),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: const Color(0xFFBFDBFE)),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.lock_outline_rounded,
-                          color: Color(0xFF1D4ED8),
-                        ),
-                        const SizedBox(width: 10),
-                        const Expanded(
-                          child: Text(
-                            'Yorum, puan, check-in ve favori icin giris gerekli.',
-                            style: TextStyle(
-                              color: Color(0xFF1E3A8A),
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: () => context.push('/auth'),
-                          child: const Text('Giris Yap'),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                const Text(
-                  'Puanın',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(5, (i) {
-                    final starValue = i + 1;
-                    return GestureDetector(
-                      onTap: () => setState(() => _rating = starValue),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: TweenAnimationBuilder<double>(
-                          tween: Tween(
-                            begin: 0.8,
-                            end: starValue <= _rating ? 1.15 : 1.0,
-                          ),
-                          duration: const Duration(milliseconds: 200),
-                          curve: Curves.elasticOut,
-                          builder: (ctx, scale, child) =>
-                              Transform.scale(scale: scale, child: child),
-                          child: Icon(
-                            starValue <= _rating
-                                ? Icons.star_rounded
-                                : Icons.star_outline_rounded,
-                            size: 40,
-                            color: starValue <= _rating
-                                ? const Color(0xFFF59E0B)
-                                : const Color(0xFFCBD5E1),
-                          ),
-                        ),
-                      ),
-                    );
-                  }),
-                ),
-                const SizedBox(height: 6),
-                Center(
-                  child: Text(
-                    _ratingLabel(_rating),
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF0B3B68),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-
-                // Quick flags
-                const Text(
-                  'Hızlı Etiketler',
-                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                ),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children:
-                      [
-                            'crowded',
-                            'family',
-                            'quiet',
-                            'photo_spot',
-                            'budget',
-                            'sunset_worthy',
-                          ]
-                          .map(
-                            (f) => FilterChip(
-                              label: Text(_flagLabel(f)),
-                              selected: _flags.contains(f),
-                              onSelected: (on) => setState(() {
-                                if (on) {
-                                  _flags.add(f);
-                                } else {
-                                  _flags.remove(f);
-                                }
-                              }),
-                            ),
-                          )
-                          .toList(),
-                ),
-                const SizedBox(height: 10),
-
-                TextField(
-                  controller: _commentController,
-                  maxLines: 3,
-                  maxLength: 240,
-                  decoration: const InputDecoration(
-                    labelText: 'Kısa yorum',
-                    hintText: 'Manzara harika, akşamüstü gidin.',
-                  ),
-                ),
-                const SizedBox(height: 8),
-                FilledButton.icon(
-                  onPressed: _posting ? null : _submitReview,
-                  icon: Icon(
-                    _posting ? Icons.hourglass_top : Icons.send,
-                    size: 18,
-                  ),
-                  label: Text(_posting ? 'Kaydediliyor...' : 'Yorumu Kaydet'),
-                ),
-
-                // Community reviews
-                if ((_stats?.recentReviews.length ?? 0) > 0) ...[
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Topluluk Yorumları',
-                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
-                  ),
-                  const SizedBox(height: 8),
-                  ...(List<PlaceReviewModel>.from(_stats!.recentReviews)..sort(
-                        (a, b) => b.reviewerScore.compareTo(a.reviewerScore),
-                      ))
-                      .map(
-                        (r) => Container(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF8FAFC),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFFE8ECF0)),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
+                          const SizedBox(height: 10),
+                          ..._placeStories.map(
+                            (story) => Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  ...List.generate(
-                                    r.rating.clamp(0, 5),
-                                    (_) => const Icon(
-                                      Icons.star,
-                                      size: 16,
-                                      color: Color(0xFFF57F17),
+                                  Text(
+                                    (story['title']
+                                                ?.toString()
+                                                .trim()
+                                                .isNotEmpty ??
+                                            false)
+                                        ? story['title'].toString()
+                                        : context.tr(
+                                            'Topluluk notu',
+                                            'Community note',
+                                          ),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
                                     ),
                                   ),
-                                  const Spacer(),
-                                  _TrustBadge(level: r.trustLevel),
-                                  const SizedBox(width: 8),
-                                  if (r.createdAt != null)
-                                    Text(
-                                      '${r.createdAt!.day}.${r.createdAt!.month}.${r.createdAt!.year}',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: Colors.grey.shade500,
-                                      ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    story['story_text']?.toString() ?? '',
+                                    style: const TextStyle(
+                                      color: Color(0xFF475569),
+                                      height: 1.45,
                                     ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '${story['submitter_name'] ?? 'Routevia gezgini'} • ${story['fact_type'] ?? 'story'}',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFF94A3B8),
+                                    ),
+                                  ),
                                 ],
                               ),
-                              if (r.commentShort.isNotEmpty) ...[
-                                const SizedBox(height: 6),
-                                Text(r.commentShort),
-                              ],
-                              if (r.status != 'approved') ...[
-                                const SizedBox(height: 6),
-                                Text(
-                                  r.status == 'pending'
-                                      ? 'Moderasyon bekliyor'
-                                      : 'Görünürlüğü kısıtlandı',
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                    color: Color(0xFFD97706),
-                                  ),
-                                ),
-                              ],
-                              if (r.flags.isNotEmpty) ...[
-                                const SizedBox(height: 6),
-                                Wrap(
-                                  spacing: 4,
-                                  children: r.flags
-                                      .map(
-                                        (f) => Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 6,
-                                            vertical: 2,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: const Color(0xFFE0F2FE),
-                                            borderRadius: BorderRadius.circular(
-                                              8,
-                                            ),
-                                          ),
-                                          child: Text(
-                                            _flagLabel(f),
-                                            style: const TextStyle(
-                                              fontSize: 11,
-                                              color: Color(0xFF0369A1),
-                                            ),
-                                          ),
-                                        ),
-                                      )
-                                      .toList(),
-                                ),
-                              ],
-                            ],
+                            ),
                           ),
-                        ),
+                        ],
                       ),
-                ] else ...[
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+
+                  // Summary — sadece gerçek açıklama varsa göster (ilçe adı gibi kısa değerler atlanır)
+                  if (place.shortSummary.length > 25) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE8ECF0)),
+                      ),
+                      child: Text(
+                        place.shortSummary,
+                        style: const TextStyle(fontSize: 15, height: 1.5),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
+                  if (_relatedEvents.isNotEmpty) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            context.tr(
+                              'Bu İlde Etkinlikler',
+                              'Events in This Province',
+                            ),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            height: 134,
+                            child: ListView.separated(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: _relatedEvents.length,
+                              separatorBuilder: (_, _) =>
+                                  const SizedBox(width: 10),
+                              itemBuilder: (context, index) {
+                                final event = _relatedEvents[index];
+                                return SizedBox(
+                                  width: 220,
+                                  child: InkWell(
+                                    onTap: () => context.push(
+                                      '/local-hub',
+                                      extra: {
+                                        'province_slug': place.provinceSlug,
+                                        'event_id': event.id,
+                                      },
+                                    ),
+                                    borderRadius: BorderRadius.circular(16),
+                                    child: Container(
+                                      padding: const EdgeInsets.all(14),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFF8FAFC),
+                                        borderRadius: BorderRadius.circular(16),
+                                        border: Border.all(
+                                          color: const Color(0xFFE2E8F0),
+                                        ),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            event.name,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w800,
+                                              color: Color(0xFF0F172A),
+                                              height: 1.2,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Text(
+                                            [
+                                              if ((event.district ?? '')
+                                                  .isNotEmpty)
+                                                event.district!,
+                                              _eventMonthRange(event),
+                                            ].join(' • '),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Color(0xFF475569),
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                          const Spacer(),
+                                          const Text(
+                                            'Local hub içinde aç',
+                                            style: TextStyle(
+                                              color: Color(0xFF0B3B68),
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
+                  // Source attribution
+                  _SourceBadge(place: place),
                   const SizedBox(height: 12),
+                  if (_trustMetric != null) ...[
+                    _TrustCard(metric: _trustMetric!, live: _liveStatus),
+                    const SizedBox(height: 12),
+                  ],
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       color: const Color(0xFFF8FAFC),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFE8ECF0)),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
                     ),
-                    child: const Text(
-                      'Henüz topluluk yorumu yok. İlk yorumu sen bırak!',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Color(0xFF64748B)),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 54,
+                          height: 54,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFF7ED),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Center(
+                            child: Text(
+                              ((_stats?.avgRating ?? 0) > 0)
+                                  ? _stats!.avgRating.toStringAsFixed(1)
+                                  : '-',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 20,
+                                color: Color(0xFFD97706),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Routevia Topluluk Skoru',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 15,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                _summaryText(_stats),
+                                style: const TextStyle(
+                                  color: Color(0xFF475569),
+                                  height: 1.4,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-                const SizedBox(height: 24),
-                const AdBannerWidget(),
-                const SizedBox(height: 32),
-              ]),
+                  const SizedBox(height: 12),
+                  if (_photos.isNotEmpty) ...[
+                    SizedBox(
+                      height: 160,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: _photos.length,
+                        separatorBuilder: (_, _) => const SizedBox(width: 10),
+                        itemBuilder: (context, index) {
+                          final photo = _photos[index];
+                          return ClipRRect(
+                            borderRadius: BorderRadius.circular(14),
+                            child: Stack(
+                              children: [
+                                SizedBox(
+                                  width: 220,
+                                  child: SafeNetworkImage(
+                                    url: photo.imageUrl,
+                                    fit: BoxFit.cover,
+                                    imageSize: ImageSize.thumbnail,
+                                  ),
+                                ),
+                                if (!photo.isApproved)
+                                  Positioned(
+                                    left: 8,
+                                    right: 8,
+                                    bottom: 8,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black87,
+                                        borderRadius: BorderRadius.circular(
+                                          999,
+                                        ),
+                                      ),
+                                      child: Text(
+                                        photo.status == 'pending'
+                                            ? 'Onay bekliyor'
+                                            : 'Gizlendi',
+                                        textAlign: TextAlign.center,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
+                  // ── Similar places ─────────────────────────────────
+                  if (_similarPlaces.isNotEmpty) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            context.tr('Yakınındaki Benzer Yerler', 'Similar Nearby Places'),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 15,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            height: 120,
+                            child: ListView.separated(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: _similarPlaces.length,
+                              separatorBuilder: (_, _) => const SizedBox(width: 10),
+                              itemBuilder: (context, i) {
+                                final sp = _similarPlaces[i];
+                                final spCat = _styleOf(sp.category);
+                                return GestureDetector(
+                                  onTap: () => context.push('/place', extra: sp),
+                                  child: SizedBox(
+                                    width: 150,
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(14),
+                                      child: Stack(
+                                        fit: StackFit.expand,
+                                        children: [
+                                          PlacePexelsImage(
+                                            placeName: sp.name,
+                                            provinceName: sp.provinceName ?? '',
+                                            category: sp.category,
+                                            fit: BoxFit.cover,
+                                            fallbackWidget: Container(
+                                              color: spCat.color.withValues(alpha: 0.15),
+                                              child: Icon(spCat.icon, size: 32, color: spCat.color.withValues(alpha: 0.5)),
+                                            ),
+                                          ),
+                                          const DecoratedBox(
+                                            decoration: BoxDecoration(
+                                              gradient: LinearGradient(
+                                                begin: Alignment.topCenter,
+                                                end: Alignment.bottomCenter,
+                                                colors: [Colors.transparent, Color(0xB3000000)],
+                                                stops: [0.4, 1.0],
+                                              ),
+                                            ),
+                                          ),
+                                          Positioned(
+                                            left: 8,
+                                            right: 8,
+                                            bottom: 8,
+                                            child: Text(
+                                              sp.name,
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w700,
+                                                height: 1.2,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
+                  // Stats row
+                  if (_stats != null) ...[
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        if (_stats!.familyCount > 0)
+                          _StatChip(
+                            Icons.family_restroom,
+                            'Aile Dostu',
+                            _stats!.familyCount,
+                          ),
+                        if (_stats!.photoSpotCount > 0)
+                          _StatChip(
+                            Icons.camera_alt,
+                            'Foto Noktası',
+                            _stats!.photoSpotCount,
+                          ),
+                        if (_stats!.sunsetWorthyCount > 0)
+                          _StatChip(
+                            Icons.wb_twilight,
+                            'Gün Batımı',
+                            _stats!.sunsetWorthyCount,
+                          ),
+                        if (_stats!.crowdedCount > 0)
+                          _StatChip(
+                            Icons.groups,
+                            'Kalabalık',
+                            _stats!.crowdedCount,
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
+                  // Tags
+                  if (place.tags.isNotEmpty) ...[
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: place.tags
+                          .map(
+                            (t) => Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 5,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF1F5F9),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                '#$t',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF64748B),
+                                ),
+                              ),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Content sections
+                  _SectionCard(
+                    icon: Icons.history_edu,
+                    title: 'Tarih',
+                    items: place.historyBullets,
+                    color: const Color(0xFFF57F17),
+                  ),
+                  _SectionCard(
+                    icon: Icons.restaurant_menu,
+                    title: 'Yeme / İçme',
+                    items: place.eatDrinkBullets,
+                    color: const Color(0xFFD84315),
+                  ),
+                  _SectionCard(
+                    icon: Icons.lightbulb_outline,
+                    title: 'İpuçları',
+                    items: place.tipsBullets,
+                    color: RouteviaColors.accent,
+                  ),
+
+                  const SizedBox(height: 20),
+                  const Divider(),
+                  const SizedBox(height: 12),
+
+                  // Review section
+                  const Text(
+                    'Değerlendirme Yap',
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+                  ),
+                  const SizedBox(height: 12),
+                  if (!_isLoggedIn) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEEF6FF),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFBFDBFE)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.lock_outline_rounded,
+                            color: Color(0xFF1D4ED8),
+                          ),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: Text(
+                              'Yorum, puan, check-in ve favori icin giris gerekli.',
+                              style: TextStyle(
+                                color: Color(0xFF1E3A8A),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () => context.push('/auth'),
+                            child: const Text('Giris Yap'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  const Text(
+                    'Puanın',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(5, (i) {
+                      final starValue = i + 1;
+                      return GestureDetector(
+                        onTap: () => setState(() => _rating = starValue),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: TweenAnimationBuilder<double>(
+                            tween: Tween(
+                              begin: 0.8,
+                              end: starValue <= _rating ? 1.15 : 1.0,
+                            ),
+                            duration: const Duration(milliseconds: 200),
+                            curve: Curves.elasticOut,
+                            builder: (ctx, scale, child) =>
+                                Transform.scale(scale: scale, child: child),
+                            child: Icon(
+                              starValue <= _rating
+                                  ? Icons.star_rounded
+                                  : Icons.star_outline_rounded,
+                              size: 40,
+                              color: starValue <= _rating
+                                  ? const Color(0xFFF59E0B)
+                                  : const Color(0xFFCBD5E1),
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
+                  const SizedBox(height: 6),
+                  Center(
+                    child: Text(
+                      _ratingLabel(_rating),
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF0B3B68),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+
+                  // Quick flags
+                  const Text(
+                    'Hızlı Etiketler',
+                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children:
+                        [
+                              'crowded',
+                              'family',
+                              'quiet',
+                              'photo_spot',
+                              'budget',
+                              'sunset_worthy',
+                            ]
+                            .map(
+                              (f) => FilterChip(
+                                label: Text(_flagLabel(f)),
+                                selected: _flags.contains(f),
+                                onSelected: (on) => setState(() {
+                                  if (on) {
+                                    _flags.add(f);
+                                  } else {
+                                    _flags.remove(f);
+                                  }
+                                }),
+                              ),
+                            )
+                            .toList(),
+                  ),
+                  const SizedBox(height: 10),
+
+                  TextField(
+                    controller: _commentController,
+                    maxLines: 3,
+                    maxLength: 240,
+                    decoration: const InputDecoration(
+                      labelText: 'Kısa yorum',
+                      hintText: 'Manzara harika, akşamüstü gidin.',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  FilledButton.icon(
+                    onPressed: _posting ? null : _submitReview,
+                    icon: Icon(
+                      _posting ? Icons.hourglass_top : Icons.send,
+                      size: 18,
+                    ),
+                    label: Text(_posting ? 'Kaydediliyor...' : 'Yorumu Kaydet'),
+                  ),
+
+                  // Community reviews
+                  if ((_stats?.recentReviews.length ?? 0) > 0) ...[
+                    const SizedBox(height: 20),
+                    const Text(
+                      'Topluluk Yorumları',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ...(List<PlaceReviewModel>.from(_stats!.recentReviews)
+                          ..sort(
+                            (a, b) =>
+                                b.reviewerScore.compareTo(a.reviewerScore),
+                          ))
+                        .map(
+                          (r) => Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: const Color(0xFFE8ECF0),
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    ...List.generate(
+                                      r.rating.clamp(0, 5),
+                                      (_) => const Icon(
+                                        Icons.star,
+                                        size: 16,
+                                        color: Color(0xFFF57F17),
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    _TrustBadge(level: r.trustLevel),
+                                    const SizedBox(width: 8),
+                                    if (r.createdAt != null)
+                                      Text(
+                                        '${r.createdAt!.day}.${r.createdAt!.month}.${r.createdAt!.year}',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.grey.shade500,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                if (r.commentShort.isNotEmpty) ...[
+                                  const SizedBox(height: 6),
+                                  Text(r.commentShort),
+                                ],
+                                if (r.status != 'approved') ...[
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    r.status == 'pending'
+                                        ? 'Moderasyon bekliyor'
+                                        : 'Görünürlüğü kısıtlandı',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFFD97706),
+                                    ),
+                                  ),
+                                ],
+                                if (r.flags.isNotEmpty) ...[
+                                  const SizedBox(height: 6),
+                                  Wrap(
+                                    spacing: 4,
+                                    children: r.flags
+                                        .map(
+                                          (f) => Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 2,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFFE0F2FE),
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                            ),
+                                            child: Text(
+                                              _flagLabel(f),
+                                              style: const TextStyle(
+                                                fontSize: 11,
+                                                color: Color(0xFF0369A1),
+                                              ),
+                                            ),
+                                          ),
+                                        )
+                                        .toList(),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                  ] else ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFE8ECF0)),
+                      ),
+                      child: const Text(
+                        'Henüz topluluk yorumu yok. İlk yorumu sen bırak!',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Color(0xFF64748B)),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  // ── Trip.com affiliate card ───────────────────────────
+                  TripComCard(
+                    provinceName: place.provinceName ?? '',
+                    districtName: place.districtName,
+                  ),
+                  const SizedBox(height: 16),
+                ]),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
+  }
+
+  String _eventMonthRange(EventModel event) {
+    const tr = [
+      '',
+      'Ocak',
+      'Şubat',
+      'Mart',
+      'Nisan',
+      'Mayıs',
+      'Haziran',
+      'Temmuz',
+      'Ağustos',
+      'Eylül',
+      'Ekim',
+      'Kasım',
+      'Aralık',
+    ];
+    const en = [
+      '',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    final months = context.isEnglish ? en : tr;
+    if (event.monthStart == event.monthEnd) {
+      return months[event.monthStart];
+    }
+    return '${months[event.monthStart]} - ${months[event.monthEnd]}';
   }
 
   Widget _infoBadge(IconData icon, String text, Color color) {

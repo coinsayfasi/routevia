@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/error_utils.dart';
 import '../../data/providers.dart';
 
 class ResetPasswordScreen extends ConsumerStatefulWidget {
@@ -63,7 +64,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      _snack('Hata: ${e.toString()}');
+      _snack(friendlyError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

@@ -200,6 +200,7 @@
 				97C146EC1CF9000F007C117D /* Resources */,
 				9705A1C41CF9048500538489 /* Embed Frameworks */,
 				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
+				A4E2F6B8C1D3E5F7A4E2F6B8 /* Strip Simulator Archs */,
 				C81A705DC3B94177888D2B48 /* [firebase_crashlytics] Crashlytics Upload dSYM */,
 				98CBC3D5238CE130E0714A11 /* [CP] Copy Pods Resources */,
 			);
@@ -274,6 +275,21 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		A4E2F6B8C1D3E5F7A4E2F6B8 /* Strip Simulator Archs */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Strip Simulator Archs";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Remove simulator-only (x86_64/i386, no arm64) frameworks from the app bundle.\n# These are Dart FFI stubs not needed on real devices (e.g. objective_c.framework).\n# Fixes ITMS-91169 / ITMS-90087 / ITMS-90203.\nFRAMEWORKS_DIR=\"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}\"\nif [ ! -d \"$FRAMEWORKS_DIR\" ]; then exit 0; fi\nfind \"$FRAMEWORKS_DIR\" -name \"*.framework\" -type d | while read -r FW; do\n  FW_NAME=$(basename \"$FW\" .framework)\n  FW_EXEC=\"$FW/$FW_NAME\"\n  if [ ! -f \"$FW_EXEC\" ]; then continue; fi\n  ARCHS=$(lipo -archs \"$FW_EXEC\" 2>/dev/null || true)\n  HAS_ARM64=$(echo \"$ARCHS\" | grep -cw arm64 || true)\n  HAS_X86=$(echo \"$ARCHS\" | grep -cw x86_64 || true)\n  if [ \"$HAS_ARM64\" -eq 0 ] && [ \"$HAS_X86\" -gt 0 ]; then\n    echo \"Removing simulator-only framework: $FW_NAME\"\n    rm -rf \"$FW\"\n  elif [ \"$HAS_ARM64\" -gt 0 ] && [ \"$HAS_X86\" -gt 0 ]; then\n    echo \"Stripping x86_64 from: $FW_NAME\"\n    lipo -remove x86_64 \"$FW_EXEC\" -o \"$FW_EXEC.tmp\" && mv \"$FW_EXEC.tmp\" \"$FW_EXEC\"\n  fi\ndone\n";
+		};
 		3B06AD1E1E4923F5004D2608 /* Thin Binary */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
@@ -706,8 +722,8 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGN_IDENTITY = "Apple Development";
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "Apple Distribution";
+				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				DEVELOPMENT_TEAM = A6KKZ4WJ49;
 				ENABLE_BITCODE = NO;
@@ -718,7 +734,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.yunusgunes.routevia;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				PROVISIONING_PROFILE_SPECIFIER = "";
+				PROVISIONING_PROFILE_SPECIFIER = "Routevia App Store";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";

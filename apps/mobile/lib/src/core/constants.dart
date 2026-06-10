@@ -23,6 +23,10 @@ class AppConstants {
   static const supportEmail = 'routevia@tabserve.com.tr';
   static const playStoreUrl =
       'https://play.google.com/store/apps/details?id=com.yunusgunes.routevia';
+  static const appStoreUrl = String.fromEnvironment(
+    'APP_STORE_URL',
+    defaultValue: 'https://apps.apple.com/app/routevia/id6761003117',
+  );
   static const adminAllowedEmails = String.fromEnvironment(
     'ADMIN_ALLOWED_EMAILS',
     defaultValue: '',

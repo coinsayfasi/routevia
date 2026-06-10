@@ -56,6 +56,8 @@
 		</array>
 		<key>CADisableMinimumFrameDurationOnPhone</key>
 		<true/>
+		<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+		<string>Routevia yakinindaki rotalari ve canli kesif onerilerini gostermek icin konumunu kullanir.</string>
 		<key>NSLocationWhenInUseUsageDescription</key>
 		<string>Routevia yakinindaki rotalari ve canli kesif onerilerini gostermek icin konumunu kullanir.</string>
 		<key>UIApplicationSupportsIndirectInputEvents</key>
@@ -64,7 +66,36 @@
 		<true/>
 		<key>UIViewControllerBasedStatusBarAppearance</key>
 		<false/>
-		<key>GADApplicationIdentifier</key>
+		<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>upload.wikimedia.org</key>
+			<dict>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+				<key>NSExceptionMinimumTLSVersion</key>
+				<string>TLSv1.2</string>
+				<key>NSExceptionRequiresForwardSecrecy</key>
+				<false/>
+			</dict>
+			<key>images.pexels.com</key>
+			<dict>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+				<key>NSExceptionMinimumTLSVersion</key>
+				<string>TLSv1.2</string>
+			</dict>
+			<key>en.wikipedia.org</key>
+			<dict>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+				<key>NSExceptionMinimumTLSVersion</key>
+				<string>TLSv1.2</string>
+			</dict>
+		</dict>
+	</dict>
+	<key>GADApplicationIdentifier</key>
 		<string>ca-app-pub-7579691213276550~3433133762</string>
 		<key>NSUserTrackingUsageDescription</key>
 		<string>Routevia, sana daha uygun icerik ve oneriler sunmak icin reklam kimligini kullanmak ister.</string>

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:firebase_core/firebase_core.dart';
@@ -12,11 +13,33 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   } catch (_) {}
 }
 
+/// Returns true if [error] is a transient network/IO error that should NOT
+/// be treated as a fatal crash (tile aborts, socket resets, TLS handshakes).
+bool _isNetworkError(Object error) {
+  final msg = error.toString().toLowerCase();
+  return error is SocketException ||
+      msg.contains('clientexception') ||
+      msg.contains('connection abort') ||
+      msg.contains('connection reset') ||
+      msg.contains('broken pipe') ||
+      msg.contains('connection closed') ||
+      msg.contains('handshakeexception') ||
+      msg.contains('tlsexception') ||
+      msg.contains('software caused') ||
+      msg.contains('socketexception') ||
+      msg.contains('network is unreachable') ||
+      msg.contains('failed host lookup') ||
+      msg.contains('connection timed out') ||
+      msg.contains('tile.openstreetmap.org');
+}
+
 class FirebaseRuntime {
   FirebaseRuntime._();
 
   static bool _initialized = false;
   static bool get isInitialized => _initialized;
+  // Stored so we can cancel if registerPushIfAllowed is called again.
+  static StreamSubscription<String>? _tokenRefreshSub;
 
   static Future<void> initialize() async {
     if (_initialized || kIsWeb) return;
@@ -24,10 +47,15 @@ class FirebaseRuntime {
       await Firebase.initializeApp();
       FlutterError.onError = (details) {
         FlutterError.presentError(details);
-        FirebaseCrashlytics.instance.recordFlutterFatalError(details);
+        if (_isNetworkError(details.exception)) {
+          FirebaseCrashlytics.instance.recordFlutterError(details, fatal: false);
+        } else {
+          FirebaseCrashlytics.instance.recordFlutterFatalError(details);
+        }
       };
       PlatformDispatcher.instance.onError = (error, stack) {
-        FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+        final fatal = !_isNetworkError(error);
+        FirebaseCrashlytics.instance.recordError(error, stack, fatal: fatal);
         return true;
       };
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
@@ -82,12 +110,17 @@ class FirebaseRuntime {
       if (token != null && token.isNotEmpty) {
         await upsertToken(token);
       }
-      FirebaseMessaging.instance.onTokenRefresh.listen((token) async {
-        if (token.isEmpty) return;
-        try {
-          await upsertToken(token);
-        } catch (_) {}
-      });
+
+      // Cancel previous listener before registering a new one to prevent leaks.
+      await _tokenRefreshSub?.cancel();
+      _tokenRefreshSub = FirebaseMessaging.instance.onTokenRefresh.listen(
+        (t) async {
+          if (t.isEmpty) return;
+          try {
+            await upsertToken(t);
+          } catch (_) {}
+        },
+      );
     } catch (error) {
       debugPrint('[firebase] push registration skipped: $error');
     }

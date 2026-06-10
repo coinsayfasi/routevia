@@ -7,9 +7,7 @@ import '../../core/i18n.dart';
 import '../../data/providers.dart';
 
 class OnboardingScreen extends ConsumerStatefulWidget {
-  const OnboardingScreen({super.key, this.prefillReferralCode});
-
-  final String? prefillReferralCode;
+  const OnboardingScreen({super.key});
 
   @override
   ConsumerState<OnboardingScreen> createState() => _OnboardingScreenState();
@@ -21,7 +19,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   String _pace = 'Orta';
   bool _allowLocation = false;
   bool _allowNotifications = false;
-  final TextEditingController _refController = TextEditingController();
   bool _saving = false;
 
   static const _allTags = [
@@ -37,16 +34,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   ];
 
   @override
-  void initState() {
-    super.initState();
-    if (widget.prefillReferralCode != null) {
-      _refController.text = widget.prefillReferralCode!;
-    }
-  }
-
-  @override
   void dispose() {
-    _refController.dispose();
     super.dispose();
   }
 
@@ -88,28 +76,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     setState(() => _saving = true);
     try {
       final repo = ref.read(repositoryProvider);
-      final refCode = _refController.text.trim();
-      if (refCode.isNotEmpty &&
-          !RegExp(r'^[A-Z0-9]{8}$').hasMatch(refCode.toUpperCase())) {
-        throw Exception(
-          context.tr(
-            'Davet kodu 8 karakterli olmalı.',
-            'Invite code must be 8 characters.',
-          ),
-        );
-      }
-      if (refCode.isNotEmpty) {
-        final isValid = await repo.validateReferralCode(refCode);
-        if (!mounted) return;
-        if (!isValid) {
-          throw Exception(
-            context.tr(
-              'Davet kodu geçersiz veya bulunamadı.',
-              'Invite code is invalid or was not found.',
-            ),
-          );
-        }
-      }
 
       Future<void> completeOnboardingFlow() async {
         await repo.completeOnboarding(
@@ -135,20 +101,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       // Mark onboarding as completed locally so home screen doesn't re-redirect
       // even if the remote profile read returns stale data.
       await ref.read(localCacheProvider).setOnboardingCompleted(true);
-
-      if (refCode.isNotEmpty) {
-        try {
-          await repo.redeemReferral(refCode);
-        } catch (error) {
-          final raw = error.toString().toLowerCase();
-          if (raw.contains('invalid jwt') || raw.contains('unauthorized')) {
-            await repo.client.auth.refreshSession();
-            await repo.redeemReferral(refCode);
-          } else {
-            rethrow;
-          }
-        }
-      }
 
       if (!mounted) return;
       if (_allowLocation) {
@@ -335,17 +287,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               ],
               selected: {_pace},
               onSelectionChanged: (v) => setState(() => _pace = v.first),
-            ),
-            const SizedBox(height: 20),
-            TextField(
-              controller: _refController,
-              maxLength: 8,
-              decoration: InputDecoration(
-                labelText: context.tr('Davet Kodu (Opsiyonel)', 'Invite Code (Optional)'),
-                hintText: context.tr('Örn: AB12CD34', 'Ex: AB12CD34'),
-                counterText: '',
-              ),
-              textCapitalization: TextCapitalization.characters,
             ),
           ],
         );

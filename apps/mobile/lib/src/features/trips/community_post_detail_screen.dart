@@ -1,7 +1,11 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:share_plus/share_plus.dart';
 
+import '../../core/constants.dart';
 import '../../core/error_utils.dart';
 import '../../core/i18n.dart';
 import '../../core/widgets/safe_network_image.dart';
@@ -132,6 +136,17 @@ class _CommunityPostDetailScreenState
     );
   }
 
+  Future<void> _sharePost() async {
+    final post = _post;
+    if (post == null) return;
+    final deepLink = 'https://routevia.app/community-post/${post.id}';
+    final storeUrl = Platform.isIOS
+        ? AppConstants.appStoreUrl
+        : AppConstants.playStoreUrl;
+    final text = '${post.title}\n$deepLink\n\nRoutevia ile keşfet: $storeUrl';
+    await SharePlus.instance.share(ShareParams(text: text));
+  }
+
   Future<void> _toggleAuthorBlock() async {
     final post = _post;
     if (post == null) return;
@@ -189,6 +204,12 @@ class _CommunityPostDetailScreenState
       appBar: AppBar(
         title: Text(context.tr('Topluluk Yazısı', 'Community Post')),
         actions: [
+          if (post != null && post.isApproved)
+            IconButton(
+              onPressed: _sharePost,
+              icon: const Icon(Icons.share_outlined),
+              tooltip: context.tr('Paylaş', 'Share'),
+            ),
           if (canEdit)
             IconButton(
               onPressed: () async {

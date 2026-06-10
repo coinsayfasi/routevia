@@ -1,7 +1,11 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/constants.dart';
 import '../../core/error_utils.dart';
@@ -22,10 +26,12 @@ class _TripsScreenState extends ConsumerState<TripsScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
   final ScrollController _communityScrollController = ScrollController();
+  RealtimeChannel? _realtimeChannel;
 
   bool _loadingMine = true;
   bool _loadingCommunity = true;
   bool _loadingMoreCommunity = false;
+  bool _isOfflineFallback = false;
   String? _mineError;
   String? _communityError;
   List<Map<String, dynamic>> _trips = const [];
@@ -48,10 +54,31 @@ class _TripsScreenState extends ConsumerState<TripsScreen>
     _communityScrollController.addListener(_onCommunityScroll);
     _loadMine();
     _loadCommunity(reset: true);
+    _subscribeRealtime();
+  }
+
+  void _subscribeRealtime() {
+    _realtimeChannel = Supabase.instance.client
+        .channel('community_posts_feed')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'community_posts',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'status',
+            value: 'approved',
+          ),
+          callback: (_) {
+            if (mounted) _loadCommunity(reset: true);
+          },
+        )
+        .subscribe();
   }
 
   @override
   void dispose() {
+    _realtimeChannel?.unsubscribe();
     _tabController.dispose();
     _communityScrollController
       ..removeListener(_onCommunityScroll)
@@ -72,21 +99,37 @@ class _TripsScreenState extends ConsumerState<TripsScreen>
     setState(() {
       _loadingMine = true;
       _mineError = null;
+      _isOfflineFallback = false;
     });
     try {
       final repo = ref.read(repositoryProvider);
-      final results = await Future.wait([
-        repo.listMyTrips(),
-        repo.listMyCommunityPosts(),
-      ]);
+      final trips = await repo.listMyTrips();
+      // Community posts are isolated: a failure here must NOT block My Routes.
+      List<CommunityPostModel> posts = const [];
+      try {
+        posts = await repo.listMyCommunityPosts();
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
-        _trips = results[0] as List<Map<String, dynamic>>;
-        _myPosts = results[1] as List<CommunityPostModel>;
+        _trips = trips;
+        _myPosts = posts;
         _loadingMine = false;
       });
     } catch (e) {
       if (!mounted) return;
+      // Try local cache fallback
+      try {
+        final cached = await ref.read(localCacheProvider).readTripHistory();
+        if (!mounted) return;
+        if (cached.isNotEmpty) {
+          setState(() {
+            _trips = cached;
+            _isOfflineFallback = true;
+            _loadingMine = false;
+          });
+          return;
+        }
+      } catch (_) {}
       setState(() {
         _mineError = friendlyError(e);
         _loadingMine = false;
@@ -113,6 +156,27 @@ class _TripsScreenState extends ConsumerState<TripsScreen>
             offset: reset ? 0 : _communityOffset,
           );
       if (!mounted) return;
+      if (reset && items.isNotEmpty) {
+        // Cache the first page for offline fallback
+        final rawMaps = items
+            .map((p) => {
+                  'id': p.id,
+                  'title': p.title,
+                  'summary': p.summary,
+                  'city': p.city,
+                  'country': p.country,
+                  'post_type': p.postType,
+                  'status': p.status,
+                  'estimated_read_minutes': p.estimatedReadMinutes,
+                  'submitter_name': p.submitterName,
+                  'cover_image_url': p.coverImageUrl,
+                  'tags': p.tags,
+                  'published_at': p.publishedAt?.toIso8601String(),
+                  'created_at': p.createdAt?.toIso8601String(),
+                })
+            .toList();
+        unawaited(ref.read(localCacheProvider).saveCommunityFeed(rawMaps));
+      }
       setState(() {
         if (reset) {
           _communityPosts = items;
@@ -126,6 +190,25 @@ class _TripsScreenState extends ConsumerState<TripsScreen>
       });
     } catch (e) {
       if (!mounted) return;
+      // Offline fallback: show cached posts if available
+      if (reset) {
+        try {
+          final cached = await ref.read(localCacheProvider).readCommunityFeed();
+          if (!mounted) return;
+          if (cached != null && cached.isNotEmpty) {
+            final posts = cached
+                .map((m) => CommunityPostModel.fromMap(m))
+                .toList();
+            setState(() {
+              _communityPosts = posts;
+              _communityOffset = posts.length;
+              _hasMoreCommunity = false;
+              _loadingCommunity = false;
+            });
+            return;
+          }
+        } catch (_) {}
+      }
       setState(() {
         _communityError = friendlyError(e);
         _loadingCommunity = false;
@@ -138,18 +221,16 @@ class _TripsScreenState extends ConsumerState<TripsScreen>
     try {
       final token = await ref.read(repositoryProvider).createShareToken(tripId);
       if (!mounted) return;
+      final shareUrl = '${AppConstants.supabaseUrl}/functions/v1/og_share?token=$token';
       await SharePlus.instance.share(
         ShareParams(
-          text:
-              'Routevia\'da hazırladığım rotaya göz at!\n'
-              'Uygulamada aç: routevia://share/$token\n'
-              'Paylaşım kodu: $token\n'
-              'Uygulamayı indir: ${AppConstants.playStoreUrl}',
+          text: 'Routevia\'da hazırladığım rotaya göz at! 🗺️\n$shareUrl',
         ),
       );
     } catch (_) {
+      if (!mounted) return;
       await SharePlus.instance.share(
-        ShareParams(text: AppConstants.playStoreUrl),
+        ShareParams(text: Platform.isIOS ? AppConstants.appStoreUrl : AppConstants.playStoreUrl),
       );
     }
   }
@@ -318,9 +399,10 @@ class _TripsScreenState extends ConsumerState<TripsScreen>
       return t['title'] as String;
     }
     final province = (t['province'] as Map?) ?? const {};
-    final provinceName = province['name'] as String? ?? 'Rota';
+    final provinceName = province['name'] as String? ?? context.tr('Rota', 'Route');
     final days = t['days'];
-    return '$provinceName • $days ${days == 1 ? 'gün' : 'gün'}';
+    final dayWord = context.isEnglish ? (days == 1 ? 'day' : 'days') : 'gün';
+    return '$provinceName • $days $dayWord';
   }
 
   String _formatTripDate(String? raw) {
@@ -366,7 +448,7 @@ class _TripsScreenState extends ConsumerState<TripsScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Gezilerim'),
+        title: Text(context.tr('Gezilerim', 'My Trips')),
         bottom: TabBar(
           controller: _tabController,
           tabs: [
@@ -472,6 +554,53 @@ class _TripsScreenState extends ConsumerState<TripsScreen>
             ),
           ),
           const SizedBox(height: 10),
+          if (_isOfflineFallback)
+            Container(
+              margin: const EdgeInsets.fromLTRB(0, 0, 0, 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF3CD),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: const Color(0xFFFFD600).withValues(alpha: 0.6),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.wifi_off_rounded,
+                    size: 16,
+                    color: Color(0xFF856404),
+                  ),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Çevrimdışı — önbellekten gösteriliyor',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF856404),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      setState(() => _isOfflineFallback = false);
+                      _loadMine();
+                    },
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text(
+                      'Yenile',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF856404)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           if (_trips.isEmpty)
             _EmptyPanel(
               icon: Icons.map_outlined,
@@ -795,7 +924,7 @@ class _TripCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
-                    isLocal ? 'Şablon' : 'Hesapta',
+                    isLocal ? context.tr('Şablon', 'Template') : context.tr('Hesapta', 'Saved'),
                     style: TextStyle(
                       color: isLocal
                           ? const Color(0xFF1D4ED8)
@@ -819,7 +948,7 @@ class _TripCard extends StatelessWidget {
                   child: OutlinedButton.icon(
                     onPressed: deleting ? null : onShare,
                     icon: const Icon(Icons.share_outlined, size: 18),
-                    label: const Text('Paylaş'),
+                    label: Text(context.tr('Paylaş', 'Share')),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -839,7 +968,7 @@ class _TripCard extends StatelessWidget {
                             ),
                           )
                         : const Icon(Icons.delete_outline, size: 18),
-                    label: const Text('Sil'),
+                    label: Text(context.tr('Sil', 'Delete')),
                   ),
                 ),
               ],
@@ -891,7 +1020,7 @@ class _MyPostCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    post.title.isEmpty ? 'İsimsiz taslak' : post.title,
+                    post.title.isEmpty ? context.tr('İsimsiz taslak', 'Untitled draft') : post.title,
                     style: const TextStyle(
                       fontWeight: FontWeight.w800,
                       fontSize: 17,
@@ -952,7 +1081,7 @@ class _MyPostCard extends StatelessWidget {
                           : Icons.edit_outlined,
                       size: 18,
                     ),
-                    label: Text(onEdit == null ? 'Görüntüle' : 'Düzenle'),
+                    label: Text(onEdit == null ? context.tr('Görüntüle', 'View') : context.tr('Düzenle', 'Edit')),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -972,7 +1101,7 @@ class _MyPostCard extends StatelessWidget {
                             ),
                           )
                         : const Icon(Icons.delete_outline, size: 18),
-                    label: const Text('Sil'),
+                    label: Text(context.tr('Sil', 'Delete')),
                   ),
                 ),
               ],
@@ -1034,15 +1163,15 @@ class _CommunityFeedCard extends StatelessWidget {
                     children: [
                       _FeedPill(
                         label: post.postType == 'guide'
-                            ? 'Mini Rehber'
-                            : 'Hikâye',
+                            ? context.tr('Mini Rehber', 'Mini Guide')
+                            : context.tr('Hikâye', 'Story'),
                       ),
                       _FeedPill(
                         label: '${post.city}, ${post.country}',
                         icon: Icons.location_on_outlined,
                       ),
                       _FeedPill(
-                        label: '${post.estimatedReadMinutes} dk',
+                        label: '${post.estimatedReadMinutes} ${context.tr('dk', 'min')}',
                         icon: Icons.schedule_outlined,
                       ),
                     ],
@@ -1071,7 +1200,7 @@ class _CommunityFeedCard extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          post.submitterName ?? 'Routevia gezgini',
+                          post.submitterName ?? context.tr('Routevia gezgini', 'Routevia traveler'),
                           style: const TextStyle(
                             color: Color(0xFF0F172A),
                             fontWeight: FontWeight.w700,

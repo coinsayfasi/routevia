@@ -10,34 +10,37 @@ import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../core/i18n.dart';
 import '../../core/theme.dart';
 import '../../core/widgets/glass_panel.dart';
+import '../../core/widgets/place_pexels_image.dart';
 import '../../core/widgets/safe_network_image.dart';
 import '../../data/providers.dart';
 import '../../models/trip_models.dart';
 
 // ─── Category Styling ───────────────────────────────────────────────
 class _CategoryStyle {
-  const _CategoryStyle(this.color, this.icon, this.label);
+  const _CategoryStyle(this.color, this.icon, this.label, this.labelEn);
   final Color color;
   final IconData icon;
   final String label;
+  final String labelEn;
 }
 
 const _categoryStyles = <String, _CategoryStyle>{
-  'museum':     _CategoryStyle(Color(0xFF1565C0), Icons.museum,            'Müze'),
-  'historical': _CategoryStyle(Color(0xFFF57F17), Icons.account_balance,   'Tarihi'),
-  'nature':     _CategoryStyle(Color(0xFF2E7D32), Icons.park,              'Doğa'),
-  'beach':      _CategoryStyle(Color(0xFF0097A7), Icons.beach_access,      'Plaj'),
-  'viewpoint':  _CategoryStyle(Color(0xFF00897B), Icons.panorama,          'Manzara'),
-  'food':       _CategoryStyle(Color(0xFFD84315), Icons.restaurant,        'Yemek'),
-  'cafe':       _CategoryStyle(Color(0xFF6D4C41), Icons.coffee,            'Kafe'),
-  'lodging':    _CategoryStyle(Color(0xFF7B1FA2), Icons.hotel,             'Konaklama'),
-  'activity':   _CategoryStyle(Color(0xFF283593), Icons.directions_run,    'Aktivite'),
-  'market':     _CategoryStyle(Color(0xFFC2185B), Icons.shopping_bag,      'Pazar/Çarşı'),
-  'tour':       _CategoryStyle(Color(0xFFE65100), Icons.tour,              'Tur'),
-  'waterfall':  _CategoryStyle(Color(0xFF0288D1), Icons.water_drop,        'Şelale'),
-  'canyon':     _CategoryStyle(Color(0xFF4527A0), Icons.terrain,           'Kanyon'),
+  'museum':     _CategoryStyle(Color(0xFF1565C0), Icons.museum,            'Müze',         'Museum'),
+  'historical': _CategoryStyle(Color(0xFFF57F17), Icons.account_balance,   'Tarihi',       'Historical'),
+  'nature':     _CategoryStyle(Color(0xFF2E7D32), Icons.park,              'Doğa',         'Nature'),
+  'beach':      _CategoryStyle(Color(0xFF0097A7), Icons.beach_access,      'Plaj',         'Beach'),
+  'viewpoint':  _CategoryStyle(Color(0xFF00897B), Icons.panorama,          'Manzara',      'Viewpoint'),
+  'food':       _CategoryStyle(Color(0xFFD84315), Icons.restaurant,        'Yemek',        'Food'),
+  'cafe':       _CategoryStyle(Color(0xFF6D4C41), Icons.coffee,            'Kafe',         'Cafe'),
+  'lodging':    _CategoryStyle(Color(0xFF7B1FA2), Icons.hotel,             'Konaklama',    'Lodging'),
+  'activity':   _CategoryStyle(Color(0xFF283593), Icons.directions_run,    'Aktivite',     'Activity'),
+  'market':     _CategoryStyle(Color(0xFFC2185B), Icons.shopping_bag,      'Pazar/Çarşı',  'Market/Bazaar'),
+  'tour':       _CategoryStyle(Color(0xFFE65100), Icons.tour,              'Tur',          'Tour'),
+  'waterfall':  _CategoryStyle(Color(0xFF0288D1), Icons.water_drop,        'Şelale',       'Waterfall'),
+  'canyon':     _CategoryStyle(Color(0xFF4527A0), Icons.terrain,           'Kanyon',       'Canyon'),
 };
 
 // Category → emoji mapping for map markers.
@@ -63,7 +66,7 @@ String _emojiOf(String category) =>
 
 _CategoryStyle _styleOf(String category) =>
     _categoryStyles[category] ??
-    const _CategoryStyle(Color(0xFF78909C), Icons.place, 'Diğer');
+    const _CategoryStyle(Color(0xFF78909C), Icons.place, 'Diğer', 'Other');
 
 // ─── Map Screen ─────────────────────────────────────────────────────
 class MapScreen extends ConsumerStatefulWidget {
@@ -124,6 +127,8 @@ class _MapScreenState extends ConsumerState<MapScreen>
   final _bboxCache = _LruBBoxCache(maxEntries: 24);
   bool _initialPlaceFocusApplied = false;
   String? _selectedExplorePlaceId;
+  // Keeps the tapped place so its card shows even before viewport data loads
+  PlaceModel? _pinnedPlace;
   LatLng? _userLocation;
   // Immediate pin shown before viewport data loads (when navigating from a card tap)
   LatLng? _initialPinLatLng;
@@ -183,9 +188,10 @@ class _MapScreenState extends ConsumerState<MapScreen>
             : widget.initialPlaceId?.trim();
     if (pinnedId == null || pinnedId.isEmpty) return picks;
     final pinned = _filteredPlaces.cast<PlaceModel?>().firstWhere(
-      (candidate) => candidate?.id == pinnedId,
-      orElse: () => null,
-    );
+          (candidate) => candidate?.id == pinnedId,
+          orElse: () => null,
+        ) ??
+        (_pinnedPlace?.id == pinnedId ? _pinnedPlace : null);
     if (pinned == null) return picks;
     final existingIndex = picks.indexWhere((candidate) => candidate.id == pinned.id);
     if (existingIndex >= 0) {
@@ -377,7 +383,10 @@ class _MapScreenState extends ConsumerState<MapScreen>
     bool animatePage = true,
   }) {
     if (!_exploreMode) return;
-    setState(() => _selectedExplorePlaceId = place.id);
+    setState(() {
+      _selectedExplorePlaceId = place.id;
+      _pinnedPlace = place;
+    });
     if (place.lat != null && place.lng != null) {
       _mapController.move(
         LatLng(place.lat!, place.lng!),
@@ -500,7 +509,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
       if (!mounted) return;
       setState(() {
         _offline = true;
-        _error = 'Ağ bağlantısı yok veya veriler alınamadı.';
+        _error = 'Network error or data could not be loaded.';
         _districtFallbackActive = false;
       });
     } finally {
@@ -542,7 +551,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
           permission == LocationPermission.deniedForever) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Konum izni verilmedi.')),
+          SnackBar(content: Text(context.tr('Konum izni verilmedi.', 'Location permission denied.'))),
         );
         return;
       }
@@ -769,7 +778,12 @@ class _MapScreenState extends ConsumerState<MapScreen>
             children: [
               TileLayer(
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.routevia.mobile',
+                userAgentPackageName: 'com.yunusgunes.routevia',
+                // Tile fetch failures (connection abort, timeout, offline) must
+                // NOT propagate as uncaught exceptions — log and continue.
+                errorTileCallback: (tile, error, stackTrace) {
+                  debugPrint('[map] tile error ignored: $error');
+                },
               ),
               if (_exploreMode)
                 MarkerClusterLayerWidget(
@@ -854,7 +868,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
                                   ? '${_effectiveProvinceSlug?.toUpperCase() ?? 'TÜRKİYE'} • $_effectiveDistrictName'
                                   : _effectiveProvinceSlug?.toUpperCase() ??
                                       'TÜRKİYE'
-                              : 'Gün $_selectedDay',
+                              : context.tr('Gün $_selectedDay', 'Day $_selectedDay'),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -865,8 +879,8 @@ class _MapScreenState extends ConsumerState<MapScreen>
                         ),
                         Text(
                           _exploreMode
-                              ? '${_filteredPlaces.length} nokta${_categoryFilters.isEmpty ? '' : ' (filtrelenmiş)'}${_offline ? ' • çevrimdışı' : ''}'
-                              : '${_stops.length} durak',
+                              ? '${_filteredPlaces.length} ${context.tr('nokta', 'spots')}${_categoryFilters.isEmpty ? '' : ' (${context.tr('filtrelenmiş', 'filtered')})'}${_offline ? ' • ${context.tr('çevrimdışı', 'offline')}' : ''}'
+                              : '${_stops.length} ${context.tr('durak', 'stops')}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -883,7 +897,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
                       active: _showLegend,
                       onTap: () =>
                           setState(() => _showLegend = !_showLegend),
-                      tooltip: 'Kategori Rehberi',
+                      tooltip: context.tr('Kategori Rehberi', 'Category Guide'),
                     ),
                     const SizedBox(width: 4),
                     _MapIconButton(
@@ -891,14 +905,14 @@ class _MapScreenState extends ConsumerState<MapScreen>
                       active: _showFilters,
                       onTap: () =>
                           setState(() => _showFilters = !_showFilters),
-                      tooltip: 'Filtreler',
+                      tooltip: context.tr('Filtreler', 'Filters'),
                     ),
                     const SizedBox(width: 4),
                   ],
                   _MapIconButton(
                     icon: Icons.my_location,
                     onTap: _goMyLocation,
-                    tooltip: 'Konumum',
+                    tooltip: context.tr('Konumum', 'My Location'),
                   ),
                 ],
               ),
@@ -917,7 +931,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
                   controller: _searchController,
                   textInputAction: TextInputAction.search,
                   decoration: InputDecoration(
-                    hintText: 'Haritada ara',
+                    hintText: context.tr('Haritada ara', 'Search on map'),
                     icon: const Icon(Icons.search, size: 18),
                     border: InputBorder.none,
                     isDense: true,
@@ -970,7 +984,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
                                   ? style.color
                                   : Colors.grey.shade600),
                           label: Text(
-                            '${ style.label} ($count)',
+                            '${context.isEnglish ? style.labelEn : style.label} ($count)',
                             style: TextStyle(
                               fontSize: 11.5,
                               fontWeight: FontWeight.w600,
@@ -1019,7 +1033,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
                                   size: 16, color: Colors.grey.shade600),
                               const SizedBox(width: 4),
                               Text(
-                                'Tüm filtreleri temizle',
+                                context.tr('Tüm filtreleri temizle', 'Clear all filters'),
                                 style: TextStyle(
                                   fontSize: 12,
                                   color: Colors.grey.shade600,
@@ -1045,9 +1059,9 @@ class _MapScreenState extends ConsumerState<MapScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Kategori Rehberi',
-                      style: TextStyle(
+                    Text(
+                      context.tr('Kategori Rehberi', 'Category Guide'),
+                      style: const TextStyle(
                         fontWeight: FontWeight.w800,
                         fontSize: 13,
                       ),
@@ -1073,7 +1087,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
                             ),
                             const SizedBox(width: 8),
                             Text(
-                              '${style.label} ($count)',
+                              '${context.isEnglish ? style.labelEn : style.label} ($count)',
                               style: const TextStyle(fontSize: 12),
                             ),
                           ],
@@ -1099,16 +1113,16 @@ class _MapScreenState extends ConsumerState<MapScreen>
             Positioned.fill(
               child: Container(
                 color: Colors.black12,
-                child: const Center(
+                child: Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      CircularProgressIndicator(
+                      const CircularProgressIndicator(
                           color: RouteviaColors.accent),
-                      SizedBox(height: 12),
+                      const SizedBox(height: 12),
                       Text(
-                        'Görünür alan yükleniyor...',
-                        style: TextStyle(
+                        context.tr('En güzel yerleri yüklüyoruz, sadece 3 saniye...', 'Loading the best places, just 3 seconds...'),
+                        style: const TextStyle(
                           fontWeight: FontWeight.w600,
                           color: Colors.white,
                         ),
@@ -1149,7 +1163,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
                     FilledButton.icon(
                       onPressed: () => _loadViewportPlaces(force: true),
                       icon: const Icon(Icons.refresh, size: 18),
-                      label: const Text('Tekrar Dene'),
+                      label: Text(context.tr('Tekrar Dene', 'Try Again')),
                     ),
                   ],
                 ),
@@ -1170,10 +1184,13 @@ class _MapScreenState extends ConsumerState<MapScreen>
                     const Icon(Icons.info_outline,
                         size: 18, color: Color(0xFF0B5394)),
                     const SizedBox(width: 8),
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        'Bu ilçede veri az — yakın çevredeki yerler gösteriliyor.',
-                        style: TextStyle(
+                        context.tr(
+                          'Bu ilçede veri az — yakın çevredeki yerler gösteriliyor.',
+                          'Limited data in this district — showing nearby places.',
+                        ),
+                        style: const TextStyle(
                             fontSize: 12.5, fontWeight: FontWeight.w600),
                       ),
                     ),
@@ -1193,14 +1210,17 @@ class _MapScreenState extends ConsumerState<MapScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Bu bölgede henüz içerik bulunmuyor.',
-                      style: TextStyle(fontWeight: FontWeight.w600),
+                    Text(
+                      context.tr('Bu bölgede henüz içerik bulunmuyor.', 'No content found in this area yet.'),
+                      style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 4),
-                    const Text(
-                      'Haritayı kaydırarak yakın il veya ilçeleri keşfedebilirsin.',
-                      style: TextStyle(
+                    Text(
+                      context.tr(
+                        'Haritayı kaydırarak yakın il veya ilçeleri keşfedebilirsin.',
+                        'Scroll the map to explore nearby provinces or districts.',
+                      ),
+                      style: const TextStyle(
                           fontSize: 12.5, color: Color(0xFF64748B)),
                     ),
                     const SizedBox(height: 10),
@@ -1209,12 +1229,12 @@ class _MapScreenState extends ConsumerState<MapScreen>
                         FilledButton.icon(
                           onPressed: () => _loadViewportPlaces(force: true),
                           icon: const Icon(Icons.refresh, size: 18),
-                          label: const Text('Yenile'),
+                          label: Text(context.tr('Yenile', 'Refresh')),
                         ),
                         const SizedBox(width: 8),
                         OutlinedButton(
                           onPressed: () => context.go('/home'),
-                          child: const Text('Şehir Değiştir'),
+                          child: Text(context.tr('Şehir Değiştir', 'Change City')),
                         ),
                       ],
                     ),
@@ -1265,8 +1285,8 @@ class _MapScreenState extends ConsumerState<MapScreen>
                                 const SizedBox(width: 4),
                                 Text(
                                   _exploreMode
-                                      ? 'En İyiler'
-                                      : 'Gün $_selectedDay',
+                                      ? context.tr('En İyiler', 'Top Picks')
+                                      : context.tr('Gün $_selectedDay', 'Day $_selectedDay'),
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.w700,
@@ -1278,7 +1298,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            '${cardItems.length} yer',
+                            '${cardItems.length} ${context.tr('yer', 'places')}',
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.grey.shade600,
@@ -1325,6 +1345,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
                             child: _PlaceCard(
                               place: p,
                               style: style,
+                              provinceName: _effectiveCityName,
                               onTap: () =>
                                   context.push('/place', extra: p),
                             ),
@@ -1362,7 +1383,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
           ? FloatingActionButton.extended(
               onPressed: _openDayNavigation,
               icon: const Icon(Icons.navigation),
-              label: const Text('Güne Başla'),
+              label: Text(context.tr('Güne Başla', 'Start the Day')),
               backgroundColor: RouteviaColors.primary,
               foregroundColor: Colors.white,
             )
@@ -1379,7 +1400,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
         children: days
             .map(
               (d) => ChoiceChip(
-                label: Text('Gün ${d.dayNumber}'),
+                label: Text(context.tr('Gün ${d.dayNumber}', 'Day ${d.dayNumber}')),
                 selected: _selectedDay == d.dayNumber,
                 selectedColor: RouteviaColors.accent.withValues(alpha: 0.2),
                 onSelected: (_) =>
@@ -1437,11 +1458,13 @@ class _PlaceCard extends StatelessWidget {
     required this.place,
     required this.style,
     required this.onTap,
+    this.provinceName,
   });
 
   final PlaceModel place;
   final _CategoryStyle style;
   final VoidCallback onTap;
+  final String? provinceName;
 
   @override
   Widget build(BuildContext context) {
@@ -1468,11 +1491,26 @@ class _PlaceCard extends StatelessWidget {
                     topLeft: Radius.circular(17),
                     bottomLeft: Radius.circular(17),
                   ),
-                  child: SafeNetworkImage(
-                    url: place.media.firstOrNull?.publicUrl,
-                    fit: BoxFit.cover,
-                    height: double.infinity,
-                  ),
+                  child: place.media.isNotEmpty
+                      ? SafeNetworkImage(
+                          url: place.media.first.publicUrl,
+                          fit: BoxFit.cover,
+                          height: double.infinity,
+                        )
+                      : PlacePexelsImage(
+                          placeName: place.name,
+                          provinceName: provinceName ?? '',
+                          category: place.category,
+                          fit: BoxFit.cover,
+                          fallbackWidget: Container(
+                            color: style.color.withValues(alpha: 0.12),
+                            child: Icon(
+                              style.icon,
+                              size: 36,
+                              color: style.color.withValues(alpha: 0.5),
+                            ),
+                          ),
+                        ),
                 ),
               ),
               // Info
@@ -1515,7 +1553,7 @@ class _PlaceCard extends StatelessWidget {
                                         const SizedBox(width: 4),
                                         Flexible(
                                           child: Text(
-                                            style.label,
+                                            context.isEnglish ? style.labelEn : style.label,
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                             style: TextStyle(
