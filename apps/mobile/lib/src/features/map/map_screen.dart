@@ -182,10 +182,11 @@ class _MapScreenState extends ConsumerState<MapScreen>
 
   List<PlaceModel> get _exploreCardItems {
     final picks = List<PlaceModel>.from(_topPicks);
-    final pinnedId =
-        (_selectedExplorePlaceId?.trim().isNotEmpty ?? false)
-            ? _selectedExplorePlaceId!.trim()
-            : widget.initialPlaceId?.trim();
+    // Kart sırası SABİT kalmalı. Yalnızca ilk açılıştaki (deep-link) yer öne
+    // alınır. Kaydırınca değişen _selectedExplorePlaceId'yi BURADA kullanmayız;
+    // aksi halde her onPageChanged'de liste yeniden sıralanır, PageView'in
+    // index'i kayar ve "kaydırınca aynı/yanlış yer açılır" hatası oluşur.
+    final pinnedId = widget.initialPlaceId?.trim();
     if (pinnedId == null || pinnedId.isEmpty) return picks;
     final pinned = _filteredPlaces.cast<PlaceModel?>().firstWhere(
           (candidate) => candidate?.id == pinnedId,
@@ -767,10 +768,14 @@ class _MapScreenState extends ConsumerState<MapScreen>
             options: MapOptions(
               initialCenter: _center,
               initialZoom: _zoom,
-              onPositionChanged: (position, _) {
+              onPositionChanged: (position, hasGesture) {
                 _center = position.center;
                 _zoom = position.zoom;
-                if (_exploreMode) {
+                // Yalnızca KULLANICI haritayı eliyle oynattığında yeniden yükle.
+                // Carousel kaydırması / odaklama gibi programatik hareketler
+                // (hasGesture=false) _topPicks'i değiştirip PageView index'ini
+                // kaydırmamalı — "kaydırınca aynı/yanlış yer" hatasının 2. katmanı.
+                if (_exploreMode && hasGesture) {
                   _scheduleViewportLoad();
                 }
               },
