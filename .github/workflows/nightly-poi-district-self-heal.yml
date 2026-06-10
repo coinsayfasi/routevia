@@ -16,10 +16,10 @@ jobs:
       QUALITY_ISSUE_RATE_THRESHOLD: "0.002"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "20"
 
@@ -57,6 +57,30 @@ jobs:
 
       - name: Run district auto-fix pass
         run: node tools/fix_poi_districts_nominatim.mjs --max-updates=1000 --delay-ms=1100
+
+      - name: Nearest-district fallback (offshore/coastal POIs)
+        run: |
+          node -e '
+            const url = process.env.SUPABASE_URL;
+            const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+            (async () => {
+              const res = await fetch(`${url}/rest/v1/rpc/backfill_missing_districts`, {
+                method: "POST",
+                headers: {
+                  apikey: key,
+                  Authorization: `Bearer ${key}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ p_max: 2000 }),
+              });
+              const text = await res.text();
+              // Non-fatal: if the migration is not applied yet the RPC is missing
+              // (404); just log it so the nightly job still completes.
+              console.log(`backfill_missing_districts: ${res.status} ${text}`);
+            })().catch((e) => {
+              console.error(`nearest-district fallback skipped: ${e.message || e}`);
+            });
+          '
 
       - name: Build district quality report
         run: |

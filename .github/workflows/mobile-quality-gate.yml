@@ -15,7 +15,7 @@ jobs:
         working-directory: apps/mobile
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -24,10 +24,10 @@ jobs:
           cache: true
 
       - name: Flutter pub get
-        run: flutter pub get
+        run: ../../scripts/mobile_flutter.sh pub get
 
       - name: Flutter analyze
-        run: flutter analyze
+        run: ../../scripts/mobile_flutter.sh analyze
 
       - name: Flutter test
-        run: flutter test
+        run: ../../scripts/mobile_flutter.sh test
