@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -5,7 +6,9 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/constants.dart';
+import '../core/geo_utils.dart';
 import '../models/community_post_models.dart';
+import '../models/event_models.dart';
 import '../models/trip_models.dart';
 import '../models/weather_models.dart';
 import 'fallback_provinces.dart';
@@ -18,6 +21,7 @@ class RouteviaRepository {
   final SupabaseClient _client;
   final LocalCache _cache;
   final Map<String, _NearbyCacheEntry> _nearbyCache = {};
+  final Map<String, _SignedUrlCacheEntry> _signedUrlCache = {};
   DateTime? _lastSessionValidationAt;
   // Mutex: prevents concurrent refreshSession() calls that corrupt session state.
   Future<void>? _refreshLock;
@@ -365,20 +369,33 @@ class RouteviaRepository {
   }) async {
     final path = storagePath?.trim() ?? '';
     if (path.isEmpty) return null;
+    final cacheKey = '$path:$width:$quality';
+    final cached = _signedUrlCache[cacheKey];
+    if (cached != null &&
+        DateTime.now().difference(cached.cachedAt).inSeconds < 518400) {
+      return cached.url;
+    }
     try {
-      return await _runAuthed(
-        () => _client.storage.from('community-posts').createSignedUrl(
+      final url = await _runAuthed(
+        () => _client.storage
+            .from('community-posts')
+            .createSignedUrl(
               path,
               60 * 60 * 24 * 7,
               transform: TransformOptions(width: width, quality: quality),
             ),
       );
+      _signedUrlCache[cacheKey] = _SignedUrlCacheEntry(url: url, cachedAt: DateTime.now());
+      return url;
     } catch (_) {
-      // Fall back to non-transformed URL if transform fails (e.g. non-image file)
       try {
-        return await _runAuthed(
-          () => _client.storage.from('community-posts').createSignedUrl(path, 60 * 60 * 24 * 7),
+        final url = await _runAuthed(
+          () => _client.storage
+              .from('community-posts')
+              .createSignedUrl(path, 60 * 60 * 24 * 7),
         );
+        _signedUrlCache[cacheKey] = _SignedUrlCacheEntry(url: url, cachedAt: DateTime.now());
+        return url;
       } catch (_) {
         return null;
       }
@@ -461,13 +478,28 @@ class RouteviaRepository {
 
     // Fetch all gallery + cover signed URLs in parallel instead of sequentially.
     // Gallery images are served at card size; covers at detail size.
-    final galleryUrlFutures = galleryRows.map(
-      (row) => _signedCommunityPostUrl(row['storage_path']?.toString(), width: 400, quality: 72),
-    ).toList();
-    final coverUrlFutures = rows.map(
-      (row) => _signedCommunityPostUrl(row['cover_storage_path']?.toString(), width: 900, quality: 80),
-    ).toList();
-    final allUrls = await Future.wait([...galleryUrlFutures, ...coverUrlFutures]);
+    final galleryUrlFutures = galleryRows
+        .map(
+          (row) => _signedCommunityPostUrl(
+            row['storage_path']?.toString(),
+            width: 400,
+            quality: 72,
+          ),
+        )
+        .toList();
+    final coverUrlFutures = rows
+        .map(
+          (row) => _signedCommunityPostUrl(
+            row['cover_storage_path']?.toString(),
+            width: 900,
+            quality: 80,
+          ),
+        )
+        .toList();
+    final allUrls = await Future.wait([
+      ...galleryUrlFutures,
+      ...coverUrlFutures,
+    ]);
     final galleryUrls = allUrls.sublist(0, galleryRows.length);
     final coverUrls = allUrls.sublist(galleryRows.length);
 
@@ -729,7 +761,9 @@ class RouteviaRepository {
       if (requireAuth) {
         headers['Authorization'] = 'Bearer ${await _requireAccessToken()}';
       }
-      return _client.functions.invoke(name, body: body, headers: headers);
+      return _client.functions
+          .invoke(name, body: body, headers: headers)
+          .timeout(const Duration(seconds: 30));
     }
 
     try {
@@ -828,8 +862,10 @@ class RouteviaRepository {
     required String email,
     required String code,
   }) async {
+    // Signup confirmation codes must be verified with OtpType.signup (verified
+    // end-to-end: generate_link signup OTP -> verifyOTP signup -> session).
     await _client.auth.verifyOTP(
-      type: OtpType.email,
+      type: OtpType.signup,
       email: email.trim(),
       token: code.trim(),
     );
@@ -842,14 +878,11 @@ class RouteviaRepository {
     // ignoreDuplicates: true → sadece profil yoksa oluştur, varsa dokunma.
     // Bu sayede concurrent çağrılar onboarding_completed gibi alanları sıfırlamaz.
     await _runAuthed(
-      () => _client.from('profiles').upsert(
-        {
-          'id': user.id,
-          'display_name': user.email,
-          'onboarding_completed': false,
-        },
-        ignoreDuplicates: true,
-      ),
+      () => _client.from('profiles').upsert({
+        'id': user.id,
+        'display_name': user.email,
+        'onboarding_completed': false,
+      }, ignoreDuplicates: true),
     );
   }
 
@@ -1000,6 +1033,157 @@ class RouteviaRepository {
     }
   }
 
+  Future<List<EventModel>> listProvinceEvents(
+    String provinceSlug, {
+    int limit = 24,
+  }) async {
+    final viaFunction = await getEvents(
+      provinceSlug: provinceSlug,
+      limit: limit,
+    );
+    if (viaFunction.isNotEmpty) return viaFunction;
+    try {
+      final province = await _client
+          .from('provinces')
+          .select('id')
+          .eq('slug', provinceSlug)
+          .maybeSingle();
+      final provinceId = province?['id']?.toString();
+      if (provinceId == null || provinceId.isEmpty) return const [];
+
+      final rows = await _client
+          .from('events')
+          .select(
+            'id,province_id,province_name,district,name,slug,description,month_start,month_end,category,is_recurring,tags,lat,lng,source_url,is_active',
+          )
+          .eq('province_id', provinceId)
+          .eq('is_active', true)
+          .order('month_start')
+          .order('name')
+          .limit(limit);
+
+      return (rows as List)
+          .map((e) => EventModel.fromMap(Map<String, dynamic>.from(e as Map)))
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<List<EventModel>> getEvents({
+    String? provinceSlug,
+    String? provinceName,
+    int? month,
+    int limit = 24,
+  }) async {
+    try {
+      final payload =
+          <String, dynamic>{
+            'province_slug': provinceSlug?.trim(),
+            'province': provinceName?.trim(),
+            'month': month,
+            'limit': limit,
+          }..removeWhere(
+            (key, value) => value == null || (value is String && value.isEmpty),
+          );
+      final result = await _invokeFunction('get_events', body: payload);
+      final data = result.data;
+      if (data is List) {
+        return data
+            .map((e) => EventModel.fromMap(Map<String, dynamic>.from(e as Map)))
+            .toList();
+      }
+      if (data is Map && data['items'] is List) {
+        return (data['items'] as List)
+            .map((e) => EventModel.fromMap(Map<String, dynamic>.from(e as Map)))
+            .toList();
+      }
+    } catch (_) {}
+
+    try {
+      dynamic query = _client
+          .from('events')
+          .select(
+            'id,province_id,province_name,district,name,slug,description,month_start,month_end,category,is_recurring,tags,lat,lng,source_url,is_active',
+          )
+          .eq('is_active', true)
+          .order('month_start')
+          .order('name')
+          .limit(limit);
+      if (provinceSlug != null && provinceSlug.trim().isNotEmpty) {
+        final province = await _client
+            .from('provinces')
+            .select('id')
+            .eq('slug', provinceSlug.trim())
+            .maybeSingle();
+        final provinceId = province?['id']?.toString();
+        if (provinceId == null || provinceId.isEmpty) return const [];
+        query = query.eq('province_id', provinceId);
+      } else if (provinceName != null && provinceName.trim().isNotEmpty) {
+        query = query.ilike('province_name', provinceName.trim());
+      }
+      final rows = await query;
+      var items = (rows as List)
+          .map((e) => EventModel.fromMap(Map<String, dynamic>.from(e as Map)))
+          .toList();
+      if (month != null) {
+        items = items.where((event) => event.isActiveInMonth(month)).toList();
+      }
+      return items;
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<Map<String, EventReminderSetting>> listMyEventReminders() async {
+    final user = _client.auth.currentUser;
+    if (user == null) return const <String, EventReminderSetting>{};
+    try {
+      await _ensureFreshSession();
+      final rows = await _runAuthed(
+        () => _client
+            .from('user_event_reminders')
+            .select('event_id')
+            .eq('user_id', user.id),
+      );
+      final items = (rows as List)
+          .map(
+            (e) => EventReminderSetting.fromMap(
+              Map<String, dynamic>.from(e as Map),
+            ),
+          )
+          .where((item) => item.eventId.isNotEmpty);
+      return {for (final item in items) item.eventId: item};
+    } catch (_) {
+      return const <String, EventReminderSetting>{};
+    }
+  }
+
+  Future<void> setEventReminder({
+    required String eventId,
+    required bool enabled,
+  }) async {
+    await _ensureFreshSession();
+    final user = _client.auth.currentUser;
+    if (user == null) throw Exception('auth session missing');
+    if (enabled) {
+      await _runAuthed(
+        () => _client.from('user_event_reminders').upsert(
+          {'user_id': user.id, 'event_id': eventId},
+          onConflict: 'user_id,event_id',
+        ),
+      );
+    } else {
+      await _runAuthed(
+        () => _client
+            .from('user_event_reminders')
+            .delete()
+            .eq('user_id', user.id)
+            .eq('event_id', eventId),
+      );
+    }
+  }
+
   Future<List<PlaceModel>> fetchPoisByViewport({
     required double minLat,
     required double maxLat,
@@ -1045,27 +1229,18 @@ class RouteviaRepository {
       final lat = (row['lat'] as num?)?.toDouble();
       final lng = (row['lng'] as num?)?.toDouble();
       if (lat == null || lng == null) return double.infinity;
-      const r = 6371.0;
-      final dLat = (lat - centerLat) * math.pi / 180.0;
-      final dLng = (lng - centerLng) * math.pi / 180.0;
-      final a =
-          math.sin(dLat / 2) * math.sin(dLat / 2) +
-          math.cos(centerLat * math.pi / 180.0) *
-              math.cos(lat * math.pi / 180.0) *
-              math.sin(dLng / 2) *
-              math.sin(dLng / 2);
-      final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
-      return r * c;
+      return GeoUtils.distanceKm(centerLat, centerLng, lat, lng);
     }
 
-    void applyLocationScope(dynamic query) {
+    dynamic applyLocationScope(dynamic q) {
       if (districtName != null &&
           districtName.trim().isNotEmpty &&
           cityName == null) {
-        query.ilike('district', districtName.trim());
+        return q.ilike('district', districtName.trim());
       } else if (cityName != null && cityName.trim().isNotEmpty) {
-        query.ilike('city', cityName.trim());
+        return q.ilike('city', cityName.trim());
       }
+      return q;
     }
 
     dynamic query = _client
@@ -1080,7 +1255,7 @@ class RouteviaRepository {
     if (categories.isNotEmpty) {
       query = query.inFilter('category', categories);
     }
-    applyLocationScope(query);
+    query = applyLocationScope(query);
     if (trimmedSearch.isNotEmpty) {
       final q = trimmedSearch.replaceAll(',', ' ').trim();
       query = query.or(
@@ -1112,7 +1287,7 @@ class RouteviaRepository {
     if (categories.isNotEmpty) {
       broaderQuery = broaderQuery.inFilter('category', categories);
     }
-    applyLocationScope(broaderQuery);
+    broaderQuery = applyLocationScope(broaderQuery);
     broaderQuery = broaderQuery.or(
       [
         'name.ilike.%$trimmedSearch%',
@@ -1159,17 +1334,7 @@ class RouteviaRepository {
     double lng1,
     double lat2,
     double lng2,
-  ) {
-    const r = 6371.0;
-    final dLat = (lat2 - lat1) * math.pi / 180.0;
-    final dLng = (lng2 - lng1) * math.pi / 180.0;
-    final a =
-        (math.sin(dLat / 2) * math.sin(dLat / 2)) +
-        math.cos(lat1 * math.pi / 180.0) *
-            math.cos(lat2 * math.pi / 180.0) *
-            (math.sin(dLng / 2) * math.sin(dLng / 2));
-    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
-  }
+  ) => GeoUtils.distanceKm(lat1, lng1, lat2, lng2);
 
   // ── Tourist quality filter ───────────────────────────────────────────────
 
@@ -1308,7 +1473,6 @@ class RouteviaRepository {
     int startHour = 9,
     List<String> mustIncludePlaceIds = const [],
   }) async {
-    // Compliance mode: generate trip only from compliant POIs dataset.
     final generated = await generateDemoTripPlan(
       provinceSlug: provinceSlug,
       days: days,
@@ -1323,6 +1487,10 @@ class RouteviaRepository {
       startLng: startLng,
       startHour: startHour,
     );
+    // AI enrichment — fire-and-forget, never block the user
+    if (AppConstants.useLlm) {
+      unawaited(_enrichTripWithAi(generated));
+    }
     try {
       final persisted = await _saveTripRemote(generated);
       await _persistTripArtifacts(persisted);
@@ -1330,6 +1498,30 @@ class RouteviaRepository {
     } catch (_) {
       await _persistTripArtifacts(generated);
       return generated;
+    }
+  }
+
+  Future<void> _enrichTripWithAi(TripPlan plan) async {
+    try {
+      final daysPayload = plan.daysPlan.map((d) => {
+        'day': d.dayNumber,
+        'stops': d.stops.map((s) => {
+          'name': s.place.name,
+          'category': s.place.category,
+        }).toList(),
+      }).toList();
+      await _invokeFunction(
+        'generate_trip_plan_v2',
+        body: {
+          'province_name': plan.province.name,
+          'days': daysPayload,
+          'transport_mode': plan.transportMode,
+          'pace': plan.pace,
+        },
+        requireAuth: true,
+      );
+    } catch (_) {
+      // Enrichment is best-effort — never propagate errors
     }
   }
 
@@ -1386,20 +1578,20 @@ class RouteviaRepository {
 
     // Category-based realistic visit durations (minutes)
     int categoryDuration(String? cat) => switch (cat) {
-          'museum' => 90,
-          'historical' => 75,
-          'nature' => 90,
-          'beach' => 90,
-          'waterfall' => 60,
-          'canyon' => 75,
-          'viewpoint' => 35,
-          'tour' => 90,
-          'activity' => 75,
-          'market' => 45,
-          'food' => 60,
-          'cafe' => 45,
-          _ => 60,
-        };
+      'museum' => 90,
+      'historical' => 75,
+      'nature' => 90,
+      'beach' => 90,
+      'waterfall' => 60,
+      'canyon' => 75,
+      'viewpoint' => 35,
+      'tour' => 90,
+      'activity' => 75,
+      'market' => 45,
+      'food' => 60,
+      'cafe' => 45,
+      _ => 60,
+    };
 
     Future<List<PlaceModel>> fetchFiltered(dynamic q) async {
       final raw = (await (q as dynamic).limit(500)) as List;
@@ -1412,7 +1604,8 @@ class RouteviaRepository {
               'name': row['name'],
               'slug': row['id'],
               'category': cat,
-              'short_summary': '${row['district'] ?? row['city'] ?? 'Keşif noktası'}',
+              'short_summary':
+                  '${row['district'] ?? row['city'] ?? 'Keşif noktası'}',
               'best_time': 'day',
               'duration_min': categoryDuration(cat),
               'lat': row['lat'],
@@ -1513,8 +1706,12 @@ class RouteviaRepository {
     places = places.where((p) {
       final norm = p.name
           .toLowerCase()
-          .replaceAll('ç', 'c').replaceAll('ğ', 'g').replaceAll('ı', 'i')
-          .replaceAll('ö', 'o').replaceAll('ş', 's').replaceAll('ü', 'u')
+          .replaceAll('ç', 'c')
+          .replaceAll('ğ', 'g')
+          .replaceAll('ı', 'i')
+          .replaceAll('ö', 'o')
+          .replaceAll('ş', 's')
+          .replaceAll('ü', 'u')
           .replaceAll(RegExp(r'[^a-z0-9]'), '');
       return seenNormNames.add(norm);
     }).toList();
@@ -1522,18 +1719,26 @@ class RouteviaRepository {
     // ── Must-see boosting: push province-level must-see places to the front ──
     // This ensures must-see landmarks (Ayasofya, Efes, Pamukkale etc.) are
     // always included in generated routes when they're in the pool.
-    final mustSeeKeywords = kMustSeePlaceKeywordsByProvince[provinceSlug] ?? const [];
+    final mustSeeKeywords =
+        kMustSeePlaceKeywordsByProvince[provinceSlug] ?? const [];
     if (mustSeeKeywords.isNotEmpty) {
       String normMustSee(String s) => s
           .toLowerCase()
-          .replaceAll('ç', 'c').replaceAll('ğ', 'g').replaceAll('ı', 'i')
-          .replaceAll('ö', 'o').replaceAll('ş', 's').replaceAll('ü', 'u')
+          .replaceAll('ç', 'c')
+          .replaceAll('ğ', 'g')
+          .replaceAll('ı', 'i')
+          .replaceAll('ö', 'o')
+          .replaceAll('ş', 's')
+          .replaceAll('ü', 'u')
           .replaceAll(RegExp(r'[^a-z0-9]'), '');
       final normalizedKeywords = mustSeeKeywords.map(normMustSee).toSet();
       bool isMustSee(PlaceModel p) {
         final norm = normMustSee(p.name);
-        return normalizedKeywords.any((kw) => norm.contains(kw) || kw.contains(norm));
+        return normalizedKeywords.any(
+          (kw) => norm.contains(kw) || kw.contains(norm),
+        );
       }
+
       final mustSees = places.where(isMustSee).toList();
       final rest = places.where((p) => !isMustSee(p)).toList();
       places = [...mustSees, ...rest];
@@ -1577,32 +1782,52 @@ class RouteviaRepository {
     const catActive = {'activity', 'market'};
     const catDining = {'food', 'cafe'};
 
-    final bucketCultural =
-        sortedByProx.where((p) => catCultural.contains(p.category)).toList();
-    final bucketOutdoor =
-        sortedByProx.where((p) => catOutdoor.contains(p.category)).toList();
-    final bucketActive =
-        sortedByProx.where((p) => catActive.contains(p.category)).toList();
-    final bucketDining =
-        sortedByProx.where((p) => catDining.contains(p.category)).toList();
+    final bucketCultural = sortedByProx
+        .where((p) => catCultural.contains(p.category))
+        .toList();
+    final bucketOutdoor = sortedByProx
+        .where((p) => catOutdoor.contains(p.category))
+        .toList();
+    final bucketActive = sortedByProx
+        .where((p) => catActive.contains(p.category))
+        .toList();
+    final bucketDining = sortedByProx
+        .where((p) => catDining.contains(p.category))
+        .toList();
 
     // Global used-ID set — no place repeated across days
     final usedIds = <String>{};
 
     // Must-see keyword set for this province (for bucket priority)
-    final mustSeeKeywordsForBucket = (kMustSeePlaceKeywordsByProvince[provinceSlug] ?? const []).map((s) => s
-        .toLowerCase()
-        .replaceAll('ç', 'c').replaceAll('ğ', 'g').replaceAll('ı', 'i')
-        .replaceAll('ö', 'o').replaceAll('ş', 's').replaceAll('ü', 'u')
-        .replaceAll(RegExp(r'[^a-z0-9]'), '')).toSet();
+    final mustSeeKeywordsForBucket =
+        (kMustSeePlaceKeywordsByProvince[provinceSlug] ?? const [])
+            .map(
+              (s) => s
+                  .toLowerCase()
+                  .replaceAll('ç', 'c')
+                  .replaceAll('ğ', 'g')
+                  .replaceAll('ı', 'i')
+                  .replaceAll('ö', 'o')
+                  .replaceAll('ş', 's')
+                  .replaceAll('ü', 'u')
+                  .replaceAll(RegExp(r'[^a-z0-9]'), ''),
+            )
+            .toSet();
 
     bool isMustSeePlace(PlaceModel p) {
       if (mustSeeKeywordsForBucket.isEmpty) return false;
-      final norm = p.name.toLowerCase()
-          .replaceAll('ç', 'c').replaceAll('ğ', 'g').replaceAll('ı', 'i')
-          .replaceAll('ö', 'o').replaceAll('ş', 's').replaceAll('ü', 'u')
+      final norm = p.name
+          .toLowerCase()
+          .replaceAll('ç', 'c')
+          .replaceAll('ğ', 'g')
+          .replaceAll('ı', 'i')
+          .replaceAll('ö', 'o')
+          .replaceAll('ş', 's')
+          .replaceAll('ü', 'u')
           .replaceAll(RegExp(r'[^a-z0-9]'), '');
-      return mustSeeKeywordsForBucket.any((kw) => norm.contains(kw) || kw.contains(norm));
+      return mustSeeKeywordsForBucket.any(
+        (kw) => norm.contains(kw) || kw.contains(norm),
+      );
     }
 
     // Pick from a bucket skipping used IDs. Must-see places always win;
@@ -1637,24 +1862,42 @@ class RouteviaRepository {
 
       // Slot: Cultural (museum / historical / tour)
       final c1 = pickFrom(bucketCultural);
-      if (c1 != null) { composed.add(c1); use(c1); }
+      if (c1 != null) {
+        composed.add(c1);
+        use(c1);
+      }
 
       // Slot: Outdoor (nature / beach / viewpoint / waterfall / canyon)
       final o1 = pickFrom(bucketOutdoor);
-      if (o1 != null) { composed.add(o1); use(o1); }
+      if (o1 != null) {
+        composed.add(o1);
+        use(o1);
+      }
 
       // Slot: Activity / market — or a second outdoor / cultural if unavailable
-      final a1 = pickFrom(bucketActive) ?? pickFrom(bucketOutdoor) ?? pickFrom(bucketCultural);
-      if (a1 != null) { composed.add(a1); use(a1); }
+      final a1 =
+          pickFrom(bucketActive) ??
+          pickFrom(bucketOutdoor) ??
+          pickFrom(bucketCultural);
+      if (a1 != null) {
+        composed.add(a1);
+        use(a1);
+      }
 
       // Slot: Dining (max 1 food/cafe per day)
       final d1 = pickFrom(bucketDining);
-      if (d1 != null) { composed.add(d1); use(d1); }
+      if (d1 != null) {
+        composed.add(d1);
+        use(d1);
+      }
 
       // Slot: Second cultural or outdoor if pace calls for more stops
       if (composed.length < perDay) {
         final c2 = pickFrom(bucketCultural) ?? pickFrom(bucketOutdoor);
-        if (c2 != null) { composed.add(c2); use(c2); }
+        if (c2 != null) {
+          composed.add(c2);
+          use(c2);
+        }
       }
 
       // Fill any remaining slots with nearest unused place
@@ -1719,8 +1962,22 @@ class RouteviaRepository {
   }
 
   Future<List<TripPlan>> readTripHistory() async {
-    final items = await _cache.readTripHistory();
-    return items.map(TripPlan.fromMap).toList();
+    List<Map<String, dynamic>> items;
+    try {
+      items = await _cache.readTripHistory();
+    } catch (_) {
+      return const [];
+    }
+    return items
+        .map((m) {
+          try {
+            return TripPlan.fromMap(m);
+          } catch (_) {
+            return null;
+          }
+        })
+        .whereType<TripPlan>()
+        .toList();
   }
 
   Future<void> deleteTrip({
@@ -2553,18 +2810,14 @@ class RouteviaRepository {
         row['id']?.toString() ?? '': row['display_name']?.toString(),
     };
     return items
-        .map(
-          (row) {
-            final rawName =
-                profileById[row['user_id']?.toString() ?? ''] ?? '';
-            // Mask emails and empty names for privacy — never show email addresses
-            final displayName =
-                (rawName.isEmpty || rawName.contains('@'))
-                    ? 'Elit routevia kullanıcısı'
-                    : rawName;
-            return {...row, 'submitter_name': displayName};
-          },
-        )
+        .map((row) {
+          final rawName = profileById[row['user_id']?.toString() ?? ''] ?? '';
+          // Mask emails and empty names for privacy — never show email addresses
+          final displayName = (rawName.isEmpty || rawName.contains('@'))
+              ? 'Elit routevia kullanıcısı'
+              : rawName;
+          return {...row, 'submitter_name': displayName};
+        })
         .toList(growable: false);
   }
 
@@ -2640,6 +2893,8 @@ class RouteviaRepository {
       'app_score': communityState?['routevia_score'] ?? 0,
       'app_rating': communityState?['avg_rating'] ?? 0,
       'rating_count': communityState?['review_count'] ?? 0,
+      'province_name': row['city'],
+      'district_name': row['district'],
     });
   }
 
@@ -2690,7 +2945,7 @@ class RouteviaRepository {
     final cached = _nearbyCache[cacheKey];
     final now = DateTime.now();
     if (cached != null &&
-        now.difference(cached.createdAt).inSeconds <= 15 &&
+        now.difference(cached.createdAt).inSeconds <= 120 &&
         cached.items.isNotEmpty) {
       return {
         'items': cached.items,
@@ -3173,27 +3428,58 @@ class RouteviaRepository {
     List<String> preferences = const [],
     String? districtName,
   }) async {
+    // Try provinces_with_coords view first (has lat/lng), fallback to table.
     Map<String, dynamic>? province = await _client
+        .from('provinces_with_coords')
+        .select('name,slug')
+        .eq('slug', provinceSlug)
+        .maybeSingle();
+    province ??= await _client
         .from('provinces')
         .select('name,slug')
         .eq('slug', provinceSlug)
         .maybeSingle();
-    if (province == null) return const [];
+    // If still null, derive city name from fallback list.
+    if (province == null) {
+      final fallback = kFallbackProvinces.firstWhere(
+        (p) => p['slug'] == provinceSlug,
+        orElse: () => const <String, dynamic>{},
+      );
+      if (fallback.isEmpty) return const [];
+      province = fallback;
+    }
     final cityName = (province['name'] as String?) ?? '';
+    if (cityName.isEmpty) return const [];
 
-    // Always fetch all province POIs — district data in pois table may be
-    // unreliable (geographic centroid assignment can be inaccurate).
-    // Client-side proximity sort handles district prioritisation instead.
-    final rows = await _client
-        .from('pois')
-        .select('id,name,category,lat,lng,city,district,tags,source,place_community_state(cover_photo)')
-        .eq('provenance_verified', true)
-        .eq('city', cityName)
-        .limit(1000);
+    // District-level scoping: when a district is selected we filter POIs to that
+    // district; when only a province is selected we return the whole province.
+    // (POI city/district are now boundary-accurate after the admin re-sync.)
+    final districtFilter = (districtName ?? '').trim();
+    final scopeToDistrict = districtFilter.isNotEmpty;
+
+    var rawRows = await () {
+      var q = _client
+          .from('pois')
+          .select('id,name,category,lat,lng,city,district,tags,source')
+          .eq('provenance_verified', true)
+          .eq('city', cityName);
+      if (scopeToDistrict) q = q.ilike('district', districtFilter);
+      return q.limit(1000);
+    }();
+
+    // Fallback: case-insensitive match in case of encoding mismatch.
+    if ((rawRows as List).isEmpty) {
+      rawRows = await () {
+        var q = _client
+            .from('pois')
+            .select('id,name,category,lat,lng,city,district,tags,source')
+            .ilike('city', cityName);
+        if (scopeToDistrict) q = q.ilike('district', districtFilter);
+        return q.limit(1000);
+      }();
+    }
 
     PlaceModel mapRow(Map<String, dynamic> row) {
-      final state = row['place_community_state'] as Map?;
-      final coverUrl = state?['cover_photo'] as String?;
       return PlaceModel.fromMap({
         'id': row['id'],
         'name': row['name'],
@@ -3207,16 +3493,14 @@ class RouteviaRepository {
         'tags': ((row['tags'] as List?) ?? const []).cast<String>(),
         'source_kind': row['source'],
         'is_free': true,
-        'media': (coverUrl != null && coverUrl.isNotEmpty)
-            ? [{'public_url': coverUrl, 'storage_path': '', 'sort_order': 0}]
-            : const <Map<String, dynamic>>[],
+        'media': const <Map<String, dynamic>>[],
         'app_score': 0,
         'app_rating': 0,
         'rating_count': 0,
       });
     }
 
-    final places = (rows as List)
+    final places = (rawRows as List)
         .map((e) => mapRow(Map<String, dynamic>.from(e as Map)))
         .where((p) => !_isLodgingCategory(p.category))
         .where((p) => !_isSuppressedPlace(p))
@@ -3244,40 +3528,34 @@ class RouteviaRepository {
       // Fetch all province POIs; district filtering is unreliable server-side
       final localRows = await _client
           .from('pois')
-          .select('id,name,category,lat,lng,city,district,tags,source,place_community_state(cover_photo)')
+          .select('id,name,category,lat,lng,city,district,tags,source')
           .eq('provenance_verified', true)
           .eq('city', cityName)
           .limit(limit);
 
       final local = (localRows as List)
           .map((e) => Map<String, dynamic>.from(e as Map))
-          .map(
-            (row) {
-              final state = row['place_community_state'] as Map?;
-              final coverUrl = state?['cover_photo'] as String?;
-              return PlaceModel.fromMap({
-                'id': row['id'],
-                'name': row['name'],
-                'slug': row['id'],
-                'category': row['category'],
-                'short_summary':
-                    '${row['district'] ?? row['city'] ?? 'Keşif noktası'}',
-                'best_time': 'day',
-                'duration_min': 60,
-                'lat': row['lat'],
-                'lng': row['lng'],
-                'tags': ((row['tags'] as List?) ?? const []).cast<String>(),
-                'source_kind': row['source'],
-                'is_free': true,
-                'media': (coverUrl != null && coverUrl.isNotEmpty)
-                    ? [{'public_url': coverUrl, 'storage_path': '', 'sort_order': 0}]
-                    : const <Map<String, dynamic>>[],
-                'app_score': 0,
-                'app_rating': 0,
-                'rating_count': 0,
-              });
-            },
-          )
+          .map((row) {
+            return PlaceModel.fromMap({
+              'id': row['id'],
+              'name': row['name'],
+              'slug': row['id'],
+              'category': row['category'],
+              'short_summary':
+                  '${row['district'] ?? row['city'] ?? 'Keşif noktası'}',
+              'best_time': 'day',
+              'duration_min': 60,
+              'lat': row['lat'],
+              'lng': row['lng'],
+              'tags': ((row['tags'] as List?) ?? const []).cast<String>(),
+              'source_kind': row['source'],
+              'is_free': true,
+              'media': const <Map<String, dynamic>>[],
+              'app_score': 0,
+              'app_rating': 0,
+              'rating_count': 0,
+            });
+          })
           .where((p) => !_isLodgingCategory(p.category))
           .where((p) => p.name.trim().isNotEmpty)
           .toList();
@@ -3293,41 +3571,36 @@ class RouteviaRepository {
       }
     }
 
+    // National fallback: no province filter, no provenance_verified filter so
+    // we always show something even if pois migration is incomplete.
     final nationalRows = await _client
         .from('pois')
-        .select('id,name,category,lat,lng,city,district,tags,source,place_community_state(cover_photo)')
-        .eq('provenance_verified', true)
+        .select('id,name,category,lat,lng,city,district,tags,source')
         .limit(limit);
 
     final national = (nationalRows as List)
         .map((e) => Map<String, dynamic>.from(e as Map))
-        .map(
-          (row) {
-            final state = row['place_community_state'] as Map?;
-            final coverUrl = state?['cover_photo'] as String?;
-            return PlaceModel.fromMap({
-              'id': row['id'],
-              'name': row['name'],
-              'slug': row['id'],
-              'category': row['category'],
-              'short_summary':
-                  '${row['district'] ?? row['city'] ?? 'Keşif noktası'}',
-              'best_time': 'day',
-              'duration_min': 60,
-              'lat': row['lat'],
-              'lng': row['lng'],
-              'tags': ((row['tags'] as List?) ?? const []).cast<String>(),
-              'source_kind': row['source'],
-              'is_free': true,
-              'media': (coverUrl != null && coverUrl.isNotEmpty)
-                  ? [{'public_url': coverUrl, 'storage_path': '', 'sort_order': 0}]
-                  : const <Map<String, dynamic>>[],
-              'app_score': 0,
-              'app_rating': 0,
-              'rating_count': 0,
-            });
-          },
-        )
+        .map((row) {
+          return PlaceModel.fromMap({
+            'id': row['id'],
+            'name': row['name'],
+            'slug': row['id'],
+            'category': row['category'],
+            'short_summary':
+                '${row['district'] ?? row['city'] ?? 'Keşif noktası'}',
+            'best_time': 'day',
+            'duration_min': 60,
+            'lat': row['lat'],
+            'lng': row['lng'],
+            'tags': ((row['tags'] as List?) ?? const []).cast<String>(),
+            'source_kind': row['source'],
+            'is_free': true,
+            'media': const <Map<String, dynamic>>[],
+            'app_score': 0,
+            'app_rating': 0,
+            'rating_count': 0,
+          });
+        })
         .where((p) => !_isLodgingCategory(p.category))
         .where((p) => p.name.trim().isNotEmpty)
         .toList();
@@ -4384,7 +4657,6 @@ class RouteviaRepository {
     final data = Map<String, dynamic>.from(result.data as Map);
     return data['place_id'] as String;
   }
-
 
   Future<List<Map<String, dynamic>>> adminSuggestions({
     String status = 'pending',
@@ -5558,6 +5830,8 @@ class RouteviaRepository {
     required String status,
     String? adminNote,
   }) async {
+    final isAdmin = await isCurrentUserAdmin();
+    if (!isAdmin) throw Exception('Admin yetkisi gerekli.');
     // community_post is not in the moderation_submission_type enum so we
     // cannot use admin_moderate_submission RPC here — use a direct update
     // which is protected by the admin RLS policy on community_posts.
@@ -5882,16 +6156,86 @@ class RouteviaRepository {
     String category = '',
   }) async {
     try {
-      final result = await _invokeFunction('get_destination_image', body: {
-        'city': provinceName,
-        'place_name': placeName,
-        'category': category,
-      });
+      final result = await _invokeFunction(
+        'get_destination_image',
+        body: {
+          'city': provinceName,
+          'place_name': placeName,
+          'category': category,
+        },
+      );
       final data = result.data;
       if (data is Map) return Map<String, dynamic>.from(data);
       return null;
     } catch (_) {
       return null;
+    }
+  }
+
+  /// Returns similar places (same category + province), excluding current place.
+  Future<List<PlaceModel>> getSimilarPlaces({
+    required String placeId,
+    required String category,
+    required String provinceSlug,
+    int limit = 5,
+  }) async {
+    if (provinceSlug.isEmpty) return [];
+    try {
+      final rows = await _client
+          .from('places_clean')
+          .select('id,name,slug,category,short_summary,popularity_score,provinces(name,slug)')
+          .eq('category', category)
+          .neq('id', placeId)
+          .order('popularity_score', ascending: false)
+          .limit(limit * 3); // fetch more, filter by province client-side
+      final all = (rows as List).map((row) {
+        final map = Map<String, dynamic>.from(row as Map);
+        final province = map['provinces'] as Map?;
+        return PlaceModel.fromMap({
+          ...map,
+          'province_name': province?['name'],
+          'province_slug': province?['slug'],
+          'best_time': 'day',
+          'duration_min': 60,
+        });
+      }).toList();
+      // Prefer same province, fall back to any
+      final sameProvince = all.where((p) => p.provinceSlug == provinceSlug).take(limit).toList();
+      if (sameProvince.isNotEmpty) return sameProvince;
+      return all.take(limit).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Global place search — queries places_clean by name with province join.
+  /// Returns up to [limit] results ordered by popularity_score descending.
+  Future<List<PlaceModel>> searchPlaces(String query, {int limit = 40}) async {
+    final q = query.trim();
+    if (q.isEmpty) return [];
+    try {
+      final rows = await _client
+          .from('places_clean')
+          .select(
+            'id,name,slug,category,short_summary,popularity_score,provinces(name,slug)',
+          )
+          .ilike('name', '%$q%')
+          .order('popularity_score', ascending: false)
+          .limit(limit);
+
+      return (rows as List).map((row) {
+        final map = Map<String, dynamic>.from(row as Map);
+        final province = map['provinces'] as Map?;
+        return PlaceModel.fromMap({
+          ...map,
+          'province_name': province?['name'],
+          'province_slug': province?['slug'],
+          'best_time': 'day',
+          'duration_min': 60,
+        });
+      }).toList();
+    } catch (_) {
+      return [];
     }
   }
 
@@ -5902,18 +6246,28 @@ class RouteviaRepository {
     required String body,
     Map<String, String> data = const {},
   }) async {
-    await _ensureFreshSession();
-    final result = await _invokeFunction(
-      'admin_send_push',
-      body: {
-        if (userId != null && userId.isNotEmpty) 'user_id': userId,
-        'title': title,
-        'body': body,
-        if (data.isNotEmpty) 'data': data,
-      },
-      requireAuth: true,
-    );
-    return Map<String, dynamic>.from((result.data as Map?) ?? const {});
+    // Force a fresh access token for admin operations so edge function
+    // never rejects a stale JWT with a misleading "session expired" error.
+    try {
+      await _client.auth.refreshSession();
+    } catch (_) {}
+    try {
+      final result = await _invokeFunction(
+        'admin_send_push',
+        body: {
+          if (userId != null && userId.isNotEmpty) 'user_id': userId,
+          'title': title,
+          'body': body,
+          if (data.isNotEmpty) 'data': data,
+        },
+        requireAuth: true,
+      );
+      return Map<String, dynamic>.from((result.data as Map?) ?? const {});
+    } catch (e) {
+      // Re-throw with function name so friendlyError shows the right message
+      // instead of the generic "oturum süreniz dolmuş" for 401 responses.
+      throw Exception('admin_send_push: $e');
+    }
   }
 
   // ── Weather ────────────────────────────────────────────────────────────────
@@ -5949,4 +6303,11 @@ class _NearbyCacheEntry {
 
   final List<PlaceModel> items;
   final DateTime createdAt;
+}
+
+class _SignedUrlCacheEntry {
+  const _SignedUrlCacheEntry({required this.url, required this.cachedAt});
+
+  final String url;
+  final DateTime cachedAt;
 }

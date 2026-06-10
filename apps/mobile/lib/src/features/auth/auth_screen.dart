@@ -19,7 +19,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
-  final _inviteCtrl = TextEditingController();
 
   bool _createAccount = false;
   bool _obscurePassword = true;
@@ -38,29 +37,20 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
     ) async {
       if (event.event == AuthChangeEvent.passwordRecovery) return;
       if (event.session != null && mounted) {
-        final repo = ref.read(repositoryProvider);
-        final pendingCode = await ref
-            .read(localCacheProvider)
-            .getPendingReferralCode();
-        await repo.ensureProfile();
-        final profile = await repo.getMyProfile();
-        final completed = (profile?['onboarding_completed'] as bool?) ?? false;
-        if (pendingCode != null && pendingCode.isNotEmpty) {
+        try {
+          final repo = ref.read(repositoryProvider);
+          await repo.ensureProfile();
+          final profile = await repo.getMyProfile();
+          final completed = (profile?['onboarding_completed'] as bool?) ?? false;
+          // Refresh premium state so admin role is detected immediately
+          ref.read(premiumStateProvider.notifier).refresh();
           if (!completed) {
-            await ref.read(localCacheProvider).setPendingReferralCode(null);
-            if (mounted) context.go('/onboarding?ref=$pendingCode');
+            if (mounted) context.go('/onboarding');
             return;
           }
-          try {
-            await repo.redeemReferral(pendingCode);
-          } catch (_) {}
-          await ref.read(localCacheProvider).setPendingReferralCode(null);
-        }
-        // Refresh premium state so admin role is detected immediately
-        ref.read(premiumStateProvider.notifier).refresh();
-        if (!completed) {
-          if (mounted) context.go('/onboarding');
-          return;
+        } catch (e) {
+          debugPrint('[AuthScreen] post-login setup error: $e');
+          // Profile setup failed — still navigate to home; session is valid
         }
         if (mounted) context.go('/home');
       }
@@ -77,7 +67,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
     _confirmCtrl.dispose();
-    _inviteCtrl.dispose();
     super.dispose();
   }
 
@@ -99,21 +88,46 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
     if (lower.contains('password should be at least')) {
       return context.tr('Şifre en az 6 karakter olmalı.', 'Password must be at least 6 characters.');
     }
+    if (lower.contains('password') && (lower.contains('leaked') || lower.contains('pwned') || lower.contains('compromised'))) {
+      return context.tr(
+        'Bu şifre güvensiz. Daha önce veri ihlalinde ele geçirilmiş. Lütfen farklı bir şifre seç.',
+        'This password is not secure. It has been found in a data breach. Please choose a different password.',
+      );
+    }
     if (lower.contains('user already registered')) {
       return context.tr('Bu e-posta zaten kayıtlı. Giriş yapmayı dene.', 'This email is already registered. Try signing in.');
     }
     if (lower.contains('error sending')) {
       return context.tr('Mail gönderilemedi. Biraz sonra tekrar dene.', 'Email could not be sent. Please try again later.');
     }
-    return error.toString();
+    if (lower.contains('otp') && (lower.contains('expired') || lower.contains('invalid'))) {
+      return context.tr('Doğrulama bağlantısının süresi dolmuş. Yeniden kayıt olmayı veya maili tekrar göndermeyi dene.', 'Verification link has expired. Try signing up again or resend the email.');
+    }
+    if (lower.contains('timeout') || lower.contains('timed out') || lower.contains('connection')) {
+      return context.tr('Bağlantı zaman aşımına uğradı. İnternet bağlantını kontrol edip tekrar dene.', 'Connection timed out. Check your internet connection and try again.');
+    }
+    if (lower.contains('token') && lower.contains('expired')) {
+      return context.tr('Bağlantının süresi dolmuş. Lütfen tekrar dene.', 'The link has expired. Please try again.');
+    }
+    if (lower.contains('over_request_rate_limit') || lower.contains('over request rate limit')) {
+      return context.tr('Çok fazla istek gönderildi. Biraz bekleyip tekrar dene.', 'Too many requests. Please wait and try again.');
+    }
+    if (lower.contains('user_already_exists') || lower.contains('already registered') || lower.contains('already exists')) {
+      return context.tr('Bu e-posta zaten kayıtlı. Giriş yapmayı dene.', 'This email is already registered. Try signing in.');
+    }
+    if (lower.contains('signup_disabled') || lower.contains('signups not allowed')) {
+      return context.tr('Şu an kayıt yapılamıyor. Daha sonra tekrar dene.', 'Signups are currently disabled. Please try again later.');
+    }
+    if (lower.contains('network') || lower.contains('socket') || lower.contains('unreachable')) {
+      return context.tr('İnternet bağlantısı yok. Bağlantını kontrol edip tekrar dene.', 'No internet connection. Check your connection and try again.');
+    }
+    return context.tr('Bir hata oluştu. Lütfen tekrar dene.', 'Something went wrong. Please try again.');
   }
 
   Future<void> _submit() async {
     final email = _emailCtrl.text.trim();
     final password = _passwordCtrl.text;
     final confirm = _confirmCtrl.text;
-    final inviteCode = _inviteCtrl.text.trim().toUpperCase();
-
     if (email.isEmpty || !email.contains('@')) {
       _snack(context.tr('Geçerli bir e-posta gir.', 'Enter a valid email.'));
       return;
@@ -126,48 +140,18 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
       _snack(context.tr('Şifre tekrarı eşleşmiyor.', 'Passwords do not match.'));
       return;
     }
-    if (inviteCode.isNotEmpty &&
-        !RegExp(r'^[A-Z0-9]{8}$').hasMatch(inviteCode)) {
-      _snack(
-        context.tr(
-          'Davet kodu 8 karakterli olmalı.',
-          'Invite code must be 8 characters.',
-        ),
-      );
-      return;
-    }
 
     setState(() => _loading = true);
     try {
       final repo = ref.read(repositoryProvider);
-      if (inviteCode.isNotEmpty) {
-        final isValid = await repo.validateReferralCode(inviteCode);
-        if (!mounted) return;
-        if (!isValid) {
-          _snack(
-            context.tr(
-              'Davet kodu geçersiz veya bulunamadı.',
-              'Invite code is invalid or was not found.',
-            ),
-          );
-          return;
-        }
-      }
-      await ref.read(localCacheProvider).setPendingReferralCode(
-            inviteCode.isEmpty ? null : inviteCode,
-          );
       if (_createAccount) {
         await repo.signUpWithPassword(email: email, password: password);
         if (!mounted) return;
         final session = Supabase.instance.client.auth.currentSession;
         if (session == null) {
-          _snack(
-            context.tr(
-              '$email adresine doğrulama bağlantısı gönderildi. Mailine gel, bağlantıya tıkla ve geri dön.',
-              'A verification link was sent to $email. Open your email, tap the link, and come back.',
-            ),
-            duration: 8,
-          );
+          // Email confirmation enabled → Supabase sends a 6-digit code; take the
+          // user to the verification screen to enter it (no magic link).
+          context.go('/verify?email=${Uri.encodeComponent(email)}');
           return;
         }
         _snack(context.tr('Hesap oluşturuldu, oturum açılıyor...', 'Account created, signing you in...'));
@@ -221,13 +205,9 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
       await ref.read(repositoryProvider).resendSignupConfirmation(email);
       if (!mounted) return;
       setState(() => _verificationResent = true);
-      _snack(
-        context.tr(
-          '$email adresine doğrulama maili yeniden gönderildi.',
-          'A new verification email was sent to $email.',
-        ),
-        duration: 6,
-      );
+      // A fresh 6-digit code was sent → go to the verification screen to enter it.
+      context.go('/verify?email=${Uri.encodeComponent(email)}');
+      return;
     } catch (e) {
       if (!mounted) return;
       _snack(_friendlyAuthError(e));
@@ -394,28 +374,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                           ),
                         ),
                       ],
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _inviteCtrl,
-                        textCapitalization: TextCapitalization.characters,
-                        maxLength: 8,
-                        decoration: InputDecoration(
-                          labelText: context.tr(
-                            'Davet Kodu (Opsiyonel)',
-                            'Invite Code (Optional)',
-                          ),
-                          prefixIcon: const Icon(Icons.card_giftcard_outlined),
-                          helperText: context.tr(
-                            '7 gun Pro denemesi icin kodun varsa burada gir.',
-                            'If you have an invite code for a 7-day Pro trial, enter it here.',
-                          ),
-                          counterText: '',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                      ),
-
                       // Forgot password (login mode only)
                       if (!_createAccount) ...[
                         Align(
