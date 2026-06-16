@@ -36,7 +36,7 @@ serve(async (req) => {
       .from("provinces")
       .select("id")
       .eq("slug", body.province_slug)
-      .single();
+      .maybeSingle();
     if (provinceError || !province) return jsonResponse({ error: "province not found" }, 404);
 
     let districtId: string | null = null;
@@ -58,8 +58,8 @@ serve(async (req) => {
       suggested_category: body.suggested_category,
       suggested_tags: (body.suggested_tags ?? []).slice(0, 12),
       short_note: body.short_note.trim(),
-      lat: Number.isFinite(body.lat) ? body.lat : null,
-      lng: Number.isFinite(body.lng) ? body.lng : null,
+      lat: (Number.isFinite(body.lat) && body.lat >= -90 && body.lat <= 90) ? body.lat : null,
+      lng: (Number.isFinite(body.lng) && body.lng >= -180 && body.lng <= 180) ? body.lng : null,
       source_url: body.source_url?.trim() || null,
       status: "pending",
     };
@@ -68,7 +68,7 @@ serve(async (req) => {
       .from("place_suggestions")
       .insert(payload)
       .select("id,status,created_at")
-      .single();
+      .maybeSingle();
 
     if (error) return jsonResponse({ error: error.message }, 500);
 

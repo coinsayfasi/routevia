@@ -44,7 +44,13 @@ Expected:
 - each legacy endpoint: HTTP `410`
 
 ## 4) Operational Guardrails
-- Worker default: `GOOGLE_RAW_AFTER_BATCH=false`
+- Active runtime and worker tooling no longer depend on Google Places API keys or `places.googleapis.com`.
+- Legacy Google endpoint files remain only to return `410 disabled_by_policy`.
 - Progress endpoint policy marker:
   - `google_pipeline_enabled: false`
   - `policy_mode: "clean_only"`
+
+## 5) Trend / Density Disclosure
+- `Trend Harita`, `Topluluk Trendi`, `kalabalik`, `hareketli`, and similar labels are Routevia community signals.
+- These scores may use check-ins, reviews, photo uploads, favorites, and in-app interactions.
+- They must not be presented as exact official or real-time physical crowd measurements.

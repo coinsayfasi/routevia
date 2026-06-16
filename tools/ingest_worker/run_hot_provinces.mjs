@@ -67,7 +67,7 @@ async function sleep(ms) {
 
 async function run() {
   const args = parseArgs(process.argv);
-  console.log(`[hot] provinces=${args.provinces.join(',')} mode=${args.mode} radius_km=${args.radiusKm} normalize_limit=${args.normalizeLimit} concurrency=${args.concurrency} curated=${args.withCurated}`);
+  console.log(`[hot] provinces=${args.provinces.join(',')} mode=${args.mode} radius_km=${args.radiusKm} normalize_limit=${args.normalizeLimit} concurrency=${args.concurrency} curated_append=${args.withCurated}`);
 
   for (const province of args.provinces) {
     await runNode(
@@ -83,15 +83,6 @@ async function run() {
     );
 
     if (args.withCurated) {
-      await runNode(
-        [
-          'tools/ingest_worker/generate_province_full_batch.mjs',
-          `--province=${province}`,
-          '--max-per-district=18',
-          '--radius-m=25000',
-        ],
-        `curated_generate:${province}`,
-      );
       await runNode(
         ['tools/ingest_worker/import_curated_batch.mjs'],
         `curated_import:${province}`,
@@ -116,4 +107,3 @@ run().catch((err) => {
   console.error(err.message || err);
   process.exit(1);
 });
-

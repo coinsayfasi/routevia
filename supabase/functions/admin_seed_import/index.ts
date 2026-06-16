@@ -71,7 +71,7 @@ serve(async (req) => {
         .from("provinces")
         .select("id")
         .eq("slug", row.province_slug)
-        .single();
+        .maybeSingle();
       if (!province) continue;
 
       const { data: district } = await service

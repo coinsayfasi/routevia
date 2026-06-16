@@ -48,12 +48,20 @@ supabase functions deploy admin_attach_open_license_media
 
 ## Mobil
 ```bash
-cd ~/Desktop/02_Projeler/routevia/apps/mobile
-flutter pub get
-flutter analyze
-flutter run \
+cd ~/Desktop/02_Projeler/routevia
+./scripts/mobile_flutter.sh pub get
+./scripts/mobile_flutter.sh analyze
+./scripts/mobile_flutter.sh run \
   --dart-define=SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co \
   --dart-define=SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
+```
+
+Alternatif olarak root'tan:
+```bash
+make mobile-pub-get
+make mobile-analyze
+make mobile-test
+make mobile-run ARGS="--dart-define=SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co --dart-define=SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY"
 ```
 
 ## Doğrulama

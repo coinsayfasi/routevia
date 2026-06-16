@@ -203,6 +203,7 @@
 				A4E2F6B8C1D3E5F7A4E2F6B8 /* Strip Simulator Archs */,
 				C81A705DC3B94177888D2B48 /* [firebase_crashlytics] Crashlytics Upload dSYM */,
 				98CBC3D5238CE130E0714A11 /* [CP] Copy Pods Resources */,
+				62AF4CE3A65AA9C2CA2C7F06 /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
@@ -275,21 +276,6 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		A4E2F6B8C1D3E5F7A4E2F6B8 /* Strip Simulator Archs */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-			);
-			name = "Strip Simulator Archs";
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "# Remove simulator-only (x86_64/i386, no arm64) frameworks from the app bundle.\n# These are Dart FFI stubs not needed on real devices (e.g. objective_c.framework).\n# Fixes ITMS-91169 / ITMS-90087 / ITMS-90203.\nFRAMEWORKS_DIR=\"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}\"\nif [ ! -d \"$FRAMEWORKS_DIR\" ]; then exit 0; fi\nfind \"$FRAMEWORKS_DIR\" -name \"*.framework\" -type d | while read -r FW; do\n  FW_NAME=$(basename \"$FW\" .framework)\n  FW_EXEC=\"$FW/$FW_NAME\"\n  if [ ! -f \"$FW_EXEC\" ]; then continue; fi\n  ARCHS=$(lipo -archs \"$FW_EXEC\" 2>/dev/null || true)\n  HAS_ARM64=$(echo \"$ARCHS\" | grep -cw arm64 || true)\n  HAS_X86=$(echo \"$ARCHS\" | grep -cw x86_64 || true)\n  if [ \"$HAS_ARM64\" -eq 0 ] && [ \"$HAS_X86\" -gt 0 ]; then\n    echo \"Removing simulator-only framework: $FW_NAME\"\n    rm -rf \"$FW\"\n  elif [ \"$HAS_ARM64\" -gt 0 ] && [ \"$HAS_X86\" -gt 0 ]; then\n    echo \"Stripping x86_64 from: $FW_NAME\"\n    lipo -remove x86_64 \"$FW_EXEC\" -o \"$FW_EXEC.tmp\" && mv \"$FW_EXEC.tmp\" \"$FW_EXEC\"\n  fi\ndone\n";
-		};
 		3B06AD1E1E4923F5004D2608 /* Thin Binary */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
@@ -305,6 +291,23 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "/bin/sh \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh\" embed_and_thin";
+		};
+		62AF4CE3A65AA9C2CA2C7F06 /* [CP] Embed Pods Frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-frameworks-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			name = "[CP] Embed Pods Frameworks";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-frameworks.sh\"\n";
+			showEnvVarsInLog = 0;
 		};
 		9740EEB61CF901F6004384FC /* Run Script */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -338,6 +341,38 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
+		A4E2F6B8C1D3E5F7A4E2F6B8 /* Strip Simulator Archs */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Strip Simulator Archs";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Remove simulator-only (x86_64/i386, no arm64) frameworks from the app bundle.\n# These are Dart FFI stubs not needed on real devices (e.g. objective_c.framework).\n# Fixes ITMS-91169 / ITMS-90087 / ITMS-90203.\nFRAMEWORKS_DIR=\"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}\"\nif [ ! -d \"$FRAMEWORKS_DIR\" ]; then exit 0; fi\nfind \"$FRAMEWORKS_DIR\" -name \"*.framework\" -type d | while read -r FW; do\n  FW_NAME=$(basename \"$FW\" .framework)\n  FW_EXEC=\"$FW/$FW_NAME\"\n  if [ ! -f \"$FW_EXEC\" ]; then continue; fi\n  ARCHS=$(lipo -archs \"$FW_EXEC\" 2>/dev/null || true)\n  HAS_ARM64=$(echo \"$ARCHS\" | grep -cw arm64 || true)\n  HAS_X86=$(echo \"$ARCHS\" | grep -cw x86_64 || true)\n  if [ \"$HAS_ARM64\" -eq 0 ] && [ \"$HAS_X86\" -gt 0 ]; then\n    echo \"Removing simulator-only framework: $FW_NAME\"\n    rm -rf \"$FW\"\n  elif [ \"$HAS_ARM64\" -gt 0 ] && [ \"$HAS_X86\" -gt 0 ]; then\n    echo \"Stripping x86_64 from: $FW_NAME\"\n    lipo -remove x86_64 \"$FW_EXEC\" -o \"$FW_EXEC.tmp\" && mv \"$FW_EXEC.tmp\" \"$FW_EXEC\"\n  fi\ndone\n";
+		};
+		C81A705DC3B94177888D2B48 /* [firebase_crashlytics] Crashlytics Upload dSYM */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${TARGET_NAME}",
+				"$(SRCROOT)/$(BUILT_PRODUCTS_DIR)/$(INFOPLIST_PATH)",
+			);
+			name = "[firebase_crashlytics] Crashlytics Upload dSYM";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/FirebaseCrashlytics/run\"\n";
+			showEnvVarsInLog = 0;
+		};
 		DEE59D66670D741B689664B2 /* [CP] Check Pods Manifest.lock */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -358,23 +393,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
-			showEnvVarsInLog = 0;
-		};
-		C81A705DC3B94177888D2B48 /* [firebase_crashlytics] Crashlytics Upload dSYM */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${TARGET_NAME}",
-				"$(SRCROOT)/$(BUILT_PRODUCTS_DIR)/$(INFOPLIST_PATH)",
-			);
-			name = "[firebase_crashlytics] Crashlytics Upload dSYM";
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 1;
-			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/FirebaseCrashlytics/run\"\n";
 			showEnvVarsInLog = 0;
 		};
 		F89BA8F926B7F4EF53EA2EAF /* [CP] Check Pods Manifest.lock */ = {

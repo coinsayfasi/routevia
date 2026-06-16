@@ -101,6 +101,9 @@ serve(async (req) => {
     if (!city_slug || lat == null || lng == null) {
       return jsonResponse({ error: "city_slug, lat, lng are required" }, 400);
     }
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return jsonResponse({ error: "Invalid coordinates" }, 400);
+    }
 
     const cacheKey = district_slug
       ? `${city_slug}:${district_slug}`
@@ -244,6 +247,14 @@ serve(async (req) => {
       },
       { onConflict: "cache_key" },
     );
+
+    // Best-effort cleanup: purge rows expired >24h ago to prevent table bloat.
+    // Runs opportunistically on every fresh fetch; no separate cron needed.
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    Promise.race([
+      service.from("weather_cache").delete().lt("expires_at", cutoff),
+      new Promise((_, r) => setTimeout(() => r(new Error("cleanup_timeout")), 2_000)),
+    ]).catch(() => {});
 
     return jsonResponse({ ...payload, from_cache: false });
   } catch (error) {

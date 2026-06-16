@@ -99,9 +99,6 @@ async function run() {
     districts: districts.length,
     ingestDistrictDone: 0,
     ingestDistrictFailed: 0,
-    googleFetched: 0,
-    googleInserted: 0,
-    googleUpdated: 0,
     drafts: 0,
     approved: 0,
     merged: 0,
@@ -123,15 +120,6 @@ async function run() {
           if (ingest?.ok) summary.ingestDistrictDone += 1;
         }
 
-        const g = await fnInvoke(supabaseUrl, anon, serviceKey, 'ingest_google_district', {
-          district_id: d.id,
-          mode: args.mode,
-          radius_km: args.radiusKm,
-        });
-        summary.googleFetched += Number(g.fetched || 0);
-        summary.googleInserted += Number(g.inserted || 0);
-        summary.googleUpdated += Number(g.updated || 0);
-
         const n = await fnInvoke(supabaseUrl, anon, serviceKey, 'normalize_raw_places', {
           district_id: d.id,
           limit: args.normalizeLimit,
@@ -142,7 +130,7 @@ async function run() {
         summary.merged += Number(n.merged || 0);
         summary.skipped += Number(n.skipped || 0);
 
-        console.log(`[ok] ${d.name} fetched=${g.fetched || 0} inserted=${g.inserted || 0} updated=${g.updated || 0} drafts=${n.drafts || 0} approved=${n.approved || 0}`);
+        console.log(`[ok] ${d.name} drafts=${n.drafts || 0} approved=${n.approved || 0} merged=${n.merged || 0} skipped=${n.skipped || 0}`);
       } catch (e) {
         const msg = String(e.message || e);
         if (msg.includes('ingest_district')) summary.ingestDistrictFailed += 1;

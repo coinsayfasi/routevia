@@ -46,7 +46,7 @@ If failed jobs accumulate:
 System policy is `clean_only`:
 - Runtime map/plan/search flows use only clean dataset.
 - Legacy proprietary pipeline functions are deployed as `disabled_by_policy` (HTTP 410).
-- Worker default `GOOGLE_RAW_AFTER_BATCH=false`.
+- Active worker tooling has no Google Places dependency.
 
 ## 7) Monitoring Snapshot
 Use `get_ingest_progress` and track:

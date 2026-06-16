@@ -1,0 +1,10 @@
+apps/mobile/
+supabase/
+tools/
+scripts/
+data/
+docs/
+public-media/
+releases/
+.github/
+node_modules/

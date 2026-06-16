@@ -4,12 +4,22 @@
 - Android monthly product id: `routevia_pro_monthly`
 - Android yearly product id: `routevia_pro_yearly`
 - Entitlement key: `routevia_pro`
+- Hedef aylik fiyat: `49.99 TL`
+- Hedef yillik fiyat: `500 TL`
+- Android package: `com.yunusgunes.routevia`
+- iOS bundle id: `com.yunusgunes.routevia`
 
 ## Yapilacaklar
 1. Play Console > Monetize > Products icinde aylik ve yillik urunleri olustur.
 2. App Store Connect tarafinda ayni urunleri esdeger product id ile ac.
 3. Billing entegrasyonu acildiginda mobil istemci `IAP_PRO_MONTHLY` ve `IAP_PRO_YEARLY` dart-define ile baglansin.
-4. Satin alma sonrasi backend tarafinda store receipt / purchase token dogrulama katmani eklenip `user_entitlements` tablosu guncellensin.
+4. Supabase secrets:
+   - `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`
+   - `GOOGLE_PLAY_PACKAGE_NAME=com.yunusgunes.routevia`
+   - `APPLE_SHARED_SECRET`
+   - `APPLE_BUNDLE_ID=com.yunusgunes.routevia`
+5. `verify_purchase` edge function'i Google Play Developer API ve Apple verifyReceipt ile gerçek store dogrulamasi yapar; dogrulanan bitis tarihi `user_entitlements` tablosuna yazilir.
+6. Public release oncesi test kartlari ile Android ve iOS satin alma + restore akisi gercek cihazda smoke test edilmeli.
 
 ## Data Safety / Consent
 - Hesap verisi: e-posta, kullanici kimligi

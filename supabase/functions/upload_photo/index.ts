@@ -73,9 +73,15 @@ serve(async (req) => {
         moderation_note: `awaiting_review:${fileName}`,
       })
       .select("id,place_id,user_id,image_url,storage_path,status,likes_count,reports_count,created_at,updated_at")
-      .single();
+      .maybeSingle();
 
-    if (insertError) return jsonResponse({ error: insertError.message }, 500);
+    if (insertError) {
+      // Clean up the storage object so it doesn't become an orphan
+      try {
+        await service.storage.from("place-photos").remove([uploaded.storagePath]);
+      } catch (_) { /* best effort */ }
+      return jsonResponse({ error: insertError.message }, 500);
+    }
 
     const { data: state } = await service
       .from("place_community_state")

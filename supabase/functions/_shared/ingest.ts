@@ -51,34 +51,11 @@ const allowedCategories = new Set([
   "canyon",
 ]);
 
-const GOOGLE_REQ_PER_MIN = Number(Deno.env.get("GOOGLE_REQ_PER_MIN") ?? "30");
-const GOOGLE_DAILY_REQUEST_CAP = Number(Deno.env.get("GOOGLE_DAILY_REQUEST_CAP") ?? "5000");
-let minuteWindowStart = Date.now();
-let minuteWindowCount = 0;
-let dayKey = new Date().toISOString().slice(0, 10);
-let dayCount = 0;
-
 export function clampRadiusMeters(input?: number): 1000 | 3000 | 10000 {
   const v = Number(input ?? 3000);
   if (v <= 1000) return 1000;
   if (v <= 3000) return 3000;
   return 10000;
-}
-
-function categoryFromGoogleTypes(types: string[]): { category: string; tags: string[]; bestTime: string } {
-  const t = new Set(types);
-  if (t.has("mosque") || t.has("church") || t.has("synagogue") || t.has("place_of_worship")) {
-    return { category: "historical", tags: ["culture", "faith", "history"], bestTime: "day" };
-  }
-  if (t.has("cafe")) return { category: "cafe", tags: ["coffee", "social"], bestTime: "day" };
-  if (t.has("restaurant") || t.has("food")) return { category: "food", tags: ["food"], bestTime: "day" };
-  if (t.has("lodging") || t.has("hotel")) return { category: "lodging", tags: ["stay"], bestTime: "night" };
-  if (t.has("museum")) return { category: "museum", tags: ["history"], bestTime: "day" };
-  if (t.has("tourist_attraction")) return { category: "tour", tags: ["attraction"], bestTime: "day" };
-  if (t.has("airport")) return { category: "activity", tags: ["airport", "transport", "travel"], bestTime: "day" };
-  if (t.has("marina") || t.has("rv_park")) return { category: "tour", tags: ["marina", "coast", "boat"], bestTime: "day" };
-  if (t.has("park") || t.has("natural_feature")) return { category: "nature", tags: ["nature"], bestTime: "day" };
-  return { category: "viewpoint", tags: ["discover"], bestTime: "sunset" };
 }
 
 function categoryFromOsmTags(tags: Record<string, string>): { category: string; tags: string[]; bestTime: string } {
@@ -115,26 +92,6 @@ function categoryFromOsmTags(tags: Record<string, string>): { category: string; 
   return { category: "nature", tags: ["discover"], bestTime: "day" };
 }
 
-function isGoogleQualityPass(category: string, rating?: number, reviewCount?: number): boolean {
-  const r = Number(rating ?? 0);
-  const rc = Number(reviewCount ?? 0);
-  if (["food", "cafe", "lodging"].includes(category)) {
-    return (r >= 4.3 && rc >= 150) || (r >= 4.5 && rc >= 80);
-  }
-  return r >= 4.0 && rc >= 50;
-}
-
-function googlePriceLevelToInt(value: unknown): number | null {
-  if (value == null) return null;
-  if (typeof value === "number") return Math.max(0, Math.min(4, Math.floor(value)));
-  const normalized = String(value).toUpperCase();
-  if (normalized === "PRICE_LEVEL_FREE") return 0;
-  if (normalized === "PRICE_LEVEL_INEXPENSIVE") return 1;
-  if (normalized === "PRICE_LEVEL_MODERATE") return 2;
-  if (normalized === "PRICE_LEVEL_EXPENSIVE") return 3;
-  if (normalized === "PRICE_LEVEL_VERY_EXPENSIVE") return 4;
-  return null;
-}
 
 export async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -147,33 +104,6 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
   ]);
 }
 
-async function reserveGoogleQuota(): Promise<boolean> {
-  const now = Date.now();
-  const nowDay = new Date(now).toISOString().slice(0, 10);
-  if (nowDay !== dayKey) {
-    dayKey = nowDay;
-    dayCount = 0;
-  }
-  if (dayCount >= GOOGLE_DAILY_REQUEST_CAP) return false;
-
-  if (now - minuteWindowStart >= 60_000) {
-    minuteWindowStart = now;
-    minuteWindowCount = 0;
-  }
-  while (minuteWindowCount >= GOOGLE_REQ_PER_MIN) {
-    await sleep(300);
-    const t = Date.now();
-    if (t - minuteWindowStart >= 60_000) {
-      minuteWindowStart = t;
-      minuteWindowCount = 0;
-      break;
-    }
-  }
-
-  minuteWindowCount += 1;
-  dayCount += 1;
-  return true;
-}
 
 function normalizeName(value: string): string {
   return value
@@ -334,7 +264,7 @@ export async function buildDistrictContext(client: SupabaseClient, districtId: s
     .from("provinces")
     .select("id,name,slug")
     .eq("id", district.data.province_id as string)
-    .single();
+    .maybeSingle();
 
   if (!province.data || province.error) return null;
 
@@ -391,197 +321,9 @@ async function findCanonicalPlace(
   return best ? { id: best.id, source_kind: best.source_kind } : null;
 }
 
-function preferredSource(current: string, incoming: "curated" | "google" | "osm"): "curated" | "google" | "osm" {
-  const rank: Record<string, number> = { curated: 3, google: 2, osm: 1 };
-  return (rank[current] ?? 0) >= rank[incoming] ? (current as "curated" | "google" | "osm") : incoming;
-}
-
-async function upsertGooglePlace(client: SupabaseClient, ctx: DistrictContext, item: Record<string, unknown>): Promise<boolean> {
-  const placeId = String(item.id ?? item.place_id ?? "");
-  if (!placeId) return false;
-
-  const loc = item.location as { latitude?: number; longitude?: number } | undefined;
-  const geometry = item.geometry as { location?: { lat?: number; lng?: number } } | undefined;
-  const lat = Number(loc?.latitude ?? geometry?.location?.lat ?? NaN);
-  const lng = Number(loc?.longitude ?? geometry?.location?.lng ?? NaN);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
-
-  const displayName = item.displayName as { text?: string } | undefined;
-  const name = String(displayName?.text ?? item.name ?? "").trim();
-  if (!name) return false;
-
-  const types = ((item.types as unknown[]) ?? []).map((x) => String(x));
-  const mapped = categoryFromGoogleTypes(types);
-  const rating = Number(item.rating ?? 0);
-  const reviewCount = Number(item.userRatingCount ?? item.user_ratings_total ?? 0);
-  if (!isGoogleQualityPass(mapped.category, rating, reviewCount)) return false;
-
-  const slug = `${ctx.province_slug}-${ctx.district_slug}-g-${placeId.slice(0, 20).toLowerCase()}`;
-  const shortSummary = `${name} (${ctx.district_name}) bolgesinde kalite esikli Google noktasi.`.slice(0, 160);
-  const photoRefs = ((item.photos as Record<string, unknown>[] | undefined) ?? [])
-    .map((p) => String(p.name ?? p.photo_reference ?? ""))
-    .filter((x) => x.length > 0)
-    .slice(0, 5);
-
-  const canonical = await findCanonicalPlace(client, ctx, lat, lng, name);
-  if (canonical) {
-    const src = preferredSource(canonical.source_kind, "google");
-    const { error: mergeError } = await client.from("places").update({
-      source_kind: src,
-      google_place_id: placeId,
-      google_rating: rating,
-      google_review_count: reviewCount,
-      google_price_level: googlePriceLevelToInt(item.priceLevel ?? item.price_level),
-      google_types: types,
-      google_photo_refs: photoRefs,
-      google_last_sync: new Date().toISOString(),
-      source_url: `https://maps.google.com/?q=place_id:${placeId}`,
-    }).eq("id", canonical.id);
-    return !mergeError;
-  }
-
-  const payload = {
-    province_id: ctx.province_id,
-    district_id: ctx.district_id,
-    name,
-    slug,
-    category: mapped.category,
-    geog: asPoint(lat, lng),
-    short_summary: shortSummary,
-    best_time: mapped.bestTime,
-    duration_min: 60,
-    tags: Array.from(new Set([...mapped.tags, ...types.slice(0, 3)])),
-    popularity_score: Math.max(0, Number(item.user_ratings_total ?? 0)),
-    is_free: false,
-    source_kind: "google",
-    source_url: `https://maps.google.com/?q=place_id:${placeId}`,
-    google_place_id: placeId,
-    google_rating: rating,
-    google_review_count: reviewCount,
-    google_price_level: googlePriceLevelToInt(item.priceLevel ?? item.price_level),
-    google_types: types,
-    google_photo_refs: photoRefs,
-    google_last_sync: new Date().toISOString(),
-  };
-
-  const existing = await client
-    .from("places")
-    .select("id")
-    .eq("google_place_id", placeId)
-    .maybeSingle();
-
-  if (existing.data?.id) {
-    const { error: updateErr } = await client
-      .from("places")
-      .update(payload)
-      .eq("id", String(existing.data.id));
-    if (updateErr) return false;
-    return true;
-  }
-
-  const { data, error } = await client
-    .from("places")
-    .upsert(payload, { onConflict: "province_id,slug" })
-    .select("id")
-    .single();
-  if (error || !data) return false;
-
-  if (photoRefs.length > 0) {
-    await client.from("place_media").upsert({
-      place_id: data.id,
-      storage_path: `public-media/google_refs/${placeId}/${photoRefs[0]}.jpg`,
-      source_kind: "google",
-      sort_order: 0,
-    }, { onConflict: "place_id,storage_path" });
-  }
-  return true;
-}
-
-async function ingestGoogle(
-  client: SupabaseClient,
-  ctx: DistrictContext,
-  googleApiKey: string,
-  districtPlaceCount: number,
-): Promise<number> {
-  const baseQueries = [
-    "restaurant",
-    "cafe",
-    "bakery",
-    "local food",
-    "breakfast",
-    "seafood",
-    "traditional food",
-    "hotel",
-    "boutique hotel",
-    "bungalow",
-    "museum",
-    "tourist attraction",
-    "mosque",
-    "church",
-    "cathedral",
-    "basilica",
-    "historical place",
-    "airport",
-    "marina",
-    "harbor",
-    "ferry terminal",
-    "koy",
-    "bay",
-    "cove",
-    "teleferik",
-  ];
-  const lowDensityQueries = [
-    "park",
-    "natural feature",
-    "beach",
-    "waterfall",
-    "canyon",
-    "castle",
-    "viewpoint",
-    "cable car",
-    "ski resort",
-    "beach",
-  ];
-  const queries = districtPlaceCount < 30
-    ? [...baseQueries, ...lowDensityQueries]
-    : baseQueries;
-  let upserts = 0;
-
-  for (const q of queries) {
-    if (!(await reserveGoogleQuota())) break;
-
-    const body: Record<string, unknown> = {
-      textQuery: `${q} in ${ctx.district_name}, ${ctx.province_name}, Turkey`,
-      languageCode: "tr",
-      pageSize: 20,
-      locationBias: {
-        circle: {
-          center: { latitude: ctx.lat, longitude: ctx.lng },
-          radius: districtPlaceCount < 30 ? 22_000 : 18_000,
-        },
-      },
-    };
-
-    const json = await fetchJsonWithRetry("https://places.googleapis.com/v1/places:searchText", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": googleApiKey,
-        "X-Goog-FieldMask":
-          "places.id,places.displayName,places.location,places.types,places.rating,places.userRatingCount,places.priceLevel,places.photos.name",
-      },
-      body: JSON.stringify(body),
-    }, 2, 20_000);
-    const results = ((json as { places?: unknown[] }).places ?? []) as Record<string, unknown>[];
-    for (const item of results) {
-      const ok = await upsertGooglePlace(client, ctx, item);
-      if (ok) upserts += 1;
-    }
-
-    await sleep(250);
-  }
-
-  return upserts;
+function preferredSource(current: string, incoming: "curated" | "osm"): "curated" | "osm" {
+  const rank: Record<string, number> = { curated: 3, osm: 1 };
+  return (rank[current] ?? 0) >= rank[incoming] ? (current as "curated" | "osm") : incoming;
 }
 
 async function upsertOsmPlace(client: SupabaseClient, ctx: DistrictContext, row: Record<string, unknown>): Promise<boolean> {
@@ -802,7 +544,7 @@ async function ingestCurated(client: SupabaseClient, ctx: DistrictContext): Prom
       is_published: true,
       source_kind: "curated",
       source_url: row.source_url ?? null,
-    }, { onConflict: "province_id,slug" }).select("id").single();
+    }, { onConflict: "province_id,slug" }).select("id").maybeSingle();
     if (placeRes.data?.id) {
       await client.from("place_details").upsert({
         place_id: placeRes.data.id,
@@ -821,7 +563,6 @@ export async function ingestDistrict(
   client: SupabaseClient,
   ctx: DistrictContext,
 ): Promise<{ google: number; osm: number; curated: number; errors: string[] }> {
-  const googleKey = Deno.env.get("GOOGLE_PLACES_API_KEY") ?? "";
   const overpassUrl = Deno.env.get("OVERPASS_URL") ?? "";
 
   let google = 0;
@@ -834,17 +575,6 @@ export async function ingestDistrict(
     .eq("district_id", ctx.district_id);
   const districtPlaceCount = districtCountRes.count ?? 0;
 
-  if (googleKey) {
-    try {
-      google = await withTimeout(
-        ingestGoogle(client, ctx, googleKey, districtPlaceCount),
-        60_000,
-        "google",
-      );
-    } catch (e) {
-      errors.push(`google:${(e as Error).message}`);
-    }
-  }
   if (overpassUrl) {
     try {
       osm = await withTimeout(

@@ -31,7 +31,9 @@ dependencies:
   app_links: ^6.4.0
   purchases_flutter: ^8.4.0
   image_picker: ^1.2.0
-  google_mobile_ads: ^7.0.0
+  google_mobile_ads: ^8.0.0
+  # AdMob mediation adapter (bidding) — AppLovin (boosts eCPM via auction)
+  gma_mediation_applovin: ^2.6.1
   firebase_core: ^4.1.1
   firebase_messaging: ^16.0.1
   firebase_crashlytics: ^5.0.1

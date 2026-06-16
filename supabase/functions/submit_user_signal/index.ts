@@ -40,7 +40,7 @@ serve(async (req) => {
           rating: null,
         }, { onConflict: "user_id,poi_id,type" })
         .select("id")
-        .single();
+        .maybeSingle();
       if (upsert.error) return jsonResponse({ error: upsert.error.message }, 500);
     } else {
       // rating is append-only for signal history
@@ -53,7 +53,7 @@ serve(async (req) => {
           rating,
         })
         .select("id")
-        .single();
+        .maybeSingle();
       if (ins.error) return jsonResponse({ error: ins.error.message }, 500);
     }
 

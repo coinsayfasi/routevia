@@ -36,6 +36,9 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         manifestPlaceholders["ADMOB_APP_ID"] = "ca-app-pub-7579691213276550~4855336155"
+        // AppLovin mediation SDK key — empty default is safe (adapter idle until
+        // a real key is supplied; other networks still serve). Set before release.
+        manifestPlaceholders["APPLOVIN_SDK_KEY"] = ""
     }
 
     signingConfigs {

@@ -82,7 +82,10 @@ serve(async (req) => {
         duration_min: 60,
         tags: [],
         popularity_score: 0,
-      }, { onConflict: "province_id,slug" }).select("id").single();
+        coordinate_source: "admin_verified",
+        coordinate_verified_at: new Date().toISOString(),
+        coordinate_verified_by: "admin_csv_import",
+      }, { onConflict: "province_id,slug" }).select("id").maybeSingle();
 
       if (upsert.error || !upsert.data?.id) continue;
       if (upsert.status === 201) inserted += 1; else updated += 1;

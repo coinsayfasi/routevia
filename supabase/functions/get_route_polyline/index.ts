@@ -59,9 +59,12 @@ serve(async (req) => {
         const geog = String(place.geog ?? "");
         const m = /POINT\(([-0-9.]+) ([-0-9.]+)\)/.exec(geog);
         return { lat: Number(m?.[2] ?? 0), lng: Number(m?.[1] ?? 0) };
-      }).filter((c) => Number.isFinite(c.lat) && Number.isFinite(c.lng));
+      }).filter((c) => Number.isFinite(c.lat) && Number.isFinite(c.lng) && c.lat >= -90 && c.lat <= 90 && c.lng >= -180 && c.lng <= 180);
     } else {
-      coords = (body.coords ?? []).filter((c) => Number.isFinite(c.lat) && Number.isFinite(c.lng));
+      coords = (body.coords ?? []).filter((c) =>
+  Number.isFinite(c.lat) && Number.isFinite(c.lng) &&
+  c.lat >= -90 && c.lat <= 90 && c.lng >= -180 && c.lng <= 180
+);
     }
 
     if (coords.length < 2) {
@@ -73,7 +76,7 @@ serve(async (req) => {
     const path = coords.map((c) => `${c.lng},${c.lat}`).join(";");
     const url = `${osrmBase}/route/v1/${profile}/${path}?overview=full&geometries=geojson`;
 
-    const resp = await fetch(url, { method: "GET" });
+    const resp = await fetch(url, { method: "GET", signal: AbortSignal.timeout(8_000) });
     if (!resp.ok) {
       return jsonResponse({ mode: "straight", points: coords, fallback: true });
     }

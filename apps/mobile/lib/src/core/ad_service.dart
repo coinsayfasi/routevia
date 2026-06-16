@@ -125,7 +125,7 @@ class AdService {
     required void Function() onLoaded,
   }) async {
     if (_isPremium || !_initialized) return null;
-    final adSize = await AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(
+    final adSize = await AdSize.getLargeAnchoredAdaptiveBannerAdSize(
       screenWidth.truncate(),
     );
     if (adSize == null) return null;

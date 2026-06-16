@@ -42,16 +42,6 @@ async function main() {
   for (const province of args.provinces) {
     await runNode(
       [
-        'tools/ingest_worker/generate_province_full_batch.mjs',
-        `--province=${province}`,
-        `--max-per-district=${args.maxPerDistrict}`,
-        `--radius-m=${args.radiusM}`,
-      ],
-      `generate:${province}`,
-    );
-
-    await runNode(
-      [
         'tools/ingest_worker/import_curated_batch.mjs',
         '--input=data/seed/incoming_batch.csv',
         '--output=data/seed/curated_places.csv',
@@ -83,4 +73,3 @@ main().catch((err) => {
   console.error(err.message || err);
   process.exit(1);
 });
-

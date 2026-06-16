@@ -106,7 +106,7 @@ serve(async (req) => {
         duration_min: 60,
         tags: [category],
         popularity_score: 0,
-      }, { onConflict: "province_id,slug" }).select("id").single();
+      }, { onConflict: "province_id,slug" }).select("id").maybeSingle();
 
       if (upsert.error || !upsert.data?.id) continue;
       inserted += 1;

@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { corsHeaders, jsonResponse } from "../_shared/http.ts";
-import { getServiceClient, requireAdmin, requireUser } from "../_shared/client.ts";
+import { getServiceClient, requireAdminOrWorker } from "../_shared/client.ts";
 
 type PlaceInput = {
   id?: string;
@@ -38,15 +38,17 @@ serve(async (req) => {
 
   try {
     const authHeader = req.headers.get("Authorization") ?? undefined;
-    const user = await requireUser(authHeader);
-    await requireAdmin(user.id);
+    const actor = await requireAdminOrWorker(
+      authHeader,
+      req.headers.get("x-worker-secret"),
+    );
 
     const body = (await req.json()) as PlaceInput;
     assertInput(body);
 
     const service = getServiceClient();
 
-    const province = await service.from("provinces").select("id").eq("slug", body.province_slug).single();
+    const province = await service.from("provinces").select("id").eq("slug", body.province_slug).maybeSingle();
     if (province.error || !province.data?.id) throw new Error("province_not_found");
 
     let districtId: string | null = null;
@@ -73,13 +75,16 @@ serve(async (req) => {
       duration_min: body.duration_min,
       tags: body.tags,
       popularity_score: body.popularity_score,
+      coordinate_source: "admin_verified",
+      coordinate_verified_at: new Date().toISOString(),
+      coordinate_verified_by: actor.id,
     };
 
     const upsert = await service
       .from("places_clean")
       .upsert(placeRecord, { onConflict: "province_id,slug" })
       .select("id")
-      .single();
+      .maybeSingle();
     if (upsert.error || !upsert.data?.id) throw new Error(upsert.error?.message ?? "upsert_failed");
 
     const placeId = String(upsert.data.id);

@@ -32,7 +32,7 @@ serve(async (req) => {
         rating,
       })
       .select("id")
-      .single();
+      .maybeSingle();
 
     if (ins.error) return jsonResponse({ error: ins.error.message }, 500);
 

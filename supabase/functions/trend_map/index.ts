@@ -7,6 +7,32 @@ type Payload = {
   limit?: number;
 };
 
+function normalizeText(value: string): string {
+  return value
+    .toLocaleLowerCase("tr-TR")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function hasLodgingSignal(name: string, category: string, tags: unknown): boolean {
+  const flat = [
+    normalizeText(name),
+    normalizeText(category),
+    ...(Array.isArray(tags) ? tags.map((tag) => normalizeText(String(tag))) : []),
+  ];
+  return flat.some((value) =>
+    ["lodging", "hotel", "bungalow", "bungalov", "villa", "resort", "glamping", "butikotel", "boutiquehotel", "suitotel", "suitehotel", "konaklama"]
+      .some((needle) => value.includes(needle))
+  );
+}
+
+function dedupeKey(item: Record<string, unknown>): string {
+  const lat = Number(item.lat ?? 0).toFixed(3);
+  const lng = Number(item.lng ?? 0).toFixed(3);
+  return `${normalizeText(String(item.name ?? ""))}:${lat}:${lng}`;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse({ error: "method_not_allowed" }, 405);
@@ -28,10 +54,10 @@ serve(async (req) => {
 
     let poiQ = service
       .from("pois")
-      .select("id,name,category,city,district,lat,lng,tags")
+      .select("id,name,category,city,district,lat,lng,tags,coordinate_source")
       .eq("provenance_verified", true)
       .limit(limit);
-    if (cityName) poiQ = poiQ.ilike("city", cityName);
+    if (cityName) poiQ = poiQ.eq("city", cityName);
 
     const poiRes = await poiQ;
     if (poiRes.error) return jsonResponse({ error: poiRes.error.message }, 500);
@@ -57,6 +83,7 @@ serve(async (req) => {
     }
 
     const items = pois
+      .filter((p) => !hasLodgingSignal(String(p.name ?? ""), String(p.category ?? ""), p.tags))
       .map((p) => {
         const id = String(p.id);
         const trust = trustById.get(id) ?? 0;
@@ -82,10 +109,18 @@ serve(async (req) => {
         };
       })
       .filter((x) => Number.isFinite(x.lat) && Number.isFinite(x.lng))
-      .sort((a, b) => b.trend_score - a.trend_score)
-      .slice(0, limit);
+      .sort((a, b) => b.trend_score - a.trend_score);
 
-    return jsonResponse({ items, meta: { province_slug: body.province_slug ?? null } });
+    const deduped = new Map<string, typeof items[number]>();
+    for (const item of items) {
+      const key = dedupeKey(item);
+      if (!deduped.has(key)) deduped.set(key, item);
+    }
+
+    return jsonResponse({
+      items: [...deduped.values()].slice(0, limit),
+      meta: { province_slug: body.province_slug ?? null },
+    });
   } catch (error) {
     return jsonResponse({ error: (error as Error).message }, 400);
   }

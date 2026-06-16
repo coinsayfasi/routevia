@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { corsHeaders, jsonResponse } from "../_shared/http.ts";
+import { corsHeaders, errorResponse, jsonResponse } from "../_shared/http.ts";
 import { getServiceClient, requireAdminOrWorker } from "../_shared/client.ts";
 
 type Payload = {
@@ -57,7 +57,8 @@ serve(async (req) => {
     }
 
     if (body.query && body.query.trim()) {
-      const s = body.query.trim();
+      // Escape LIKE special characters to prevent wildcard injection
+      const s = body.query.trim().slice(0, 100).replace(/[%_\\]/g, "\\$&");
       q = q.or(`name.ilike.%${s}%,slug.ilike.%${s}%`);
     }
 
@@ -66,6 +67,6 @@ serve(async (req) => {
 
     return jsonResponse({ items: data ?? [] });
   } catch (error) {
-    return jsonResponse({ error: (error as Error).message }, 401);
+    return errorResponse(error);
   }
 });

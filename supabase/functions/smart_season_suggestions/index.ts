@@ -8,6 +8,54 @@ type Payload = {
   limit?: number;
 };
 
+function normalizeText(value: string): string {
+  return value
+    .toLocaleLowerCase("tr-TR")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function hasLodgingSignal(
+  name: string,
+  category: string,
+  tags: unknown,
+): boolean {
+  const flat = [
+    normalizeText(name),
+    normalizeText(category),
+    ...(Array.isArray(tags)
+      ? tags.map((tag) => normalizeText(String(tag)))
+      : []),
+  ];
+  return flat.some((value) =>
+    [
+      "lodging",
+      "hotel",
+      "bungalow",
+      "bungalov",
+      "villa",
+      "resort",
+      "glamping",
+      "campingcabin",
+      "extendedstayhotel",
+      "boutiquehotel",
+      "butikotel",
+      "spaotel",
+      "thermalhotel",
+      "suitotel",
+      "suitehotel",
+      "konaklama",
+    ].some((needle) => value.includes(needle))
+  );
+}
+
+function dedupeKey(item: Record<string, unknown>): string {
+  const lat = Number(item.lat ?? 0).toFixed(3);
+  const lng = Number(item.lng ?? 0).toFixed(3);
+  return `${normalizeText(String(item.name ?? ""))}:${lat}:${lng}`;
+}
+
 const seasonalCategoryByMonth: Record<number, string[]> = {
   1: ["museum", "historical", "cafe"],
   2: ["museum", "historical", "cafe"],
@@ -38,15 +86,17 @@ serve(async (req) => {
     let provinceLng: number | null = null;
     if (body.province_slug) {
       const province = await service
-        .from("provinces")
+        .from("provinces_with_coords")
         .select("name,lat,lng")
         .eq("slug", body.province_slug)
         .maybeSingle();
-      cityName = (province.data?.name as string | undefined) ?? null;
-      provinceLat = Number(province.data?.lat ?? NaN);
-      provinceLng = Number(province.data?.lng ?? NaN);
-      if (!Number.isFinite(provinceLat)) provinceLat = null;
-      if (!Number.isFinite(provinceLng)) provinceLng = null;
+      if (!province.error) {
+        cityName = (province.data?.name as string | undefined) ?? null;
+        provinceLat = Number(province.data?.lat ?? NaN);
+        provinceLng = Number(province.data?.lng ?? NaN);
+        if (!Number.isFinite(provinceLat)) provinceLat = null;
+        if (!Number.isFinite(provinceLng)) provinceLng = null;
+      }
     }
 
     const month = new Date().getMonth() + 1;
@@ -54,13 +104,13 @@ serve(async (req) => {
 
     let poiQ = service
       .from("pois")
-      .select("id,name,category,city,district,lat,lng,tags,source")
+      .select("id,name,category,city,district,lat,lng,tags,source,coordinate_source")
       .eq("provenance_verified", true)
       .in("category", seasonalCats)
       .limit(300);
 
-    if (cityName) poiQ = poiQ.ilike("city", cityName);
-    if (body.district_name) poiQ = poiQ.ilike("district", body.district_name);
+    if (cityName) poiQ = poiQ.eq("city", cityName);
+    if (body.district_name) poiQ = poiQ.eq("district", body.district_name);
 
     const poiRes = await poiQ;
     if (poiRes.error) return jsonResponse({ error: poiRes.error.message }, 500);
@@ -113,7 +163,7 @@ serve(async (req) => {
       try {
         const w = await fetch(
           `https://api.open-meteo.com/v1/forecast?latitude=${provinceLat}&longitude=${provinceLng}&daily=temperature_2m_max,precipitation_probability_mean&timezone=auto&forecast_days=1`,
-          { method: "GET" },
+          { method: "GET", signal: AbortSignal.timeout(5_000) },
         );
         if (w.ok) {
           const json = await w.json();
@@ -137,6 +187,17 @@ serve(async (req) => {
 
     const weekday = new Date().getDay();
     const weekendBoost = weekday === 0 || weekday === 6 ? 8 : 0;
+
+    // Coordinate-based bounds guard: reject POIs beyond 220 km from province center.
+    // This catches bad city-field ingestion (e.g. Göreme appearing in Kütahya results).
+    const hasBounds = provinceLat != null && provinceLng != null;
+    function withinProvinceBounds(lat: number, lng: number): boolean {
+      if (!hasBounds) return true;
+      const dLat = lat - provinceLat!;
+      const dLng = (lng - provinceLng!) * Math.cos((provinceLat! * Math.PI) / 180);
+      const distKm = Math.sqrt(dLat * dLat + dLng * dLng) * 111;
+      return distKm <= 220;
+    }
 
     const scored = pois.map((p) => {
       const id = String(p.id);
@@ -177,12 +238,85 @@ serve(async (req) => {
         why: `Mevsim + trust + canli sinyal + etkinlik + hava`,
       };
     })
+      .filter((p) => !hasLodgingSignal(p.name, p.category, p.tags))
       .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng))
-      .sort((a, b) => b.season_score - a.season_score)
-      .slice(0, limit);
+      .filter((p) => withinProvinceBounds(p.lat, p.lng))
+      .sort((a, b) => b.season_score - a.season_score);
+
+    const deduped = new Map<string, typeof scored[number]>();
+    for (const item of scored) {
+      const key = dedupeKey(item);
+      if (!deduped.has(key)) deduped.set(key, item);
+    }
+
+    const topItems = [...deduped.values()].slice(0, limit);
+    const topIds = topItems.map((p) => p.id);
+
+    // ── Fetch cover photos for top items ──────────────────────────────
+    const coverById = new Map<string, string>();
+    if (topIds.length > 0) {
+      // 1. place_community_state (fastest — pre-computed cover)
+      try {
+        const { data: stateRows } = await service
+          .from("place_community_state")
+          .select("place_id,cover_photo")
+          .in("place_id", topIds);
+        for (const row of (stateRows ?? []) as Array<Record<string, unknown>>) {
+          const pid = String(row.place_id ?? "");
+          const url = String(row.cover_photo ?? "");
+          if (pid && url) coverById.set(pid, url);
+        }
+      } catch { /* ignore */ }
+
+      // 2. place_images (unified moderation pipeline)
+      const missingIds1 = topIds.filter((id) => !coverById.has(id));
+      if (missingIds1.length > 0) {
+        try {
+          const { data: imgRows } = await service
+            .from("place_images")
+            .select("place_id,bucket,object_path")
+            .in("place_id", missingIds1)
+            .eq("is_published", true)
+            .eq("is_active", true)
+            .order("created_at", { ascending: false })
+            .limit(missingIds1.length * 4);
+          for (const row of (imgRows ?? []) as Array<Record<string, unknown>>) {
+            const pid = String(row.place_id ?? "");
+            if (!pid || coverById.has(pid)) continue;
+            const bucket = String(row.bucket ?? "community-photos");
+            const objPath = String(row.object_path ?? "");
+            if (!objPath) continue;
+            const { data: { publicUrl } } = service.storage.from(bucket).getPublicUrl(objPath);
+            if (publicUrl) coverById.set(pid, publicUrl);
+          }
+        } catch { /* ignore */ }
+      }
+
+      // 3. place_photos legacy (approved photos)
+      const missingIds2 = topIds.filter((id) => !coverById.has(id));
+      if (missingIds2.length > 0) {
+        try {
+          const { data: photoRows } = await service
+            .from("place_photos")
+            .select("place_id,image_url")
+            .in("place_id", missingIds2)
+            .eq("status", "approved")
+            .order("created_at", { ascending: false })
+            .limit(missingIds2.length * 4);
+          for (const row of (photoRows ?? []) as Array<Record<string, unknown>>) {
+            const pid = String(row.place_id ?? "");
+            const url = String(row.image_url ?? "");
+            if (pid && url && !coverById.has(pid)) coverById.set(pid, url);
+          }
+        } catch { /* ignore */ }
+      }
+    }
 
     return jsonResponse({
-      items: scored,
+      items: topItems.map((item) => ({
+        ...item,
+        cover_photo: coverById.get(item.id) ?? null,
+      })),
       meta: {
         month,
         seasonal_categories: seasonalCats,

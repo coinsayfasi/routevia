@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { corsHeaders, jsonResponse } from "../_shared/http.ts";
+import { corsHeaders, errorResponse, jsonResponse } from "../_shared/http.ts";
 import { getServiceClient, requireAdmin, requireUser } from "../_shared/client.ts";
 
 type Payload =
@@ -87,6 +87,6 @@ serve(async (req) => {
     if (error) return jsonResponse({ error: error.message }, 500);
     return jsonResponse({ ok: true });
   } catch (error) {
-    return jsonResponse({ error: (error as Error).message }, 401);
+    return errorResponse(error);
   }
 });

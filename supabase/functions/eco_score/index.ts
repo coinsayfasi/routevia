@@ -42,7 +42,7 @@ function coordsFromDays(days: Day[], fallbackMode?: string): Coord[] {
     for (const stop of stops) {
       const lat = Number(stop.place?.lat ?? NaN);
       const lng = Number(stop.place?.lng ?? NaN);
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) continue;
       out.push({ lat, lng, mode: stop.transport_mode ?? fallbackMode });
     }
   }

@@ -25,6 +25,14 @@ for fn in ingest_google_district google_place_enrich cache_google_thumbnails pho
   rg -n "disabled_by_policy|410" "$f" -S >/dev/null || fail "Legacy Google function is not hard-disabled: $fn"
 done
 
+# 2b) Active runtime/tooling must not depend on Google Places keys or endpoints
+if rg -n "GOOGLE_PLACES_API_KEY|GOOGLE_MAPS_API_KEY|places.googleapis.com" \
+  supabase/functions/_shared tools/ingest_worker .env.example -S >/tmp/compliance_google_api_hits.txt; then
+  echo "[COMPLIANCE] Google API dependency hits:" >&2
+  cat /tmp/compliance_google_api_hits.txt >&2
+  fail "Google Places API dependency detected in active code/tooling"
+fi
+
 # 3) Public mobile data access should stay POI clean layer
 if rg -n "from\('places'\)|from\(\"places\"\)" apps/mobile/lib/src/data -S >/tmp/compliance_mobile_places_hits.txt; then
   echo "[COMPLIANCE] Mobile clean-layer violation:" >&2

@@ -7,8 +7,6 @@ const allowed = new Set([
   "plan_generated",
   "plan_shared",
   "place_shared",
-  "referral_shared",
-  "referral_redeemed",
   "rating_prompt_shown",
   "rating_submitted",
 ]);

@@ -49,7 +49,7 @@ serve(async (req) => {
           sort_order: Number.isFinite(it.sort_order) ? Number(it.sort_order) : 0,
         }, { onConflict: "place_id,storage_path" })
         .select("id")
-        .single();
+        .maybeSingle();
       if (upsert.error || !upsert.data?.id) continue;
 
       const meta = await service

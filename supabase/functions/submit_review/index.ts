@@ -59,7 +59,7 @@ serve(async (req) => {
       .select("id")
       .eq("provenance_verified", true)
       .eq("id", body.place_id)
-      .single();
+      .maybeSingle();
 
     if (poiError || !poi) {
       return jsonResponse({ error: "Place not found" }, 404);

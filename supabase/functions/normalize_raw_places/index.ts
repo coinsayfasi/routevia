@@ -277,7 +277,7 @@ serve(async (req) => {
         score_boost: hap.score_boost,
         status: "draft",
         raw_hash: row.raw_hash,
-      }).select("id").single();
+      }).select("id").maybeSingle();
 
       if (created.error || !created.data?.id) {
         skipped += 1;

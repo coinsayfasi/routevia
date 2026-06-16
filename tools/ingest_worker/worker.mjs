@@ -62,8 +62,6 @@ const env = {
   NORMALIZE_AFTER_BATCH: (fileEnv.NORMALIZE_AFTER_BATCH || process.env.NORMALIZE_AFTER_BATCH || 'true') === 'true',
   NORMALIZE_LIMIT: Number(fileEnv.NORMALIZE_LIMIT || process.env.NORMALIZE_LIMIT || '300'),
   AUTO_APPROVE_SAFE: (fileEnv.AUTO_APPROVE_SAFE || process.env.AUTO_APPROVE_SAFE || 'true') === 'true',
-  GOOGLE_RAW_AFTER_BATCH: (fileEnv.GOOGLE_RAW_AFTER_BATCH || process.env.GOOGLE_RAW_AFTER_BATCH || 'false') === 'true',
-  GOOGLE_RAW_RADIUS_KM: Number(fileEnv.GOOGLE_RAW_RADIUS_KM || process.env.GOOGLE_RAW_RADIUS_KM || '15'),
 };
 
 if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -241,18 +239,6 @@ async function runLoop() {
         .map((r) => r.district_id);
       for (const districtId of doneDistrictIds) {
         try {
-          if (env.GOOGLE_RAW_AFTER_BATCH) {
-            try {
-              const g = await invokeWithRetry('ingest_google_district', {
-                district_id: districtId,
-                mode: 'normal',
-                radius_km: env.GOOGLE_RAW_RADIUS_KM,
-              }, 'POST', 2);
-              console.log(`[google_raw] district=${districtId} fetched=${g.fetched ?? 0} inserted=${g.inserted ?? 0} updated=${g.updated ?? 0}`);
-            } catch (err) {
-              console.error(`[google_raw] district=${districtId} error: ${err.message}`);
-            }
-          }
           const norm = await invokeWithRetry('normalize_raw_places', {
             district_id: districtId,
             limit: env.NORMALIZE_LIMIT,

@@ -4,6 +4,7 @@
 - RouteVia product surface does **not** serve Google-origin POIs to end users.
 - Legacy Google-origin rows remain in DB for internal archival/ops only.
 - Product-facing reads are constrained by DB-level compliance filters.
+- Active runtime/tooling no longer calls Google Places API or requires Google Places keys.
 
 ## 2) DB-level blocking
 - `public.places` now has:
