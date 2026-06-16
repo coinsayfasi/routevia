@@ -16,6 +16,7 @@ import '../../core/ad_service.dart';
 import '../../core/i18n.dart';
 import '../../core/premium_gate.dart';
 import '../../core/widgets/safe_network_image.dart';
+import '../../core/widgets/place_pexels_image.dart';
 import '../../data/fallback_provinces.dart';
 import '../../data/providers.dart';
 import '../../models/event_models.dart';
@@ -1326,14 +1327,33 @@ class _LocalHubScreenState extends ConsumerState<LocalHubScreen> {
                 // Image
                 SizedBox(
                   width: 90,
-                  child: SafeNetworkImage(
-                    url: p.media.firstOrNull?.publicUrl,
-                    fit: BoxFit.cover,
-                    imageSize: ImageSize.thumbnail,
+                  child: ClipRRect(
                     borderRadius: const BorderRadius.only(
                       topLeft: Radius.circular(16),
                       bottomLeft: Radius.circular(16),
                     ),
+                    child: p.media.isNotEmpty
+                        ? SafeNetworkImage(
+                            url: p.media.first.publicUrl,
+                            fit: BoxFit.cover,
+                            imageSize: ImageSize.thumbnail,
+                          )
+                        // No stored cover → resolve via Wikidata/Wikipedia/Pexels
+                        // (same fallback the home & detail screens use).
+                        : PlacePexelsImage(
+                            placeName: p.name,
+                            provinceName: _provinceName,
+                            category: p.category,
+                            fit: BoxFit.cover,
+                            fallbackWidget: Container(
+                              color: catColor.withValues(alpha: 0.15),
+                              alignment: Alignment.center,
+                              child: Text(
+                                _categoryEmoji(p.category),
+                                style: const TextStyle(fontSize: 28),
+                              ),
+                            ),
+                          ),
                   ),
                 ),
                 // Info
@@ -1485,12 +1505,18 @@ class _LocalHubScreenState extends ConsumerState<LocalHubScreen> {
                       url: p.media.first.publicUrl,
                       fit: BoxFit.cover,
                     )
-                  : Container(
-                      color: _categoryColor(p.category).withValues(alpha: 0.15),
-                      alignment: Alignment.center,
-                      child: Text(
-                        _categoryEmoji(p.category),
-                        style: const TextStyle(fontSize: 30),
+                  : PlacePexelsImage(
+                      placeName: p.name,
+                      provinceName: _provinceName,
+                      category: p.category,
+                      fit: BoxFit.cover,
+                      fallbackWidget: Container(
+                        color: _categoryColor(p.category).withValues(alpha: 0.15),
+                        alignment: Alignment.center,
+                        child: Text(
+                          _categoryEmoji(p.category),
+                          style: const TextStyle(fontSize: 30),
+                        ),
                       ),
                     ),
             ),
