@@ -1,11 +1,11 @@
--- Routevia · Olmazsa olmaz (must-see) curated seed
--- Üretim: 2026-06-16, canlı prod DB'den birebir dump. Idempotent (tekrar çalıştırılabilir).
--- İçerik: 156 curated POI + 455 aktif featured pin. Koordinatlar resolve_admin_by_point ile doğrulandı.
--- Geri yükleme/reproduce amaçlı. city/district pois trigger'ı ile lat/lng'den otomatik dolar.
+-- Routevia · Olmazsa olmaz (must-see) curated seed/migration
+-- 2026-06-16, canlı prod'dan birebir dump. TAM IDEMPOTENT (name+city bazlı), insert-only, DDL yok.
+-- 157 curated POI + 434 featured pin. Koordinatlar resolve_admin_by_point ile doğrulandı.
+-- city/district pois trigger'ı ile lat/lng'den otomatik dolar. Mevcut yapıyı bozmaz: sadece eksikse ekler.
 
 begin;
 
--- 1) Curated POIs (DB'de yoksa ekle)
+-- 1) Curated POIs (aynı isim+yakın koordinat yoksa ekle)
 insert into pois (name,category,lat,lng,source,coordinate_source,provenance_verified,provenance_checked_at,tags)
 select $$Anavarza Antik Kenti$$,'historical',37.25,35.9,'wikidata','admin_verified',true,now(),'["must_see","curated_mustsee_v1"]'::jsonb
 where not exists (select 1 from pois where lower(name)=lower($$Anavarza Antik Kenti$$) and abs(lat-37.25)<0.0015 and abs(lng-35.9)<0.0015);
@@ -427,6 +427,9 @@ insert into pois (name,category,lat,lng,source,coordinate_source,provenance_veri
 select $$Kangal Balıklı Kaplıca$$,'activity',39.1,37.45,'wikidata','admin_verified',true,now(),'["must_see","curated_mustsee_v1"]'::jsonb
 where not exists (select 1 from pois where lower(name)=lower($$Kangal Balıklı Kaplıca$$) and abs(lat-39.1)<0.0015 and abs(lng-37.45)<0.0015);
 insert into pois (name,category,lat,lng,source,coordinate_source,provenance_verified,provenance_checked_at,tags)
+select $$Tödürge Gölü$$,'nature',39.8805336,37.5993827,'wikidata','admin_verified',true,now(),'["must_see","curated_mustsee_v1"]'::jsonb
+where not exists (select 1 from pois where lower(name)=lower($$Tödürge Gölü$$) and abs(lat-39.8805336)<0.0015 and abs(lng-37.5993827)<0.0015);
+insert into pois (name,category,lat,lng,source,coordinate_source,provenance_verified,provenance_checked_at,tags)
 select $$Cizre Nuh Peygamber Türbesi$$,'historical',37.33,42.19,'wikidata','admin_verified',true,now(),'["must_see","curated_mustsee_v1"]'::jsonb
 where not exists (select 1 from pois where lower(name)=lower($$Cizre Nuh Peygamber Türbesi$$) and abs(lat-37.33)<0.0015 and abs(lng-42.19)<0.0015);
 insert into pois (name,category,lat,lng,source,coordinate_source,provenance_verified,provenance_checked_at,tags)
@@ -475,1826 +478,2176 @@ insert into pois (name,category,lat,lng,source,coordinate_source,provenance_veri
 select $$Filyos Antik Kenti$$,'historical',41.57,32.02,'wikidata','admin_verified',true,now(),'["must_see","curated_mustsee_v1"]'::jsonb
 where not exists (select 1 from pois where lower(name)=lower($$Filyos Antik Kenti$$) and abs(lat-41.57)<0.0015 and abs(lng-32.02)<0.0015);
 
--- 2) Featured pins (POI'yi name+city ile yeniden bağla; yoksa pinle)
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Anavarza Antik Kenti$$) and p.city='Adana'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+-- 2) Featured pins (o isim+şehir için AKTİF pin yoksa bir tane pinle)
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Misis Antik Kenti$$) and p.city='Adana'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Misis Antik Kenti$$) and p2.city='Adana' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Taşköprü$$) and p.city='Adana'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Varda Köprüsü$$) and p.city='Adana'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Anavarza Antik Kenti$$) and p.city='Adana'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Anavarza Antik Kenti$$) and p2.city='Adana' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Sabancı Merkez Camii$$) and p.city='Adana'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Sabancı Merkez Camii$$) and p2.city='Adana' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Nemrut Dağı Milli Parkı$$) and p.city='Adıyaman'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Taşköprü$$) and p.city='Adana'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Taşköprü$$) and p2.city='Adana' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Varda Köprüsü$$) and p.city='Adana'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Varda Köprüsü$$) and p2.city='Adana' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Kommagene Nemrut Turları - İrfan Çetinkaya$$) and p.city='Adıyaman'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kommagene Nemrut Turları - İrfan Çetinkaya$$) and p2.city='Adıyaman' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Tarih Otel | Nemrut Dağı$$) and p.city='Adıyaman'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Karakuş Tümülüsü$$) and p.city='Adıyaman'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+from pois p where lower(p.name)=lower($$Nemrut Dağı Milli Parkı$$) and p.city='Adıyaman'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Nemrut Dağı Milli Parkı$$) and p2.city='Adıyaman' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Cendere Köprüsü$$) and p.city='Adıyaman'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Cendere Köprüsü$$) and p2.city='Adıyaman' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Nemrut Dağı$$) and p.city='Adıyaman'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Nemrut Dağı$$) and p2.city='Adıyaman' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Gazlıgöl Kaplıcaları$$) and p.city='Afyonkarahisar'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Karakuş Tümülüsü$$) and p.city='Adıyaman'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Karakuş Tümülüsü$$) and p2.city='Adıyaman' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Ayazini Frig Kenti$$) and p.city='Afyonkarahisar'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ayazini Frig Kenti$$) and p2.city='Afyonkarahisar' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Gazlıgöl Afion Thermal Otel$$) and p.city='Afyonkarahisar'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Afyon Başaranlar Termal Kaplıca Otel Gazlıgöl$$) and p.city='Afyonkarahisar'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
-from pois p where lower(p.name)=lower($$Frig Vadisi$$) and p.city='Afyonkarahisar'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Gazlıgöl Kaplıcaları$$) and p.city='Afyonkarahisar'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Gazlıgöl Kaplıcaları$$) and p2.city='Afyonkarahisar' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Afyon Kalesi$$) and p.city='Afyonkarahisar'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Afyon Kalesi$$) and p2.city='Afyonkarahisar' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Ishakpasa Sarayinda$$) and p.city='Ağrı'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
+from pois p where lower(p.name)=lower($$Frig Vadisi$$) and p.city='Afyonkarahisar'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Frig Vadisi$$) and p2.city='Afyonkarahisar' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$İshak Paşa Sarayı$$) and p.city='Ağrı'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$İshak Paşa Sarayı$$) and p2.city='Ağrı' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Ishakpasa Sarayinda$$) and p.city='Ağrı'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ishakpasa Sarayinda$$) and p2.city='Ağrı' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Ağrı Dağı$$) and p.city='Ağrı'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ağrı Dağı$$) and p2.city='Ağrı' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Aksaray Ulu Camii$$) and p.city='Aksaray'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Aksaray Ulu Camii$$) and p2.city='Aksaray' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Sultanhanı Kervansarayı$$) and p.city='Aksaray'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Sultanhanı Kervansarayı$$) and p2.city='Aksaray' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Ihlara Vadisi$$) and p.city='Aksaray'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ihlara Vadisi$$) and p2.city='Aksaray' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Hasan Dağı$$) and p.city='Aksaray'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hasan Dağı$$) and p2.city='Aksaray' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Amasya Kalesi$$) and p.city='Amasya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
-from pois p where lower(p.name)=lower($$Borabay Gölü$$) and p.city='Amasya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
-from pois p where lower(p.name)=lower($$Kral Kaya Mezarları$$) and p.city='Amasya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Amasya Kalesi$$) and p2.city='Amasya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Amasya Evleri$$) and p.city='Amasya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Amasya Evleri$$) and p2.city='Amasya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Anadolu Medeniyetleri Müzesi$$) and p.city='Ankara'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
+from pois p where lower(p.name)=lower($$Borabay Gölü$$) and p.city='Amasya'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Borabay Gölü$$) and p2.city='Amasya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Hamamönü$$) and p.city='Ankara'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Ankara Kalesi$$) and p.city='Ankara'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
+from pois p where lower(p.name)=lower($$Kral Kaya Mezarları$$) and p.city='Amasya'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kral Kaya Mezarları$$) and p2.city='Amasya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Anıtkabir$$) and p.city='Ankara'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Anıtkabir$$) and p2.city='Ankara' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Ankara Kalesi$$) and p.city='Ankara'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ankara Kalesi$$) and p2.city='Ankara' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Anadolu Medeniyetleri Müzesi$$) and p.city='Ankara'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Anadolu Medeniyetleri Müzesi$$) and p2.city='Ankara' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Hamamönü$$) and p.city='Ankara'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hamamönü$$) and p2.city='Ankara' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Atakule$$) and p.city='Ankara'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Atakule$$) and p2.city='Ankara' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Hamamonu$$) and p.city='Ankara'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hamamonu$$) and p2.city='Ankara' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Anitkabir$$) and p.city='Ankara'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Atakule$$) and p.city='Ankara'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Anitkabir$$) and p2.city='Ankara' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Olympos$$) and p.city='Antalya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Olympos$$) and p2.city='Antalya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Karain Mağarası$$) and p.city='Antalya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Karain Mağarası$$) and p2.city='Antalya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Termessos$$) and p.city='Antalya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Termessos$$) and p2.city='Antalya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Alanya Kalesi$$) and p.city='Antalya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Kaleici$$) and p.city='Antalya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Alanya Kalesi$$) and p2.city='Antalya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Duden Selalesi$$) and p.city='Antalya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Duden Selalesi$$) and p2.city='Antalya' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Kaleici$$) and p.city='Antalya'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kaleici$$) and p2.city='Antalya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Çıldır Gölü Konağı - Lake Cildir Lodge$$) and p.city='Ardahan'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Çıldır Gölü$$) and p.city='Ardahan'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Ardahan Kalesi$$) and p.city='Ardahan'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Çıldır Gölü Konağı - Lake Cildir Lodge$$) and p2.city='Ardahan' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Şeytan Kalesi$$) and p.city='Ardahan'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Şeytan Kalesi$$) and p2.city='Ardahan' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Borçka Karagöl Tabiat Parkı$$) and p.city='Artvin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Çıldır Gölü$$) and p.city='Ardahan'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Çıldır Gölü$$) and p2.city='Ardahan' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Ardahan Kalesi$$) and p.city='Ardahan'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ardahan Kalesi$$) and p2.city='Ardahan' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Borçka Karagöl Kamp Alanı$$) and p.city='Artvin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Borçka Karagöl Kamp Alanı$$) and p2.city='Artvin' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$KARAGÖL-ŞAVŞAT$$) and p.city='Artvin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Şavşat Karagöl Otel & Restorant$$) and p.city='Artvin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Borçka Karagöl Tabiat Parkı$$) and p.city='Artvin'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Borçka Karagöl Tabiat Parkı$$) and p2.city='Artvin' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Karagöl-Sahara Milli Parkı$$) and p.city='Artvin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Karagöl-Sahara Milli Parkı$$) and p2.city='Artvin' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$KARAGÖL-ŞAVŞAT$$) and p.city='Artvin'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$KARAGÖL-ŞAVŞAT$$) and p2.city='Artvin' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Mençuna Şelalesi$$) and p.city='Artvin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Afrodisias Antik Kenti$$) and p.city='Aydın'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Didyma Apollon Tapınağı$$) and p.city='Aydın'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Afrodisias$$) and p.city='Aydın'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Priene Ören Yeri$$) and p.city='Aydın'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Mençuna Şelalesi$$) and p2.city='Artvin' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Dilek Yarımadası Büyük Menderes Deltası Milli Parkı$$) and p.city='Aydın'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Dilek Yarımadası Büyük Menderes Deltası Milli Parkı$$) and p2.city='Aydın' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Apollon Tapinagi$$) and p.city='Aydın'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Didyma Apollon Tapınağı$$) and p.city='Aydın'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Didyma Apollon Tapınağı$$) and p2.city='Aydın' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Afrodisias$$) and p.city='Aydın'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Afrodisias$$) and p2.city='Aydın' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Priene Ören Yeri$$) and p.city='Aydın'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Priene Ören Yeri$$) and p2.city='Aydın' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Afrodisias Antik Kenti$$) and p.city='Aydın'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Afrodisias Antik Kenti$$) and p2.city='Aydın' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Afrodisias Antik Kenti Örenyeri$$) and p.city='Aydın'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Afrodisias Antik Kenti Örenyeri$$) and p2.city='Aydın' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Apollon Tapinagi$$) and p.city='Aydın'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Apollon Tapinagi$$) and p2.city='Aydın' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Didim$$) and p.city='Aydın'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Cunda Adası$$) and p.city='Balıkesir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Şeytan Sofrası$$) and p.city='Balıkesir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Didim$$) and p2.city='Aydın' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Cunda Merkez$$) and p.city='Balıkesir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Cunda Merkez$$) and p2.city='Balıkesir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Cunda Taksiyarhis Kilisesi$$) and p.city='Balıkesir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Cunda Taksiyarhis Kilisesi$$) and p2.city='Balıkesir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Kaz Dağları Milli Parkı$$) and p.city='Balıkesir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kaz Dağları Milli Parkı$$) and p2.city='Balıkesir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Manyas Kuş Cenneti$$) and p.city='Balıkesir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Manyas Kuş Cenneti$$) and p2.city='Balıkesir' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Cunda Adası$$) and p.city='Balıkesir'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Cunda Adası$$) and p2.city='Balıkesir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Şeytan Sofrası$$) and p.city='Balıkesir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Kaz dağları$$) and p.city='Balıkesir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Şeytan Sofrası$$) and p2.city='Balıkesir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Cunda Rahmi M. Koç Müzesi$$) and p.city='Balıkesir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Cunda Rahmi M. Koç Müzesi$$) and p2.city='Balıkesir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Güzelcehisar Plajı$$) and p.city='Bartın'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$GÜZELCEHİSAR LAV SÜTUNLARI$$) and p.city='Bartın'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$İnkumu Plajı$$) and p.city='Bartın'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Kaz dağları$$) and p.city='Balıkesir'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kaz dağları$$) and p2.city='Balıkesir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Güzelcehisar Lav Sütunları$$) and p.city='Bartın'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Güzelcehisar Lav Sütunları$$) and p2.city='Bartın' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Amasra Müzesi$$) and p.city='Bartın'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$İnkumu Plajı$$) and p.city='Bartın'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$İnkumu Plajı$$) and p2.city='Bartın' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$GÜZELCEHİSAR LAV SÜTUNLARI$$) and p.city='Bartın'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$GÜZELCEHİSAR LAV SÜTUNLARI$$) and p2.city='Bartın' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Güzelcehisar Plajı$$) and p.city='Bartın'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Güzelcehisar Plajı$$) and p2.city='Bartın' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Amasra Kalesi$$) and p.city='Bartın'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Amasra Kalesi$$) and p2.city='Bartın' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Amasra Müzesi$$) and p.city='Bartın'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Amasra Müzesi$$) and p2.city='Bartın' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Amasra Merkez$$) and p.city='Bartın'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Hasankeyf Eski Köprü$$) and p.city='Batman'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Hasankeyf Limanı$$) and p.city='Batman'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Amasra Merkez$$) and p2.city='Bartın' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Hasankeyf$$) and p.city='Batman'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hasankeyf$$) and p2.city='Batman' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Batman Grand Hasankeyf Otel$$) and p.city='Batman'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+from pois p where lower(p.name)=lower($$Hasankeyf Eski Köprü$$) and p.city='Batman'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hasankeyf Eski Köprü$$) and p2.city='Batman' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Hasankeyf Limanı$$) and p.city='Batman'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hasankeyf Limanı$$) and p2.city='Batman' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Hasankeyf müzesi$$) and p.city='Batman'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hasankeyf müzesi$$) and p2.city='Batman' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Hasankeyf Kalesi$$) and p.city='Batman'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hasankeyf Kalesi$$) and p2.city='Batman' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Hasankeyf Yeni Kültürel Park Alanı$$) and p.city='Batman'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Baksı Müzesi$$) and p.city='Bayburt'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hasankeyf Yeni Kültürel Park Alanı$$) and p2.city='Batman' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Bayburt Kalesi$$) and p.city='Bayburt'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Bayburt Kalesi$$) and p2.city='Bayburt' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Baksı Müzesi$$) and p.city='Bayburt'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Baksı Müzesi$$) and p2.city='Bayburt' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Aydıntepe Yeraltı Şehri$$) and p.city='Bayburt'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Harmankaya Kanyonu$$) and p.city='Bilecik'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Söğüt Ertuğrul Gazi Türbesi$$) and p.city='Bilecik'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Aydıntepe Yeraltı Şehri$$) and p2.city='Bayburt' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Pelitözü Göleti$$) and p.city='Bilecik'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Pelitözü Göleti$$) and p2.city='Bilecik' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Harmankaya Kanyonu$$) and p.city='Bilecik'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Harmankaya Kanyonu$$) and p2.city='Bilecik' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Söğüt Ertuğrul Gazi Türbesi$$) and p.city='Bilecik'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Söğüt Ertuğrul Gazi Türbesi$$) and p2.city='Bilecik' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Şeyh Edebali Türbesi$$) and p.city='Bilecik'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Şeyh Edebali Türbesi$$) and p2.city='Bilecik' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Yüzen Adalar$$) and p.city='Bingöl'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Yüzen Adalar Tabiat Anıtı$$) and p.city='Bingöl'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Yüzen Adalar$$) and p2.city='Bingöl' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Bingöl Hesarek Kayak Merkezi$$) and p.city='Bingöl'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Bingöl Hesarek Kayak Merkezi$$) and p2.city='Bingöl' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Yüzen Adalar Tabiat Anıtı$$) and p.city='Bingöl'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Yüzen Adalar Tabiat Anıtı$$) and p2.city='Bingöl' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Kiğı Kalesi$$) and p.city='Bingöl'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kiğı Kalesi$$) and p2.city='Bingöl' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$El-Aman Kervansarayı$$) and p.city='Bitlis'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Ahlat Selçuklu Mezarlığı$$) and p.city='Bitlis'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$El-Aman Kervansarayı$$) and p2.city='Bitlis' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$NEMRUT KRATER GÖLÜ$$) and p.city='Bitlis'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$NEMRUT KRATER GÖLÜ$$) and p2.city='Bitlis' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Ahlat Selçuklu Mezarlığı$$) and p.city='Bitlis'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ahlat Selçuklu Mezarlığı$$) and p2.city='Bitlis' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Bitlis Kalesi$$) and p.city='Bitlis'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Bitlis Kalesi$$) and p2.city='Bitlis' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Gölcük Tabiat Parkı$$) and p.city='Bolu'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Gölcük Tabiat Parkı$$) and p2.city='Bolu' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Abant Gölü Milli Parkı$$) and p.city='Bolu'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Abant Gölü Milli Parkı$$) and p2.city='Bolu' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Büyük Abant Oteli$$) and p.city='Bolu'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Büyük Abant Oteli$$) and p2.city='Bolu' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Yedigöller Şelalesi$$) and p.city='Bolu'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Yedigöller Şelalesi$$) and p2.city='Bolu' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Abant Tabiat Müzesi$$) and p.city='Bolu'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Abant Tabiat Müzesi$$) and p2.city='Bolu' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Yedigöller Milli Parkı$$) and p.city='Bolu'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$SALDA GÖLÜ BELEDİYE HALK PLAJI$$) and p.city='Burdur'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Salda Gölü Tabiat Parkı$$) and p.city='Burdur'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Yedigöller Milli Parkı$$) and p2.city='Bolu' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Salda Gölü$$) and p.city='Burdur'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Sagalassos$$) and p.city='Burdur'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Salda Gölü$$) and p2.city='Burdur' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Salda Gölü Plajı$$) and p.city='Burdur'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Salda Gölü Plajı$$) and p2.city='Burdur' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Sagalassos Antik Kenti$$) and p.city='Burdur'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Salda Gölü Tabiat Parkı$$) and p.city='Burdur'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Salda Gölü Tabiat Parkı$$) and p2.city='Burdur' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$SALDA GÖLÜ BELEDİYE HALK PLAJI$$) and p.city='Burdur'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$SALDA GÖLÜ BELEDİYE HALK PLAJI$$) and p2.city='Burdur' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Sagalassos$$) and p.city='Burdur'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Sagalassos$$) and p2.city='Burdur' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$İnsuyu Mağarası$$) and p.city='Burdur'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$İnsuyu Mağarası$$) and p2.city='Burdur' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Sagalassos Örenyeri$$) and p.city='Burdur'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Sagalassos Örenyeri$$) and p2.city='Burdur' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Cumalıkızık$$) and p.city='Bursa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Sagalassos Antik Kenti$$) and p.city='Burdur'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Sagalassos Antik Kenti$$) and p2.city='Burdur' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$İznik$$) and p.city='Bursa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Uludağ$$) and p.city='Bursa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$İznik$$) and p2.city='Bursa' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Cumalıkızık Köyü$$) and p.city='Bursa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Cumalıkızık Köyü$$) and p2.city='Bursa' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$İznik Gölü$$) and p.city='Bursa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Cumalıkızık$$) and p.city='Bursa'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Cumalıkızık$$) and p2.city='Bursa' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Uludağ$$) and p.city='Bursa'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Uludağ$$) and p2.city='Bursa' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Cumalikizik$$) and p.city='Bursa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Cumalikizik$$) and p2.city='Bursa' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Golyazi$$) and p.city='Bursa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Golyazi$$) and p2.city='Bursa' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
-from pois p where lower(p.name)=lower($$Bursa Ulu Camii$$) and p.city='Bursa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$İznik Gölü$$) and p.city='Bursa'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$İznik Gölü$$) and p2.city='Bursa' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Tirilye$$) and p.city='Bursa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Tirilye$$) and p2.city='Bursa' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Assos Antik Kenti$$) and p.city='Çanakkale'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
+from pois p where lower(p.name)=lower($$Bursa Ulu Camii$$) and p.city='Bursa'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Bursa Ulu Camii$$) and p2.city='Bursa' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Assos Örenyeri$$) and p.city='Çanakkale'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Assos Örenyeri$$) and p2.city='Çanakkale' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Cleanthes Cafe | Assos Behramkale$$) and p.city='Çanakkale'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+from pois p where lower(p.name)=lower($$Assos Antik Kenti$$) and p.city='Çanakkale'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Assos Antik Kenti$$) and p2.city='Çanakkale' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Troya Antik Kenti$$) and p.city='Çanakkale'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Bozcaada$$) and p.city='Çanakkale'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Troya Antik Kenti$$) and p2.city='Çanakkale' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Troya Müzesi$$) and p.city='Çanakkale'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Troya Müzesi$$) and p2.city='Çanakkale' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Bozcaada$$) and p.city='Çanakkale'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Bozcaada$$) and p2.city='Çanakkale' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Çankırı Taş Mescit$$) and p.city='Çankırı'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Çankırı Taş Mescit$$) and p2.city='Çankırı' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Çankırı Kalesi$$) and p.city='Çankırı'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Çankırı Kalesi$$) and p2.city='Çankırı' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Çankırı Tuz Mağarası$$) and p.city='Çankırı'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Çankırı Tuz Mağarası$$) and p2.city='Çankırı' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Ilgaz Dağı$$) and p.city='Çankırı'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ilgaz Dağı$$) and p2.city='Çankırı' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Alacahöyük$$) and p.city='Çorum'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Boğazköy-alacahöyük Milli Parkı$$) and p.city='Çorum'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Hattuşa$$) and p.city='Çorum'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Alacahöyük Müzesi$$) and p.city='Çorum'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Alacahöyük$$) and p2.city='Çorum' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Çorum Kalesi$$) and p.city='Çorum'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Çorum Kalesi$$) and p2.city='Çorum' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$İncesu Kanyonu$$) and p.city='Çorum'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Hattuşa$$) and p.city='Çorum'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hattuşa$$) and p2.city='Çorum' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Hattuşa Örenyeri$$) and p.city='Çorum'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Alacahöyük Müzesi$$) and p.city='Çorum'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Alacahöyük Müzesi$$) and p2.city='Çorum' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Boğazköy-alacahöyük Milli Parkı$$) and p.city='Çorum'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Boğazköy-alacahöyük Milli Parkı$$) and p2.city='Çorum' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Hattuşaş Antik Kenti$$) and p.city='Çorum'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hattuşaş Antik Kenti$$) and p2.city='Çorum' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Pamukkale Travertenleri - Güney Kapı Otopark$$) and p.city='Denizli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$İncesu Kanyonu$$) and p.city='Çorum'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$İncesu Kanyonu$$) and p2.city='Çorum' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Denizli Hierapolis (Pamukkale) Ören yeri$$) and p.city='Denizli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Kaklık Mağarası$$) and p.city='Denizli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Laodikya$$) and p.city='Denizli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Hattuşa Örenyeri$$) and p.city='Çorum'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hattuşa Örenyeri$$) and p2.city='Çorum' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Pamukkale Belediyesi Seyir Tepesi$$) and p.city='Denizli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Pamukkale Belediyesi Seyir Tepesi$$) and p2.city='Denizli' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Pamukkale Travertenleri - Güney Kapı Otopark$$) and p.city='Denizli'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Pamukkale Travertenleri - Güney Kapı Otopark$$) and p2.city='Denizli' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Kaklık Mağarası$$) and p.city='Denizli'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kaklık Mağarası$$) and p2.city='Denizli' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Denizli Hierapolis (Pamukkale) Ören yeri$$) and p.city='Denizli'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Denizli Hierapolis (Pamukkale) Ören yeri$$) and p2.city='Denizli' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Laodikya$$) and p.city='Denizli'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Laodikya$$) and p2.city='Denizli' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Hierapolis$$) and p.city='Denizli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hierapolis$$) and p2.city='Denizli' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Pamukkale$$) and p.city='Denizli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Pamukkale White Heaven Suite Hotel$$) and p.city='Denizli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Ramada Resort by Wyndham Pamukkale Thermal$$) and p.city='Denizli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Pamukkale$$) and p2.city='Denizli' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Pamukkale Travertenleri$$) and p.city='Denizli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Pamukkale Travertenleri$$) and p2.city='Denizli' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Ramada Resort by Wyndham Pamukkale Thermal$$) and p.city='Denizli'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ramada Resort by Wyndham Pamukkale Thermal$$) and p2.city='Denizli' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$On Gözlü Köprü$$) and p.city='Diyarbakır'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$On Gözlü Köprü$$) and p2.city='Diyarbakır' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Hasan Paşa Hanı$$) and p.city='Diyarbakır'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hasan Paşa Hanı$$) and p2.city='Diyarbakır' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Diyarbakır Surları$$) and p.city='Diyarbakır'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Akçakoca Poyraz Otel - Apart$$) and p.city='Düzce'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Samandere Şelalesi$$) and p.city='Düzce'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Akçakoca$$) and p.city='Düzce'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Diyarbakır Surları$$) and p2.city='Diyarbakır' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Güzeldere Şelalesi$$) and p.city='Düzce'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Güzeldere Şelalesi$$) and p2.city='Düzce' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$AKÇAKOCA EFTELYA OTEL$$) and p.city='Düzce'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+from pois p where lower(p.name)=lower($$Akçakoca$$) and p.city='Düzce'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Akçakoca$$) and p2.city='Düzce' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Akçakoca Merkez Camii$$) and p.city='Düzce'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Güzeldere Şelalesi Tabiat Parkı$$) and p.city='Düzce'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Samandere Şelalesi$$) and p.city='Düzce'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Samandere Şelalesi$$) and p2.city='Düzce' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Aydınpınar Şelalesi Tabiat Parkı$$) and p.city='Düzce'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Aydınpınar Şelalesi Tabiat Parkı$$) and p2.city='Düzce' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Μουσείο Τέχνης Μεταξιού$$) and p.city='Edirne'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Akçakoca Merkez Camii$$) and p.city='Düzce'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Akçakoca Merkez Camii$$) and p2.city='Düzce' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Selimiye Camii$$) and p.city='Edirne'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Güzeldere Şelalesi Tabiat Parkı$$) and p.city='Düzce'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Güzeldere Şelalesi Tabiat Parkı$$) and p2.city='Düzce' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$SELİMİYE PALACE$$) and p.city='Edirne'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$SELİMİYE PALACE$$) and p2.city='Edirne' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Μουσείο Τέχνης Μεταξιού$$) and p.city='Edirne'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Selimiye Vakfı Müzesi$$) and p.city='Edirne'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Selimiye Camii$$) and p.city='Edirne'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Selimiye Camii$$) and p2.city='Edirne' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Meriç Köprüsü$$) and p.city='Edirne'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Meriç Köprüsü$$) and p2.city='Edirne' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Μουσείο Τέχνης Μεταξιού$$) and p.city='Edirne'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Μουσείο Τέχνης Μεταξιού$$) and p2.city='Edirne' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Selimiye Vakfı Müzesi$$) and p.city='Edirne'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Selimiye Vakfı Müzesi$$) and p2.city='Edirne' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Edirne Sarayı$$) and p.city='Edirne'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Edirne Sarayı$$) and p2.city='Edirne' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Saklıkapı Kanyonu$$) and p.city='Elazığ'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Harput Kalesi$$) and p.city='Elazığ'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Hazar Gölü$$) and p.city='Elazığ'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Saklıkapı Kanyonu$$) and p2.city='Elazığ' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Buzluk Mağarası$$) and p.city='Elazığ'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Buzluk Mağarası$$) and p2.city='Elazığ' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Hazar Gölü$$) and p.city='Elazığ'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hazar Gölü$$) and p2.city='Elazığ' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Harput Kalesi$$) and p.city='Elazığ'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Harput Kalesi$$) and p2.city='Elazığ' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Keban Baraj Gölü$$) and p.city='Elazığ'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Başpınar Vali Recep Yazıcıoğlu Köprüsü,Ocak Köyü/Kemaliye/Erzincan, Türkiye$$) and p.city='Erzincan'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Karanlık Kanyon$$) and p.city='Erzincan'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Kemaliye Tarihi Kenti$$) and p.city='Erzincan'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Ergan Dağı$$) and p.city='Erzincan'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Keban Baraj Gölü$$) and p2.city='Elazığ' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Kemaliye$$) and p.city='Erzincan'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kemaliye$$) and p2.city='Erzincan' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Altıntepe Ören Yeri$$) and p.city='Erzincan'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Ergan Dağı$$) and p.city='Erzincan'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ergan Dağı$$) and p2.city='Erzincan' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Girlevik Şelalesi$$) and p.city='Erzincan'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Başpınar Vali Recep Yazıcıoğlu Köprüsü,Ocak Köyü/Kemaliye/Erzincan, Türkiye$$) and p.city='Erzincan'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Başpınar Vali Recep Yazıcıoğlu Köprüsü,Ocak Köyü/Kemaliye/Erzincan, Türkiye$$) and p2.city='Erzincan' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Kemaliye Tarihi Kenti$$) and p.city='Erzincan'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kemaliye Tarihi Kenti$$) and p2.city='Erzincan' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Karanlık Kanyon$$) and p.city='Erzincan'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Karanlık Kanyon$$) and p2.city='Erzincan' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Kemah Kalesi$$) and p.city='Erzincan'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kemah Kalesi$$) and p2.city='Erzincan' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Girlevik Şelalesi$$) and p.city='Erzincan'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Girlevik Şelalesi$$) and p2.city='Erzincan' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Altıntepe Ören Yeri$$) and p.city='Erzincan'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Altıntepe Ören Yeri$$) and p2.city='Erzincan' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Polat Palandöken$$) and p.city='Erzurum'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Dedeman Palandöken$$) and p.city='Erzurum'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Polat Palandöken$$) and p2.city='Erzurum' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Dedeman Palandoken Ski Lodge$$) and p.city='Erzurum'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Dedeman Palandoken Ski Lodge$$) and p2.city='Erzurum' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Çifte Minareli Medrese$$) and p.city='Erzurum'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Tortum Şelalesi$$) and p.city='Erzurum'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Dedeman Palandöken$$) and p.city='Erzurum'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Dedeman Palandöken$$) and p2.city='Erzurum' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Palandöken Kayak Merkezi$$) and p.city='Erzurum'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Palandöken Kayak Merkezi$$) and p2.city='Erzurum' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Tarihi Odunpazarı Evleri$$) and p.city='Eskişehir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Tortum Şelalesi$$) and p.city='Erzurum'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Tortum Şelalesi$$) and p2.city='Erzurum' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Odunpazarı Evleri$$) and p.city='Eskişehir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Eskişehir Odunpazarı Evleri$$) and p.city='Eskişehir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Çifte Minareli Medrese$$) and p.city='Erzurum'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Çifte Minareli Medrese$$) and p2.city='Erzurum' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Porsuk Cayi$$) and p.city='Eskişehir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Porsuk Cayi$$) and p2.city='Eskişehir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Porsuk Çayı$$) and p.city='Eskişehir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Tarihi Odunpazarı Evleri$$) and p.city='Eskişehir'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Tarihi Odunpazarı Evleri$$) and p2.city='Eskişehir' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Odunpazarı Evleri$$) and p.city='Eskişehir'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Odunpazarı Evleri$$) and p2.city='Eskişehir' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Eskişehir Odunpazarı Evleri$$) and p.city='Eskişehir'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Eskişehir Odunpazarı Evleri$$) and p2.city='Eskişehir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Odunpazari Evleri$$) and p.city='Eskişehir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Odunpazari Evleri$$) and p2.city='Eskişehir' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Porsuk Çayı$$) and p.city='Eskişehir'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Porsuk Çayı$$) and p2.city='Eskişehir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Odunpazarı Modern Müze (OMM)$$) and p.city='Eskişehir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Zeugma Mozaik Müzesi$$) and p.city='Gaziantep'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Odunpazarı Modern Müze (OMM)$$) and p2.city='Eskişehir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Zeugma Antik Kenti$$) and p.city='Gaziantep'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Zeugma Antik Kenti$$) and p2.city='Gaziantep' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
-from pois p where lower(p.name)=lower($$Gaziantep Kalesi$$) and p.city='Gaziantep'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Zeugma Mozaik Müzesi$$) and p.city='Gaziantep'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Zeugma Mozaik Müzesi$$) and p2.city='Gaziantep' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Bakırcılar Çarşısı$$) and p.city='Gaziantep'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Bakırcılar Çarşısı$$) and p2.city='Gaziantep' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Giresun Adası$$) and p.city='Giresun'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
+from pois p where lower(p.name)=lower($$Gaziantep Kalesi$$) and p.city='Gaziantep'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Gaziantep Kalesi$$) and p2.city='Gaziantep' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Mavi Göl$$) and p.city='Giresun'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Mavi Göl$$) and p2.city='Giresun' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Giresun Adası$$) and p.city='Giresun'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Giresun Adası$$) and p2.city='Giresun' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Kulakkaya Yaylası Giresun$$) and p.city='Giresun'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kulakkaya Yaylası Giresun$$) and p2.city='Giresun' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Mavigöl$$) and p.city='Giresun'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Mavigöl$$) and p2.city='Giresun' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Giresun Adası Botanik Bahçesi$$) and p.city='Giresun'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Giresun Adası Botanik Bahçesi$$) and p2.city='Giresun' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Limni Gölü$$) and p.city='Gümüşhane'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Torul Cam Teras$$) and p.city='Gümüşhane'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Limni Gölü$$) and p2.city='Gümüşhane' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Limni Gölü Tabiat Parkı$$) and p.city='Gümüşhane'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Limni Gölü Tabiat Parkı$$) and p2.city='Gümüşhane' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Torul Cam Teras$$) and p.city='Gümüşhane'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Torul Cam Teras$$) and p2.city='Gümüşhane' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Karaca Mağarası$$) and p.city='Gümüşhane'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Karaca Mağarası$$) and p2.city='Gümüşhane' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Meydan Medresesi$$) and p.city='Hakkari'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$شيرانك$$) and p.city='Hakkari'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Meydan Medresesi$$) and p2.city='Hakkari' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$شيرانك$$) and p.city='Hakkari'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$شيرانك$$) and p2.city='Hakkari' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Cilo Dağları$$) and p.city='Hakkari'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Cilo Dağları$$) and p2.city='Hakkari' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Sat Gölleri$$) and p.city='Hakkari'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Hatay Arkeoloji Müzesi$$) and p.city='Hatay'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Sat Gölleri$$) and p2.city='Hakkari' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Harbiye Şelaleleri$$) and p.city='Hatay'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Harbiye Şelaleleri$$) and p2.city='Hatay' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Harbiye Şelalesi$$) and p.city='Hatay'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Hatay Arkeoloji Müzesi$$) and p.city='Hatay'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hatay Arkeoloji Müzesi$$) and p2.city='Hatay' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Antakya Uzun Çarşı$$) and p.city='Hatay'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Antakya Uzun Çarşı$$) and p2.city='Hatay' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Harbiye Şelalesi$$) and p.city='Hatay'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Harbiye Şelalesi$$) and p2.city='Hatay' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$St. Pierre Kilisesi$$) and p.city='Hatay'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Tuzluca Tuz Mağaraları$$) and p.city='Iğdır'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$St. Pierre Kilisesi$$) and p2.city='Hatay' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Kasımcan Kervansarayı$$) and p.city='Iğdır'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kasımcan Kervansarayı$$) and p2.city='Iğdır' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Tuzluca Tuz Mağaraları$$) and p.city='Iğdır'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Tuzluca Tuz Mağaraları$$) and p2.city='Iğdır' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Tuzluca Tuz Mağarası$$) and p.city='Iğdır'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Tuzluca Tuz Mağarası$$) and p2.city='Iğdır' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$TUZLUCA GÖKKUŞAĞI TEPELERİ$$) and p.city='Iğdır'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$TUZLUCA GÖKKUŞAĞI TEPELERİ$$) and p2.city='Iğdır' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Karakale$$) and p.city='Iğdır'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Isparta Lavanta Köyü | Lavanta Garden ( lavender )$$) and p.city='Isparta'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Karakale$$) and p2.city='Iğdır' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Lavanta Bahçeleri$$) and p.city='Isparta'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Lavanta Bahçeleri$$) and p2.city='Isparta' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Kovada Gölü$$) and p.city='Isparta'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Ispartamdan (Kuyucak Isparta Lavanta Köyü)$$) and p.city='Isparta'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Isparta Lavanta Köyü | Lavanta Garden ( lavender )$$) and p.city='Isparta'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Isparta Lavanta Köyü | Lavanta Garden ( lavender )$$) and p2.city='Isparta' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Lavanta diyari$$) and p.city='Isparta'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Lavanta diyari$$) and p2.city='Isparta' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Kovada Gölü$$) and p.city='Isparta'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kovada Gölü$$) and p2.city='Isparta' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Ispartamdan (Kuyucak Isparta Lavanta Köyü)$$) and p.city='Isparta'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ispartamdan (Kuyucak Isparta Lavanta Köyü)$$) and p2.city='Isparta' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Eğirdir Gölü$$) and p.city='Isparta'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Eğirdir Gölü$$) and p2.city='Isparta' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Topkapı Sarayı$$) and p.city='İstanbul'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Galata Kulesi$$) and p.city='İstanbul'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Kız Kulesi$$) and p.city='İstanbul'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Topkapı Sarayı$$) and p2.city='İstanbul' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Ayasofya$$) and p.city='İstanbul'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ayasofya$$) and p2.city='İstanbul' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Kız Kulesi$$) and p.city='İstanbul'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kız Kulesi$$) and p2.city='İstanbul' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Galata Kulesi$$) and p.city='İstanbul'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Galata Kulesi$$) and p2.city='İstanbul' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Fener Balat$$) and p.city='İstanbul'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Şirince$$) and p.city='İzmir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Fener Balat$$) and p2.city='İstanbul' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Bergama Akropolü$$) and p.city='İzmir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Bergama Akropolü$$) and p2.city='İzmir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Asansör$$) and p.city='İzmir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+from pois p where lower(p.name)=lower($$Şirince$$) and p.city='İzmir'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Şirince$$) and p2.city='İzmir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Alaçatı$$) and p.city='İzmir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Alaçatı$$) and p2.city='İzmir' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Asansör$$) and p.city='İzmir'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Asansör$$) and p2.city='İzmir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Kordon$$) and p.city='İzmir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Çeşme Kalesi$$) and p.city='İzmir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kordon$$) and p2.city='İzmir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Asklepion$$) and p.city='İzmir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Asklepion$$) and p2.city='İzmir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
-from pois p where lower(p.name)=lower($$İzmir Agora$$) and p.city='İzmir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Çeşme Kalesi$$) and p.city='İzmir'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Çeşme Kalesi$$) and p2.city='İzmir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Klaros$$) and p.city='İzmir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Klaros$$) and p2.city='İzmir' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
+from pois p where lower(p.name)=lower($$İzmir Agora$$) and p.city='İzmir'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$İzmir Agora$$) and p2.city='İzmir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Kahramanmaraş Kalesi$$) and p.city='Kahramanmaraş'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kahramanmaraş Kalesi$$) and p2.city='Kahramanmaraş' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Ali Kayası$$) and p.city='Kahramanmaraş'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Kapalı Çarşı$$) and p.city='Kahramanmaraş'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Ali Kayası Cam Terası$$) and p.city='Kahramanmaraş'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ali Kayası$$) and p2.city='Kahramanmaraş' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Kapalı çarşı girişi$$) and p.city='Kahramanmaraş'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kapalı çarşı girişi$$) and p2.city='Kahramanmaraş' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Kapalı Çarşı$$) and p.city='Kahramanmaraş'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kapalı Çarşı$$) and p2.city='Kahramanmaraş' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Ali Kayası Cam Terası$$) and p.city='Kahramanmaraş'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ali Kayası Cam Terası$$) and p2.city='Kahramanmaraş' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Safranbolu Eski Çarşı$$) and p.city='Karabük'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Safranbolu Eski Çarşı$$) and p2.city='Karabük' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Yörük Köyü Safranbolu$$) and p.city='Karabük'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Yörük Köyü Safranbolu$$) and p2.city='Karabük' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Cam Teras Safranbolu$$) and p.city='Karabük'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Tokatlı Kanyonu$$) and p.city='Karabük'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Cam Teras Safranbolu$$) and p2.city='Karabük' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Safranbolu Evleri$$) and p.city='Karabük'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Safranbolu Evleri$$) and p2.city='Karabük' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Tokatlı Kanyonu$$) and p.city='Karabük'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Tokatlı Kanyonu$$) and p2.city='Karabük' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Bulak Mencilis Mağarası$$) and p.city='Karabük'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Bulak Mencilis Mağarası$$) and p2.city='Karabük' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Yeşildere Kanyonu$$) and p.city='Karaman'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
-from pois p where lower(p.name)=lower($$Karaman Kalesi$$) and p.city='Karaman'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
-from pois p where lower(p.name)=lower($$Binbir Kilise$$) and p.city='Karaman'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Yeşildere Kanyonu$$) and p2.city='Karaman' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Taşkale Manazan Mağaraları$$) and p.city='Karaman'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Taşkale Manazan Mağaraları$$) and p2.city='Karaman' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Boğatepe Köyü$$) and p.city='Kars'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
+from pois p where lower(p.name)=lower($$Karaman Kalesi$$) and p.city='Karaman'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Karaman Kalesi$$) and p2.city='Karaman' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
+from pois p where lower(p.name)=lower($$Binbir Kilise$$) and p.city='Karaman'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Binbir Kilise$$) and p2.city='Karaman' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Sarıkamış Kayak Merkezi$$) and p.city='Kars'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Sarıkamış Kayak Merkezi$$) and p2.city='Kars' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Boğatepe Köyü$$) and p.city='Kars'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Boğatepe Köyü$$) and p2.city='Kars' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Kars Kalesi$$) and p.city='Kars'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kars Kalesi$$) and p2.city='Kars' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Ani Harabeleri$$) and p.city='Kars'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Küre Dağları$$) and p.city='Kastamonu'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ani Harabeleri$$) and p2.city='Kars' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Ilgaz Dağı Milli Parkı$$) and p.city='Kastamonu'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ilgaz Dağı Milli Parkı$$) and p2.city='Kastamonu' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Ilgaz Yurduntepe Kayak Merkezi$$) and p.city='Kastamonu'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+from pois p where lower(p.name)=lower($$Küre Dağları$$) and p.city='Kastamonu'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Küre Dağları$$) and p2.city='Kastamonu' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Ilıca Şelalesi$$) and p.city='Kastamonu'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ilıca Şelalesi$$) and p2.city='Kastamonu' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Valla Kanyonu$$) and p.city='Kastamonu'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Valla Kanyonu$$) and p2.city='Kastamonu' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Ilgaz Yurduntepe Kayak Merkezi$$) and p.city='Kastamonu'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ilgaz Yurduntepe Kayak Merkezi$$) and p2.city='Kastamonu' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Valla Kanyonu Milli Park Giriş Yeri$$) and p.city='Kastamonu'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Valla Kanyonu Milli Park Giriş Yeri$$) and p2.city='Kastamonu' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Rıfat Ilgaz Evi$$) and p.city='Kastamonu'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Rıfat Ilgaz Evi$$) and p2.city='Kastamonu' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Kastamonu Kalesi$$) and p.city='Kastamonu'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kastamonu Kalesi$$) and p2.city='Kastamonu' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Mimar Sinan Evi$$) and p.city='Kayseri'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Mimar Sinan Evi$$) and p2.city='Kayseri' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Sultan Sazlığı$$) and p.city='Kayseri'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Sultan Sazlığı$$) and p2.city='Kayseri' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Erciyes Kayak Merkezi$$) and p.city='Kayseri'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Erciyes Kayak Merkezi$$) and p2.city='Kayseri' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Hunat Hatun Külliyesi$$) and p.city='Kayseri'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hunat Hatun Külliyesi$$) and p2.city='Kayseri' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Kapuzbaşı Şelaleleri$$) and p.city='Kayseri'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Kilis Ulu Camii$$) and p.city='Kilis'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kapuzbaşı Şelaleleri$$) and p2.city='Kayseri' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Kilis Kalesi$$) and p.city='Kilis'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kilis Kalesi$$) and p2.city='Kilis' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Kilis Ulu Camii$$) and p.city='Kilis'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kilis Ulu Camii$$) and p2.city='Kilis' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$KİLİS MÜZESİ$$) and p.city='Kilis'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$KİLİS MÜZESİ$$) and p2.city='Kilis' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Ravanda Kalesi$$) and p.city='Kilis'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ravanda Kalesi$$) and p2.city='Kilis' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Hasandede Camii$$) and p.city='Kırıkkale'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hasandede Camii$$) and p2.city='Kırıkkale' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$MKE Silah Sanayi Müzesi$$) and p.city='Kırıkkale'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Dupnisa Mağarası$$) and p.city='Kırklareli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$MKE Silah Sanayi Müzesi$$) and p2.city='Kırıkkale' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$İğneada Plajı$$) and p.city='Kırklareli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$İğneada Plajı$$) and p2.city='Kırklareli' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$İğneada Feneri$$) and p.city='Kırklareli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$İğneada Feneri$$) and p2.city='Kırklareli' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Dupnisa Mağarası$$) and p.city='Kırklareli'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Dupnisa Mağarası$$) and p2.city='Kırklareli' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$İğneada Longoz Ormanları$$) and p.city='Kırklareli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$İğneada Longoz Ormanları$$) and p2.city='Kırklareli' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Ahi Evran Türbesi$$) and p.city='Kırşehir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ahi Evran Türbesi$$) and p2.city='Kırşehir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Kırşehir Ahilik Müzesi$$) and p.city='Kırşehir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kırşehir Ahilik Müzesi$$) and p2.city='Kırşehir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Cacabey Medresesi$$) and p.city='Kırşehir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Cacabey Medresesi$$) and p2.city='Kırşehir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Seyfe Gölü$$) and p.city='Kırşehir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Kartepe Teleferik$$) and p.city='Kocaeli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Seyfe Gölü$$) and p2.city='Kırşehir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Dedeman Kartepe Kocaeli$$) and p.city='Kocaeli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Dedeman Kartepe Kocaeli$$) and p2.city='Kocaeli' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Kartepe Teleferik$$) and p.city='Kocaeli'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kartepe Teleferik$$) and p2.city='Kocaeli' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Kartepe$$) and p.city='Kocaeli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Saklı Vadi Restaurant - Maşukiye, Kartepe$$) and p.city='Kocaeli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Seka Park$$) and p.city='Kocaeli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kartepe$$) and p2.city='Kocaeli' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Kartepe Seyir Tepesi$$) and p.city='Kocaeli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kartepe Seyir Tepesi$$) and p2.city='Kocaeli' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Ormanya$$) and p.city='Kocaeli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ormanya$$) and p2.city='Kocaeli' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Akşehir Özpark Hotel$$) and p.city='Konya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Çatalhöyük$$) and p.city='Konya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Seka Park$$) and p.city='Kocaeli'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Seka Park$$) and p2.city='Kocaeli' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Sille Seyir Tepesi$$) and p.city='Konya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Sille Seyir Tepesi$$) and p2.city='Konya' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Çatalhöyük$$) and p.city='Konya'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Çatalhöyük$$) and p2.city='Konya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Sille$$) and p.city='Konya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Sille$$) and p2.city='Konya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Sille Aya Elenia Kilisesi$$) and p.city='Konya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Sille Aya Elenia Kilisesi$$) and p2.city='Konya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Çatalhöyük Neolitik Kenti$$) and p.city='Konya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Çatalhöyük Neolitik Kenti$$) and p2.city='Konya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Mevlana Müzesi$$) and p.city='Konya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Mevlana Müzesi$$) and p2.city='Konya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Tuz Gölü$$) and p.city='Konya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Kütahya Çini Müzesi$$) and p.city='Kütahya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Tuz Gölü$$) and p2.city='Konya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Dumlupınar Zafertepe Anıtı$$) and p.city='Kütahya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Dumlupınar Zafertepe Anıtı$$) and p2.city='Kütahya' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Kütahya Çini Müzesi$$) and p.city='Kütahya'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kütahya Çini Müzesi$$) and p2.city='Kütahya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Aizanoi Antik Kenti$$) and p.city='Kütahya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Aizanoi Antik Kenti$$) and p2.city='Kütahya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Germiyan Sokağı$$) and p.city='Kütahya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Battalgazi Ulu Camii$$) and p.city='Malatya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Levent Vadisi$$) and p.city='Malatya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Germiyan Sokağı$$) and p2.city='Kütahya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Somuncu Baba Külliyesi$$) and p.city='Malatya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Somuncu Baba Külliyesi$$) and p2.city='Malatya' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Battalgazi Ulu Camii$$) and p.city='Malatya'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Battalgazi Ulu Camii$$) and p2.city='Malatya' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Levent Vadisi$$) and p.city='Malatya'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Levent Vadisi$$) and p2.city='Malatya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Levent Vadisi Seyir Terası$$) and p.city='Malatya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Levent Vadisi Seyir Terası$$) and p2.city='Malatya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Arslantepe Höyüğü$$) and p.city='Malatya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Lidya Sardes Hotel Thermal & Spa$$) and p.city='Manisa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Ağlayan Kaya$$) and p.city='Manisa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Arslantepe Höyüğü$$) and p2.city='Malatya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Sardes Antik Kenti$$) and p.city='Manisa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Sardes Antik Kenti$$) and p2.city='Manisa' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Sardes Antik Kenti - Manisa$$) and p.city='Manisa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Spil Dağı Milli Parkı$$) and p.city='Manisa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Ağlayan Kaya$$) and p.city='Manisa'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ağlayan Kaya$$) and p2.city='Manisa' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Niobe Ağlayan Kaya$$) and p.city='Manisa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Niobe Ağlayan Kaya$$) and p2.city='Manisa' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Sardes Antik Kenti - Manisa$$) and p.city='Manisa'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Sardes Antik Kenti - Manisa$$) and p2.city='Manisa' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Spil Dağı Milli Parkı$$) and p.city='Manisa'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Spil Dağı Milli Parkı$$) and p2.city='Manisa' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Dara Antik Kenti$$) and p.city='Mardin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Dara Antik Kenti$$) and p2.city='Mardin' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Midyat Konukevi$$) and p.city='Mardin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Deyrulzafaran Manastırı$$) and p.city='Mardin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Dara Antik Kenti Batı Yeraltı Su Sarnıcı$$) and p.city='Mardin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Midyat Konukevi$$) and p2.city='Mardin' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Deyrulzafaran Süryani Manastırı$$) and p.city='Mardin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Deyrulzafaran Süryani Manastırı$$) and p2.city='Mardin' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Deyrulzafaran Manastırı$$) and p.city='Mardin'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Deyrulzafaran Manastırı$$) and p2.city='Mardin' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Dara Antik Kenti Batı Yeraltı Su Sarnıcı$$) and p.city='Mardin'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Dara Antik Kenti Batı Yeraltı Su Sarnıcı$$) and p2.city='Mardin' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Mardin Eski Şehir$$) and p.city='Mardin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Kizkalesi$$) and p.city='Mersin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Mardin Eski Şehir$$) and p2.city='Mardin' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Kızkalesi$$) and p.city='Mersin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Kanlıdivane$$) and p.city='Mersin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Cennet Cehennem Obrukları$$) and p.city='Mersin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Kızkalesi Halk Plajı$$) and p.city='Mersin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Cennet Cehennem Sinkholes$$) and p.city='Mersin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kızkalesi$$) and p2.city='Mersin' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Tarsus Şelalesi$$) and p.city='Mersin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Tarsus Şelalesi$$) and p2.city='Mersin' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Kizkalesi$$) and p.city='Mersin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Kanlıdivane$$) and p.city='Mersin'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kanlıdivane$$) and p2.city='Mersin' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Kızkalesi Halk Plajı$$) and p.city='Mersin'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kızkalesi Halk Plajı$$) and p2.city='Mersin' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Cennet Cehennem Sinkholes$$) and p.city='Mersin'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Cennet Cehennem Sinkholes$$) and p2.city='Mersin' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Cennet Cehennem Obrukları$$) and p.city='Mersin'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Cennet Cehennem Obrukları$$) and p2.city='Mersin' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Kizkalesi Beach Walk$$) and p.city='Mersin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kizkalesi Beach Walk$$) and p2.city='Mersin' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Tarsus Selalesi$$) and p.city='Mersin'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Tarsus Selalesi$$) and p2.city='Mersin' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Kizkalesi$$) and p.city='Mersin'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kizkalesi$$) and p2.city='Mersin' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Saklıkent$$) and p.city='Muğla'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Saklıkent$$) and p2.city='Muğla' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Ölüdeniz$$) and p.city='Muğla'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Kayaköy$$) and p.city='Muğla'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ölüdeniz$$) and p2.city='Muğla' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Kelebekler Vadisi$$) and p.city='Muğla'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kelebekler Vadisi$$) and p2.city='Muğla' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Kayaköy$$) and p.city='Muğla'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kayaköy$$) and p2.city='Muğla' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Oludeniz$$) and p.city='Muğla'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Oludeniz$$) and p2.city='Muğla' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Kabak Koyu$$) and p.city='Muğla'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kabak Koyu$$) and p2.city='Muğla' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Malazgirt Meydan Muharebesi TMP (1)$$) and p.city='Muş'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Malazgirt Meydan Muharebesi TMP (1)$$) and p2.city='Muş' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Malazgirt Müzesi$$) and p.city='Muş'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Malazgirt Müzesi$$) and p2.city='Muş' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Malazgirt Kalesi$$) and p.city='Muş'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Malazgirt Kalesi$$) and p2.city='Muş' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$26 Ağustos 1071 Malazğirt Zafer Anıtı$$) and p.city='Muş'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
-from pois p where lower(p.name)=lower($$Malazgirt Meydan Muharebesi Alanı$$) and p.city='Muş'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$26 Ağustos 1071 Malazğirt Zafer Anıtı$$) and p2.city='Muş' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Hamurpet Gölü$$) and p.city='Muş'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hamurpet Gölü$$) and p2.city='Muş' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
+from pois p where lower(p.name)=lower($$Malazgirt Meydan Muharebesi Alanı$$) and p.city='Muş'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Malazgirt Meydan Muharebesi Alanı$$) and p2.city='Muş' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Avanos$$) and p.city='Nevşehir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Göreme Açık Hava Müzesi$$) and p.city='Nevşehir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Avanos$$) and p2.city='Nevşehir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Paşabağları$$) and p.city='Nevşehir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Paşabağları$$) and p2.city='Nevşehir' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Göreme Açık Hava Müzesi$$) and p.city='Nevşehir'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Göreme Açık Hava Müzesi$$) and p2.city='Nevşehir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Goreme Acik Hava Muzesi$$) and p.city='Nevşehir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Kapadokya$$) and p.city='Nevşehir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Goreme Acik Hava Muzesi$$) and p2.city='Nevşehir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Üç Güzeller$$) and p.city='Nevşehir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Üç Güzeller$$) and p2.city='Nevşehir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
-from pois p where lower(p.name)=lower($$Güvercinlik Vadisi$$) and p.city='Nevşehir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Kapadokya$$) and p.city='Nevşehir'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kapadokya$$) and p2.city='Nevşehir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Kozaklı Kaplıcaları$$) and p.city='Nevşehir'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kozaklı Kaplıcaları$$) and p2.city='Nevşehir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Gümüşler Manastırı$$) and p.city='Niğde'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Aladağlar Milli Parkı$$) and p.city='Niğde'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
+from pois p where lower(p.name)=lower($$Güvercinlik Vadisi$$) and p.city='Nevşehir'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Güvercinlik Vadisi$$) and p2.city='Nevşehir' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Aladağlar Camping Bungalow Climber’s House$$) and p.city='Niğde'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Aladağlar Camping Bungalow Climber’s House$$) and p2.city='Niğde' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Aladağlar Milli Parkı$$) and p.city='Niğde'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Aladağlar Milli Parkı$$) and p2.city='Niğde' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Gümüşler Manastırı$$) and p.city='Niğde'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Gümüşler Manastırı$$) and p2.city='Niğde' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Tyana Antik Kenti$$) and p.city='Niğde'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Boztepe$$) and p.city='Ordu'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Ulugöl Tabiat Parkı$$) and p.city='Ordu'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Tyana Antik Kenti$$) and p2.city='Niğde' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Ulugöl$$) and p.city='Ordu'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ulugöl$$) and p2.city='Ordu' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Yason Burnu Feneri$$) and p.city='Ordu'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Boztepe$$) and p.city='Ordu'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Boztepe$$) and p2.city='Ordu' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Ulugöl Tabiat Parkı$$) and p.city='Ordu'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ulugöl Tabiat Parkı$$) and p2.city='Ordu' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Yason Burnu$$) and p.city='Ordu'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Yason Burnu$$) and p2.city='Ordu' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Yason Burnu Feneri$$) and p.city='Ordu'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Yason Burnu Feneri$$) and p2.city='Ordu' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Boztepe Teleferik$$) and p.city='Ordu'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Boztepe Teleferik$$) and p2.city='Ordu' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Karatepe Aslantaş Milli Parkı$$) and p.city='Osmaniye'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Karatepe Aslantaş Milli Parkı$$) and p2.city='Osmaniye' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Karatepe-Aslantaş$$) and p.city='Osmaniye'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Kastabala Antik Kenti$$) and p.city='Osmaniye'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Karatepe Aslantaş Açık Hava Müzesi$$) and p.city='Osmaniye'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Karatepe-Aslantaş$$) and p2.city='Osmaniye' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Toprakkale Kalesi$$) and p.city='Osmaniye'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Toprakkale Kalesi$$) and p2.city='Osmaniye' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$شلال اوسميت اوغلو$$) and p.city='Rize'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Kastabala Antik Kenti$$) and p.city='Osmaniye'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kastabala Antik Kenti$$) and p2.city='Osmaniye' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Ayder Villa de Pelit Hotel$$) and p.city='Rize'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Karatepe Aslantaş Açık Hava Müzesi$$) and p.city='Osmaniye'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Karatepe Aslantaş Açık Hava Müzesi$$) and p2.city='Osmaniye' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Pokut Yaylası$$) and p.city='Rize'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Pokut Yaylası$$) and p2.city='Rize' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$شلال اوسميت اوغلو$$) and p.city='Rize'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$شلال اوسميت اوغلو$$) and p2.city='Rize' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Ayder Yaylası$$) and p.city='Rize'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Zil Kale$$) and p.city='Rize'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ayder Yaylası$$) and p2.city='Rize' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$POKUT$$) and p.city='Rize'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$POKUT$$) and p2.city='Rize' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Zil Kale$$) and p.city='Rize'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Zil Kale$$) and p2.city='Rize' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Fırtına Vadisi$$) and p.city='Rize'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$KOCAALİ Maden Deresi$$) and p.city='Sakarya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Fırtına Vadisi$$) and p2.city='Rize' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Maden Deresi Pamuk Ana Çiftliği Mesire Alanı$$) and p.city='Sakarya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Maden Deresi Pamuk Ana Çiftliği Mesire Alanı$$) and p2.city='Sakarya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Acarlar Longozu$$) and p.city='Sakarya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Sapanca Gölü Yürüyüş Yolu$$) and p.city='Sakarya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$KOCAALİ Maden Deresi$$) and p.city='Sakarya'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$KOCAALİ Maden Deresi$$) and p2.city='Sakarya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Sapanca Gölü$$) and p.city='Sakarya'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Sapanca Gölü$$) and p2.city='Sakarya' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Sapanca Gölü Yürüyüş Yolu$$) and p.city='Sakarya'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Sapanca Gölü Yürüyüş Yolu$$) and p2.city='Sakarya' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Acarlar Longozu$$) and p.city='Sakarya'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Acarlar Longozu$$) and p2.city='Sakarya' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Vezirköprü Şahinkaya Kanyonu Kanyon2 Tekne Turu$$) and p.city='Samsun'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Vezirköprü Şahinkaya Kanyonu Kanyon2 Tekne Turu$$) and p2.city='Samsun' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Bandırma Vapuru$$) and p.city='Samsun'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Bandırma Vapuru$$) and p2.city='Samsun' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Amisos Tepesi$$) and p.city='Samsun'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Şahinkaya Kanyonu$$) and p.city='Samsun'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Amisos Tepesi$$) and p2.city='Samsun' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Şahinkaya Kanyonu Gezisi - Çataloğlu Turizm$$) and p.city='Samsun'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Şahinkaya Kanyonu Gezisi - Çataloğlu Turizm$$) and p2.city='Samsun' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Şahinkaya Kanyonu$$) and p.city='Samsun'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Şahinkaya Kanyonu$$) and p2.city='Samsun' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Bandırma Vapuru Müzesi$$) and p.city='Samsun'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Harran Kültür Evi$$) and p.city='Şanlıurfa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Tarihi Harran Firdevs Ulucami$$) and p.city='Şanlıurfa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Harran Evi$$) and p.city='Şanlıurfa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Bandırma Vapuru Müzesi$$) and p2.city='Samsun' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Karahantepe$$) and p.city='Şanlıurfa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Karahantepe$$) and p2.city='Şanlıurfa' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Şanlıurfa Kalesi$$) and p.city='Şanlıurfa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Şanlıurfa Kalesi$$) and p2.city='Şanlıurfa' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Tarihi Harran Firdevs Ulucami$$) and p.city='Şanlıurfa'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Tarihi Harran Firdevs Ulucami$$) and p2.city='Şanlıurfa' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Harran Kültür Evi$$) and p.city='Şanlıurfa'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Harran Kültür Evi$$) and p2.city='Şanlıurfa' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Harran Evi$$) and p.city='Şanlıurfa'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Harran Evi$$) and p2.city='Şanlıurfa' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Harran Evleri$$) and p.city='Şanlıurfa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Harran Evleri$$) and p2.city='Şanlıurfa' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Göbeklitepe$$) and p.city='Şanlıurfa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Göbeklitepe$$) and p2.city='Şanlıurfa' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Balıklıgöl$$) and p.city='Şanlıurfa'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Hz.Veysel Karani Tabiat Parkı$$) and p.city='Siirt'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Tillo (Aydınlar)$$) and p.city='Siirt'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Balıklıgöl$$) and p2.city='Şanlıurfa' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Botan Vadisi$$) and p.city='Siirt'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Botan Vadisi$$) and p2.city='Siirt' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Tillo Tabiat Parkı$$) and p.city='Siirt'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Hz.Veysel Karani Tabiat Parkı$$) and p.city='Siirt'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hz.Veysel Karani Tabiat Parkı$$) and p2.city='Siirt' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Tillo Kale$$) and p.city='Siirt'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Tillo (Aydınlar)$$) and p.city='Siirt'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Tillo (Aydınlar)$$) and p2.city='Siirt' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Botan Vadisi Milli Parkı$$) and p.city='Siirt'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Botan Vadisi Milli Parkı$$) and p2.city='Siirt' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$İnceburun$$) and p.city='Sinop'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+from pois p where lower(p.name)=lower($$Tillo Kale$$) and p.city='Siirt'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Tillo Kale$$) and p2.city='Siirt' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Hamsilos Koyu$$) and p.city='Sinop'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+from pois p where lower(p.name)=lower($$Tillo Tabiat Parkı$$) and p.city='Siirt'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Tillo Tabiat Parkı$$) and p2.city='Siirt' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Hamsilos Tabiat Parkı$$) and p.city='Sinop'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hamsilos Tabiat Parkı$$) and p2.city='Sinop' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$İnceburun$$) and p.city='Sinop'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$İnceburun$$) and p2.city='Sinop' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Hamsilos Koyu$$) and p.city='Sinop'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Hamsilos Koyu$$) and p2.city='Sinop' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Sinop Tarihi Cezaevi$$) and p.city='Sinop'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Sinop Tarihi Cezaevi$$) and p2.city='Sinop' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Tödürge Gölü$$) and p.city='Sivas'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Tödürge Gölü$$) and p2.city='Sivas' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Divriği Ulu Camii$$) and p.city='Sivas'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Divriği Ulu Camii ve Darüşşifası$$) and p.city='Sivas'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$..$$) and p.city='Sivas'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Divriği Ulu Camii$$) and p2.city='Sivas' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Gök Medrese$$) and p.city='Sivas'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Gök Medrese$$) and p2.city='Sivas' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$..$$) and p.city='Sivas'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$..$$) and p2.city='Sivas' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Divriği Ulu Camii ve Darüşşifası$$) and p.city='Sivas'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Divriği Ulu Camii ve Darüşşifası$$) and p2.city='Sivas' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Kangal Balıklı Kaplıca$$) and p.city='Sivas'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Cizre Nuh Peygamber Türbesi$$) and p.city='Şırnak'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kangal Balıklı Kaplıca$$) and p2.city='Sivas' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Kasrik Boğazı$$) and p.city='Şırnak'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Kasrik Boğazı$$) and p2.city='Şırnak' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Cizre Nuh Peygamber Türbesi$$) and p.city='Şırnak'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Cizre Nuh Peygamber Türbesi$$) and p2.city='Şırnak' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Cudi Dağı$$) and p.city='Şırnak'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Cudi Dağı$$) and p2.city='Şırnak' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Şarköy Plajı$$) and p.city='Tekirdağ'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$ŞARKÖY İSKELESİ$$) and p.city='Tekirdağ'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Şarköy Plajı$$) and p2.city='Tekirdağ' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Rakoczi Müzesi$$) and p.city='Tekirdağ'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Rakoczi Müzesi$$) and p2.city='Tekirdağ' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$ŞARKÖY İSKELESİ$$) and p.city='Tekirdağ'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$ŞARKÖY İSKELESİ$$) and p2.city='Tekirdağ' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Uçmakdere$$) and p.city='Tekirdağ'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Uçmakdere$$) and p2.city='Tekirdağ' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Tokat Kalesi$$) and p.city='Tokat'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Tokat Kalesi$$) and p2.city='Tokat' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Ballıca Mağarası Tabiat Parkı$$) and p.city='Tokat'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ballıca Mağarası Tabiat Parkı$$) and p2.city='Tokat' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Ballıca Mağarası$$) and p.city='Tokat'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ballıca Mağarası$$) and p2.city='Tokat' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Sulusaray Sebastopolis$$) and p.city='Tokat'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Uzungöl Seyir Terası$$) and p.city='Trabzon'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$شاطئ جانيتا$$) and p.city='Trabzon'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Sulusaray Sebastopolis$$) and p2.city='Tokat' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Sumela Manastiri$$) and p.city='Trabzon'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Sumela Manastiri$$) and p2.city='Trabzon' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Atatürk Köşkü$$) and p.city='Trabzon'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$Uzungöl Seyir Terası$$) and p.city='Trabzon'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Uzungöl Seyir Terası$$) and p2.city='Trabzon' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
+from pois p where lower(p.name)=lower($$شاطئ جانيتا$$) and p.city='Trabzon'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$شاطئ جانيتا$$) and p2.city='Trabzon' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Sümela Manastırı$$) and p.city='Trabzon'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Sümela Manastırı$$) and p2.city='Trabzon' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$UZUNGÖL$$) and p.city='Trabzon'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$UZUNGÖL$$) and p2.city='Trabzon' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Atatürk Köşkü$$) and p.city='Trabzon'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Atatürk Köşkü$$) and p2.city='Trabzon' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Pülümür Vadisi$$) and p.city='Tunceli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Pülümür Vadisi$$) and p2.city='Tunceli' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Pertek Kalesi$$) and p.city='Tunceli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Pertek Kalesi$$) and p2.city='Tunceli' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Munzur Vadisi Milli Parkı$$) and p.city='Tunceli'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Munzur Vadisi Milli Parkı$$) and p2.city='Tunceli' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Ulubey Kanyonu$$) and p.city='Uşak'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ulubey Kanyonu$$) and p2.city='Uşak' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Clandras Köprüsü$$) and p.city='Uşak'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Ulubey Kanyonu Tabiat Parkı$$) and p.city='Uşak'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Clandras Köprüsü$$) and p2.city='Uşak' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Blaundus Antik Kenti$$) and p.city='Uşak'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Blaundus Antik Kenti$$) and p2.city='Uşak' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Ulubey Kanyonu Tabiat Parkı$$) and p.city='Uşak'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Ulubey Kanyonu Tabiat Parkı$$) and p2.city='Uşak' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Akdamar Adası$$) and p.city='Van'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Muradiye şelalesi$$) and p.city='Van'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Akdamar Adası$$) and p2.city='Van' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Çavuştepe Kalesi$$) and p.city='Van'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Çavuştepe Kalesi$$) and p2.city='Van' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Akdamar İskelesi$$) and p.city='Van'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Van Kalesi$$) and p.city='Van'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Muradiye Şelalesi$$) and p.city='Van'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Akdamar İskelesi$$) and p2.city='Van' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Akdamar Adası Kilisesi$$) and p.city='Van'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Akdamar Adası Kilisesi$$) and p2.city='Van' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Muradiye Şelalesi$$) and p.city='Van'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Muradiye Şelalesi$$) and p2.city='Van' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Van Kalesi$$) and p.city='Van'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Van Kalesi$$) and p2.city='Van' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Van Gölü$$) and p.city='Van'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Van Gölü$$) and p2.city='Van' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Termal Kaplıcaları$$) and p.city='Yalova'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Vital Thermal Hotel Yalova Termal$$) and p.city='Yalova'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Termal Kaplıcaları$$) and p2.city='Yalova' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Yürüyen Köşk$$) and p.city='Yalova'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Termal Elit Hotel$$) and p.city='Yalova'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Yürüyen Köşk$$) and p2.city='Yalova' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Sudüşen Şelalesi$$) and p.city='Yalova'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Sudüşen Şelalesi$$) and p2.city='Yalova' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Çapanoğlu Camii$$) and p.city='Yozgat'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Çapanoğlu Camii$$) and p2.city='Yozgat' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Aydıncık Kazankaya Kanyonu$$) and p.city='Yozgat'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Aydıncık Kazankaya Kanyonu$$) and p2.city='Yozgat' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Sarıkaya Roma Hamamı$$) and p.city='Yozgat'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Sarıkaya Roma Hamamı$$) and p2.city='Yozgat' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',50,true
 from pois p where lower(p.name)=lower($$Çamlık Milli Parkı$$) and p.city='Yozgat'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Çamlık Milli Parkı$$) and p2.city='Yozgat' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
 from pois p where lower(p.name)=lower($$Filyos Antik Kenti$$) and p.city='Zonguldak'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',35,true
-from pois p where lower(p.name)=lower($$Masal Bungalov Filyos & Restaurant & Cafe$$) and p.city='Zonguldak'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
-insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
-select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
-from pois p where lower(p.name)=lower($$Filyos Kalesi$$) and p.city='Zonguldak'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Filyos Antik Kenti$$) and p2.city='Zonguldak' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Filyos Plaji$$) and p.city='Zonguldak'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Filyos Plaji$$) and p2.city='Zonguldak' and f.is_active) limit 1;
 insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
 select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
 from pois p where lower(p.name)=lower($$Gökgöl Mağarası$$) and p.city='Zonguldak'
-  and not exists (select 1 from featured_places f where f.place_id=p.id) limit 1;
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Gökgöl Mağarası$$) and p2.city='Zonguldak' and f.is_active) limit 1;
+insert into featured_places (place_id,city_id,title,subtitle,sort_order,is_active)
+select p.id,(select ci.id from cities ci where ci.name=p.city limit 1),p.name,'Olmazsa olmaz',40,true
+from pois p where lower(p.name)=lower($$Filyos Kalesi$$) and p.city='Zonguldak'
+  and not exists (select 1 from featured_places f join pois p2 on p2.id=f.place_id
+    where lower(p2.name)=lower($$Filyos Kalesi$$) and p2.city='Zonguldak' and f.is_active) limit 1;
 
 commit;
