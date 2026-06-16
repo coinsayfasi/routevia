@@ -548,7 +548,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   List<PlaceModel> _personalizedDailyPicks() {
     final now = DateTime.now();
     final candidates = _allDiscoveryCandidates()
-        .where((p) => !_isLodgingLikePlace(p))
+        // Kişisel 3 öneri = sadece gezilecek yer (yeme-içmenin kendi bölümü var).
+        .where((p) => !_isLodgingLikePlace(p) && !_isFoodLikePlace(p))
         .toList();
     if (candidates.isEmpty) return const [];
     final ranked = candidates.map((place) {
