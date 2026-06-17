@@ -1,10 +1,12 @@
-apps/mobile/
-supabase/
-tools/
-scripts/
-data/
-docs/
-public-media/
-releases/
-.github/
+# Sadece KÖK dizinleri dışla (leading slash). Slash'sız desen her seviyede eşleşip
+# apps/admin/lib/supabase/ ve apps/admin/lib/data/'yı da siliyordu → Vercel module-not-found.
+/apps/mobile/
+/supabase/
+/tools/
+/scripts/
+/data/
+/docs/
+/public-media/
+/releases/
+/.github/
 node_modules/
