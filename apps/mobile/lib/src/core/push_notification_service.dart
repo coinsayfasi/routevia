@@ -18,16 +18,18 @@ class PushNotificationService {
     if (_initialized) return;
     _initialized = true;
     try {
-      // Request permission (iOS)
-      if (Platform.isIOS) {
-        final settings = await FirebaseMessaging.instance.requestPermission(
-          alert: true,
-          badge: true,
-          sound: true,
-          provisional: false,
-        );
-        if (settings.authorizationStatus == AuthorizationStatus.denied) return;
-      }
+      // Request permission (iOS + Android 13+)
+      final settings = await FirebaseMessaging.instance.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+        provisional: false,
+      );
+      if (settings.authorizationStatus == AuthorizationStatus.denied) return;
+
+      // Blog/duyuru bildirimleri: sunucu tarafı token listesi gerektirmeden
+      // topic üzerinden toplu gönderim (gezi-blog workflow → FCM v1).
+      await FirebaseMessaging.instance.subscribeToTopic('blog');
 
       // Get and register the initial token
       final token = await FirebaseMessaging.instance.getToken();

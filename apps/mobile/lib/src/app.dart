@@ -7,6 +7,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:app_links/app_links.dart';
 
 import 'core/ad_service.dart';
@@ -490,6 +491,12 @@ class _RouteviaAppState extends ConsumerState<RouteviaApp>
     final deepLink = data['deeplink']?.toString();
     if (deepLink != null && deepLink.isNotEmpty) {
       await _handleIncomingUri(Uri.parse(deepLink));
+      return;
+    }
+    // Blog push'ları (gezi-blog workflow): dış URL'i tarayıcıda aç
+    final url = data['url']?.toString();
+    if (url != null && url.startsWith('http')) {
+      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
     }
   }
 
