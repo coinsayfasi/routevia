@@ -46,11 +46,10 @@ class PushNotificationService {
         return;
       }
 
-      // Blog/duyuru bildirimleri: sunucu tarafı token listesi gerektirmeden
-      // topic üzerinden toplu gönderim (gezi-blog workflow → FCM v1).
-      await FirebaseMessaging.instance.subscribeToTopic('blog');
-
-      // Get and register the initial token
+      // Blog/duyuru bildirimleri: token oluştur → topic'e abone ol → kayıt et
+      // sıralaması refreshRegistration() içinde kontrollü retry ile yapılıyor.
+      // (İlk kurulumda token hazır olmadan subscribe SERVICE_NOT_AVAILABLE
+      // atıp init'i düşürmesin diye erken subscribe kaldırıldı.)
       await refreshRegistration();
 
       // Re-register when token refreshes
