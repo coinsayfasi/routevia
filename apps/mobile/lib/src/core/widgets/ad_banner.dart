@@ -73,14 +73,23 @@ class _AdBannerWidgetState extends State<AdBannerWidget> {
   Widget build(BuildContext context) {
     if (_bannerAd == null || !_isLoaded) return const SizedBox.shrink();
 
+    // Klavye açılınca reklamı GİZLE ama ağaçtan ÇIKARMA. AdWidget'ı ağaçtan
+    // söküp tekrar eklemek google_mobile_ads'te platform view re-attach
+    // hatasına ("AdWidget requires Ad to be loaded before...") yol açıyor;
+    // Offstage element'i mount tutar, platform view canlı kalır → çökme yok.
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
-    if (bottomInset > 80) return const SizedBox.shrink();
+    final hidden = bottomInset > 80;
 
-    return Container(
-      alignment: Alignment.center,
-      width: _bannerAd!.size.width.toDouble(),
-      height: _bannerAd!.size.height.toDouble(),
-      child: AdWidget(ad: _bannerAd!),
+    return Offstage(
+      offstage: hidden,
+      child: Container(
+        alignment: Alignment.center,
+        width: _bannerAd!.size.width.toDouble(),
+        height: _bannerAd!.size.height.toDouble(),
+        // Aynı reklam örneği için sabit key → element/platform view kimliği
+        // korunur, reklam değişmediği sürece AdWidget yeniden yaratılmaz.
+        child: AdWidget(key: ValueKey(_bannerAd), ad: _bannerAd!),
+      ),
     );
   }
 }
