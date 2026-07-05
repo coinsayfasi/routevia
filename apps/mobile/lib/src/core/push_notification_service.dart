@@ -54,10 +54,16 @@ class PushNotificationService {
       await refreshRegistration();
 
       // Re-register when token refreshes
-      _tokenSub = FirebaseMessaging.instance.onTokenRefresh.listen(
-        (newToken) => _registerToken(newToken),
-        onError: (e) => debugPrint('[Push] token refresh error: $e'),
-      );
+      _tokenSub = FirebaseMessaging.instance.onTokenRefresh.listen((
+        newToken,
+      ) async {
+        try {
+          await FirebaseMessaging.instance.subscribeToTopic('blog');
+          await _registerToken(newToken);
+        } catch (e) {
+          debugPrint('[Push] token refresh registration error: $e');
+        }
+      }, onError: (e) => debugPrint('[Push] token refresh error: $e'));
       _initialized = true;
     } catch (e) {
       debugPrint('[Push] init error: $e');
@@ -65,9 +71,9 @@ class PushNotificationService {
   }
 
   Future<void> refreshRegistration() async {
-    try {
-      final user = Supabase.instance.client.auth.currentUser;
-      if (user != null) {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user != null) {
+      try {
         final profile = await Supabase.instance.client
             .from('profiles')
             .select('allow_notifications')
@@ -77,14 +83,38 @@ class PushNotificationService {
           await FirebaseMessaging.instance.unsubscribeFromTopic('blog');
           return;
         }
+      } catch (e) {
+        debugPrint(
+          '[Push] preference check failed, registration continues: $e',
+        );
       }
-      await FirebaseMessaging.instance.subscribeToTopic('blog');
-      final token = await FirebaseMessaging.instance.getToken();
-      if (token != null && token.isNotEmpty) {
+    }
+
+    const waits = <Duration>[
+      Duration.zero,
+      Duration(seconds: 2),
+      Duration(seconds: 8),
+    ];
+    for (var attempt = 0; attempt < waits.length; attempt++) {
+      if (waits[attempt] != Duration.zero) {
+        await Future<void>.delayed(waits[attempt]);
+      }
+      try {
+        // İlk kurulumda topic aboneliğinden önce FCM installation/token
+        // oluşturulmalı; aksi halde Android SERVICE_NOT_AVAILABLE döndürebilir.
+        final token = await FirebaseMessaging.instance.getToken();
+        if (token == null || token.isEmpty) {
+          throw StateError('FCM token is empty');
+        }
+        await FirebaseMessaging.instance.subscribeToTopic('blog');
         await _registerToken(token);
+        debugPrint('[Push] blog topic subscribed');
+        return;
+      } catch (e) {
+        debugPrint(
+          '[Push] registration attempt ${attempt + 1}/${waits.length} failed: $e',
+        );
       }
-    } catch (e) {
-      debugPrint('[Push] registration refresh failed: $e');
     }
   }
 
