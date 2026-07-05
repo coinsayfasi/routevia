@@ -7,7 +7,6 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:app_links/app_links.dart';
 
 import 'core/ad_service.dart';
@@ -21,6 +20,7 @@ import 'features/auth/verify_email_screen.dart';
 import 'features/auth/location_setup_screen.dart';
 import 'features/auth/onboarding_screen.dart';
 import 'features/auth/reset_password_screen.dart';
+import 'features/blog/blog_article_screen.dart';
 import 'features/admin/admin_screen.dart';
 import 'features/day_plan/day_plan_screen.dart';
 import 'features/home/home_screen.dart';
@@ -46,6 +46,8 @@ import 'features/trips/community_post_editor_screen.dart';
 import 'data/providers.dart';
 import 'models/community_post_models.dart';
 import 'models/trip_models.dart';
+
+final rootScaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -149,6 +151,20 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/legal',
         builder: (context, state) => LegalScreen(
           documentId: state.uri.queryParameters['doc'] ?? 'privacy',
+        ),
+      ),
+      GoRoute(
+        path: '/blog-reader',
+        redirect: (context, state) {
+          final uri = Uri.tryParse(state.uri.queryParameters['url'] ?? '');
+          return uri == null ||
+                  uri.scheme != 'https' ||
+                  uri.host != 'gezi.tabserve.com.tr'
+              ? '/home'
+              : null;
+        },
+        builder: (context, state) => BlogArticleScreen(
+          url: Uri.parse(state.uri.queryParameters['url']!),
         ),
       ),
       GoRoute(
@@ -275,6 +291,7 @@ class _RouteviaAppState extends ConsumerState<RouteviaApp>
   StreamSubscription<Uri>? _uriSub;
   StreamSubscription<AuthState>? _authSub;
   StreamSubscription<RemoteMessage>? _pushOpenSub;
+  StreamSubscription<RemoteMessage>? _pushForegroundSub;
   bool _handledInitialLink = false;
   bool _handledInitialPush = false;
 
@@ -296,7 +313,11 @@ class _RouteviaAppState extends ConsumerState<RouteviaApp>
 
       if (data.event == AuthChangeEvent.signedIn) {
         // Re-register FCM token now that a user session is available
-        unawaited(PushNotificationService.instance.init().catchError((_) {}));
+        unawaited(
+          PushNotificationService.instance.refreshRegistration().catchError(
+            (_) {},
+          ),
+        );
         // RC: kullanıcıyı tanıt — satın almaları tanıması için gerekli
         final userId = data.session?.user.id;
         if (userId != null) {
@@ -447,7 +468,6 @@ class _RouteviaAppState extends ConsumerState<RouteviaApp>
 
   Future<void> _initNotifications() async {
     await ProximityNotificationService.instance.init();
-    await ProximityNotificationService.instance.requestPermission();
     unawaited(PushNotificationService.instance.init().catchError((_) {}));
     unawaited(_runProximityCheck());
   }
@@ -455,6 +475,25 @@ class _RouteviaAppState extends ConsumerState<RouteviaApp>
   void _bindPushOpenHandlers() {
     _pushOpenSub = FirebaseMessaging.onMessageOpenedApp.listen((message) {
       unawaited(_handlePushOpen(message));
+    });
+    _pushForegroundSub = FirebaseMessaging.onMessage.listen((message) {
+      final title = message.notification?.title ?? 'Routevia';
+      final body = message.notification?.body ?? '';
+      final messenger = rootScaffoldMessengerKey.currentState;
+      if (messenger == null) return;
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(body.isEmpty ? title : '$title\n$body'),
+            action: SnackBarAction(
+              label: ref.read(appLocaleProvider)?.languageCode == 'tr'
+                  ? 'Aç'
+                  : 'Open',
+              onPressed: () => unawaited(_handlePushOpen(message)),
+            ),
+          ),
+        );
     });
     unawaited(_consumeInitialPushMessage());
   }
@@ -493,10 +532,31 @@ class _RouteviaAppState extends ConsumerState<RouteviaApp>
       await _handleIncomingUri(Uri.parse(deepLink));
       return;
     }
-    // Blog push'ları (gezi-blog workflow): dış URL'i tarayıcıda aç
+    if (screen == 'home') {
+      ref.read(appRouterProvider).go('/home');
+      return;
+    }
+    // Blog push'ları: gerçek web URL'sini Routevia içinde aç; web trafiği korunur.
     final url = data['url']?.toString();
     if (url != null && url.startsWith('http')) {
-      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      final source = Uri.tryParse(url);
+      if (source == null || source.host != 'gezi.tabserve.com.tr') return;
+      final tracked = source.replace(
+        queryParameters: {
+          ...source.queryParameters,
+          'utm_source': 'routevia_app',
+          'utm_medium': 'push',
+          'utm_campaign': data['campaign']?.toString() ?? 'blog',
+        },
+      );
+      ref
+          .read(appRouterProvider)
+          .push(
+            Uri(
+              path: '/blog-reader',
+              queryParameters: {'url': tracked.toString()},
+            ).toString(),
+          );
     }
   }
 
@@ -540,6 +600,7 @@ class _RouteviaAppState extends ConsumerState<RouteviaApp>
     _uriSub?.cancel();
     _authSub?.cancel();
     _pushOpenSub?.cancel();
+    _pushForegroundSub?.cancel();
     super.dispose();
   }
 
@@ -549,6 +610,7 @@ class _RouteviaAppState extends ConsumerState<RouteviaApp>
     final locale = ref.watch(appLocaleProvider);
     return MaterialApp.router(
       title: 'Routevia',
+      scaffoldMessengerKey: rootScaffoldMessengerKey,
       theme: buildRouteviaTheme(),
       routerConfig: router,
       debugShowCheckedModeBanner: false,

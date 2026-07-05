@@ -1,7 +1,7 @@
 name: mobile
 description: Routevia mobile app
 publish_to: 'none'
-version: 1.2.41+101
+version: 1.2.42+102
 
 environment:
   sdk: ^3.10.8
@@ -39,6 +39,7 @@ dependencies:
   firebase_crashlytics: ^5.0.1
   flutter_native_splash: ^2.4.6
   flutter_local_notifications: ^18.0.0
+  webview_flutter: ^4.13.1
   connectivity_plus: ^6.1.4
   app_tracking_transparency: ^2.0.6+1
 

@@ -111,12 +111,6 @@ class _BootstrapAppState extends State<_BootstrapApp> {
     }
 
     try {
-      await FirebaseRuntime.registerPushIfAllowed();
-    } catch (e) {
-      debugPrint('[bootstrap] Firebase push registration fail: $e');
-    }
-
-    try {
       await PurchaseService.configure();
       final session = Supabase.instance.client.auth.currentSession;
       if (session != null) {
@@ -169,7 +163,9 @@ class _BootstrapAppState extends State<_BootstrapApp> {
                   child: LinearProgressIndicator(
                     minHeight: 3,
                     borderRadius: BorderRadius.all(Radius.circular(8)),
-                    valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF64D1F4)),
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      Color(0xFF64D1F4),
+                    ),
                     backgroundColor: Color(0x334A6B97),
                   ),
                 ),

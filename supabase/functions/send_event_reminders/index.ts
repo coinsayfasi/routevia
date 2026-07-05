@@ -63,7 +63,11 @@ serve(async (req) => {
     const eventIds = [...new Set(reminderRows.map((row) => row.event_id))];
     const userIds = [...new Set(reminderRows.map((row) => row.user_id))];
 
-    const [{ data: events, error: eventsError }, { data: tokens, error: tokensError }] = await Promise.all([
+    const [
+      { data: events, error: eventsError },
+      { data: tokens, error: tokensError },
+      { data: profiles, error: profilesError },
+    ] = await Promise.all([
       service
         .from("events")
         .select("id,province_id,province_name,name,month_start,month_end,is_active")
@@ -74,10 +78,21 @@ serve(async (req) => {
         .select("id,user_id,token")
         .in("user_id", userIds)
         .eq("enabled", true),
+      service
+        .from("profiles")
+        .select("id,allow_notifications")
+        .in("id", userIds),
     ]);
 
     if (eventsError) return jsonResponse({ error: eventsError.message }, 500);
     if (tokensError) return jsonResponse({ error: tokensError.message }, 500);
+    if (profilesError) return jsonResponse({ error: profilesError.message }, 500);
+
+    const notificationsAllowed = new Set(
+      (profiles ?? [])
+        .filter((profile) => profile.allow_notifications !== false)
+        .map((profile) => String(profile.id)),
+    );
 
     const provinceIds = [...new Set(((events ?? []) as EventRow[]).map((row) => row.province_id))];
     const { data: provinces, error: provincesError } = await service
@@ -99,6 +114,7 @@ serve(async (req) => {
 
     const tokensByUser = new Map<string, TokenRow[]>();
     for (const token of (tokens ?? []) as TokenRow[]) {
+      if (!notificationsAllowed.has(token.user_id)) continue;
       const bucket = tokensByUser.get(token.user_id) ?? [];
       bucket.push(token);
       tokensByUser.set(token.user_id, bucket);

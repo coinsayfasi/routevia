@@ -15,9 +15,25 @@ class PushNotificationService {
   StreamSubscription<String>? _tokenSub;
 
   Future<void> init() async {
-    if (_initialized) return;
-    _initialized = true;
+    if (_initialized) {
+      await refreshRegistration();
+      return;
+    }
     try {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user != null) {
+        final profile = await Supabase.instance.client
+            .from('profiles')
+            .select('allow_notifications')
+            .eq('id', user.id)
+            .maybeSingle();
+        if (profile != null && profile['allow_notifications'] == false) {
+          await FirebaseMessaging.instance.unsubscribeFromTopic('blog');
+          _initialized = true;
+          return;
+        }
+      }
+
       // Request permission (iOS + Android 13+)
       final settings = await FirebaseMessaging.instance.requestPermission(
         alert: true,
@@ -25,26 +41,75 @@ class PushNotificationService {
         sound: true,
         provisional: false,
       );
-      if (settings.authorizationStatus == AuthorizationStatus.denied) return;
+      if (settings.authorizationStatus == AuthorizationStatus.denied) {
+        _initialized = true;
+        return;
+      }
 
       // Blog/duyuru bildirimleri: sunucu tarafı token listesi gerektirmeden
       // topic üzerinden toplu gönderim (gezi-blog workflow → FCM v1).
       await FirebaseMessaging.instance.subscribeToTopic('blog');
 
       // Get and register the initial token
-      final token = await FirebaseMessaging.instance.getToken();
-      if (token != null) {
-        await _registerToken(token);
-      }
+      await refreshRegistration();
 
       // Re-register when token refreshes
       _tokenSub = FirebaseMessaging.instance.onTokenRefresh.listen(
         (newToken) => _registerToken(newToken),
         onError: (e) => debugPrint('[Push] token refresh error: $e'),
       );
+      _initialized = true;
     } catch (e) {
       debugPrint('[Push] init error: $e');
     }
+  }
+
+  Future<void> refreshRegistration() async {
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user != null) {
+        final profile = await Supabase.instance.client
+            .from('profiles')
+            .select('allow_notifications')
+            .eq('id', user.id)
+            .maybeSingle();
+        if (profile != null && profile['allow_notifications'] == false) {
+          await FirebaseMessaging.instance.unsubscribeFromTopic('blog');
+          return;
+        }
+      }
+      await FirebaseMessaging.instance.subscribeToTopic('blog');
+      final token = await FirebaseMessaging.instance.getToken();
+      if (token != null && token.isNotEmpty) {
+        await _registerToken(token);
+      }
+    } catch (e) {
+      debugPrint('[Push] registration refresh failed: $e');
+    }
+  }
+
+  Future<void> setEnabled(bool enabled) async {
+    final messaging = FirebaseMessaging.instance;
+    if (!enabled) {
+      await messaging.unsubscribeFromTopic('blog');
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user != null) {
+        await Supabase.instance.client
+            .from('user_push_tokens')
+            .update({'enabled': false})
+            .eq('user_id', user.id);
+      }
+      return;
+    }
+
+    final settings = await messaging.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+      provisional: false,
+    );
+    if (settings.authorizationStatus == AuthorizationStatus.denied) return;
+    await refreshRegistration();
   }
 
   Future<void> _registerToken(String token) async {
@@ -53,10 +118,7 @@ class PushNotificationService {
       if (user == null) return; // Not logged in yet — will retry on next init
       await Supabase.instance.client.functions.invoke(
         'register_push_token',
-        body: {
-          'token': token,
-          'platform': Platform.isIOS ? 'ios' : 'android',
-        },
+        body: {'token': token, 'platform': Platform.isIOS ? 'ios' : 'android'},
       );
       debugPrint('[Push] token registered');
     } catch (e) {

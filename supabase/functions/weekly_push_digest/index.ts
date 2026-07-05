@@ -74,7 +74,7 @@ serve(async (req) => {
     const userIds = [...new Set(candidates.map((c: { user_id: string }) => c.user_id))];
     const { data: profiles, error: profilesError } = await service
       .from("profiles")
-      .select("id, preferred_province_slug, preferred_province_name")
+      .select("id, preferred_province_slug, preferred_province_name, allow_notifications")
       .in("id", userIds);
 
     if (profilesError) {
@@ -84,6 +84,7 @@ serve(async (req) => {
     // Build user → province map
     const provinceByUser = new Map<string, { slug: string; name: string }>();
     for (const profile of (profiles ?? [])) {
+      if (profile.allow_notifications === false) continue;
       if (profile.preferred_province_slug && profile.preferred_province_name) {
         provinceByUser.set(profile.id, {
           slug: profile.preferred_province_slug,

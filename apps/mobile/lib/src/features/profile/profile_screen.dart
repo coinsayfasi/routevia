@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/error_utils.dart';
 import '../../core/i18n.dart';
+import '../../core/push_notification_service.dart';
 import '../../core/theme.dart';
 import '../../data/local_cache.dart';
 import '../../data/providers.dart';
@@ -22,6 +23,7 @@ class ProfileScreen extends ConsumerStatefulWidget {
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   bool _loading = true;
   bool _savingPace = false;
+  bool _savingNotifications = false;
   String? _error;
   Map<String, dynamic>? _profile;
   Map<String, String> _visitedProvinces = const {};
@@ -68,10 +70,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(ctx.tr('Hesabımı Sil', 'Delete Account')),
-        content: Text(ctx.tr(
-          'Hesabın ve tüm verilerin kalıcı olarak silinecek. Bu işlem geri alınamaz.',
-          'Your account and all data will be permanently deleted. This action cannot be undone.',
-        )),
+        content: Text(
+          ctx.tr(
+            'Hesabın ve tüm verilerin kalıcı olarak silinecek. Bu işlem geri alınamaz.',
+            'Your account and all data will be permanently deleted. This action cannot be undone.',
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -116,11 +120,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       if (!mounted) return;
       setState(() {
         // Preserve all existing fields; only overwrite pref_pace
-        _profile = _profile != null ? {..._profile!, 'pref_pace': normalized} : {'pref_pace': normalized};
+        _profile = _profile != null
+            ? {..._profile!, 'pref_pace': normalized}
+            : {'pref_pace': normalized};
       });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(context.tr('Tercih modu güncellendi.', 'Preference updated.'))));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.tr('Tercih modu güncellendi.', 'Preference updated.'),
+          ),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -128,6 +138,40 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     } finally {
       if (mounted) setState(() => _savingPace = false);
+    }
+  }
+
+  Future<void> _updateNotifications(bool enabled) async {
+    if (_savingNotifications) return;
+    setState(() => _savingNotifications = true);
+    try {
+      await ref
+          .read(repositoryProvider)
+          .updateProfilePreferences(allowNotifications: enabled);
+      await PushNotificationService.instance.setEnabled(enabled);
+      if (!mounted) return;
+      setState(() {
+        _profile = _profile != null
+            ? {..._profile!, 'allow_notifications': enabled}
+            : {'allow_notifications': enabled};
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.tr(
+              enabled ? 'Bildirimler açıldı.' : 'Bildirimler kapatıldı.',
+              enabled ? 'Notifications enabled.' : 'Notifications disabled.',
+            ),
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+    } finally {
+      if (mounted) setState(() => _savingNotifications = false);
     }
   }
 
@@ -146,7 +190,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   Widget build(BuildContext context) {
     final isEnglish = Localizations.localeOf(context).languageCode == 'en';
     final isLoggedIn = Supabase.instance.client.auth.currentSession != null;
-    final email = Supabase.instance.client.auth.currentUser?.email ?? context.tr('Misafir', 'Guest');
+    final email =
+        Supabase.instance.client.auth.currentUser?.email ??
+        context.tr('Misafir', 'Guest');
     final premiumState = ref.watch(premiumStateProvider).valueOrNull;
     final premiumActive = premiumState?.isPro ?? false;
     final premiumExpiry = premiumState?.expiresAt;
@@ -275,7 +321,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                               borderRadius: BorderRadius.circular(999),
                             ),
                             child: Text(
-                              premiumActive ? context.tr('PRO aktif', 'PRO active') : context.tr('Ücretsiz plan', 'Free plan'),
+                              premiumActive
+                                  ? context.tr('PRO aktif', 'PRO active')
+                                  : context.tr('Ücretsiz plan', 'Free plan'),
                               // keep short labels in both locales
                               style: const TextStyle(
                                 color: Colors.white,
@@ -454,6 +502,36 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                             .read(appLocaleProvider.notifier)
                             .setLanguageCode(value);
                       },
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: RouteviaColors.border),
+                  ),
+                  child: SwitchListTile.adaptive(
+                    value: (_profile?['allow_notifications'] as bool?) ?? false,
+                    onChanged: !isLoggedIn || _savingNotifications
+                        ? null
+                        : _updateNotifications,
+                    secondary: _savingNotifications
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.notifications_outlined),
+                    title: Text(
+                      isEnglish ? 'Notifications' : 'Bildirimler',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: Text(
+                      isEnglish
+                          ? 'Travel guides, weekly routes and account updates'
+                          : 'Gezi rehberleri, haftalık rotalar ve hesap güncellemeleri',
                     ),
                   ),
                 ),
@@ -689,11 +767,11 @@ class _CityDiscoveryCard extends StatelessWidget {
         : '$count şehir keşfettin';
     final subtitle = nextName != null
         ? (isEnglish
-            ? 'Next destination: $nextName'
-            : 'Sıradaki hedef: $nextName')
+              ? 'Next destination: $nextName'
+              : 'Sıradaki hedef: $nextName')
         : (isEnglish
-            ? 'You\'re an explorer! Keep going.'
-            : 'Harika! Keşfetmeye devam et.');
+              ? 'You\'re an explorer! Keep going.'
+              : 'Harika! Keşfetmeye devam et.');
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -715,10 +793,7 @@ class _CityDiscoveryCard extends StatelessWidget {
               shape: BoxShape.circle,
             ),
             child: Center(
-              child: Text(
-                '🗺️',
-                style: const TextStyle(fontSize: 22),
-              ),
+              child: Text('🗺️', style: const TextStyle(fontSize: 22)),
             ),
           ),
           const SizedBox(width: 14),
@@ -737,10 +812,7 @@ class _CityDiscoveryCard extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   subtitle,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 13,
-                  ),
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
                 ),
               ],
             ),
