@@ -92,13 +92,25 @@ class PushNotificationService {
     const waits = <Duration>[
       Duration.zero,
       Duration(seconds: 2),
-      Duration(seconds: 8),
+      Duration(seconds: 5),
+      Duration(seconds: 10),
+      Duration(seconds: 15),
     ];
     for (var attempt = 0; attempt < waits.length; attempt++) {
       if (waits[attempt] != Duration.zero) {
         await Future<void>.delayed(waits[attempt]);
       }
       try {
+        // iOS: FCM getToken() APNs token'ı GEREKTİRİR. İlk açılışta APNs kaydı
+        // birkaç saniye gecikebilir; APNs token gelmeden getToken null döner →
+        // ne token kaydı ne topic aboneliği olur (push hiç gelmez). Bu yüzden
+        // önce APNs token'ı bekle, yoksa retry döngüsüne düş.
+        if (Platform.isIOS) {
+          final apns = await FirebaseMessaging.instance.getAPNSToken();
+          if (apns == null || apns.isEmpty) {
+            throw StateError('APNs token not ready');
+          }
+        }
         // İlk kurulumda topic aboneliğinden önce FCM installation/token
         // oluşturulmalı; aksi halde Android SERVICE_NOT_AVAILABLE döndürebilir.
         final token = await FirebaseMessaging.instance.getToken();
