@@ -192,34 +192,6 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
                       ),
                       if (!isPro) ...[
                         const SizedBox(height: 14),
-                        // ── Trial badge (en güçlü dönüşüm tetikleyicisi) ──
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: RouteviaColors.amber.withValues(alpha: 0.18),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(color: RouteviaColors.amber.withValues(alpha: 0.55)),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.bolt, color: RouteviaColors.amber, size: 18),
-                              const SizedBox(width: 6),
-                              Text(
-                                context.tr(
-                                  '${BillingCatalog.trialDays} gün ücretsiz dene · istediğin an iptal',
-                                  '${BillingCatalog.trialDays}-day free trial · cancel anytime',
-                                ),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 10),
                         // ── Sosyal kanıt ──
                         Row(
                           children: [
@@ -417,17 +389,6 @@ class _PremiumScreenState extends ConsumerState<PremiumScreen> {
                                       return Text(perMonth,
                                           style: const TextStyle(fontSize: 12.5, color: RouteviaColors.textSecondary, fontWeight: FontWeight.w600));
                                     }),
-                                  // Trial satırı her iki planda da görünür (aylık + yıllık).
-                                  Text(
-                                    context.tr(
-                                      '${BillingCatalog.trialDays} gün ücretsiz, sonra ${package.storeProduct.priceString}',
-                                      '${BillingCatalog.trialDays} days free, then ${package.storeProduct.priceString}',
-                                    ),
-                                    style: const TextStyle(
-                                        fontSize: 12,
-                                        color: Color(0xFF166534),
-                                        fontWeight: FontWeight.w600),
-                                  ),
                                 ],
                               ),
                             ),

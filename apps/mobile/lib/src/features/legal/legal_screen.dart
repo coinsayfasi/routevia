@@ -301,7 +301,7 @@ const _docs = <String, _LegalDoc>{
           'Abonelikler App Store veya Google Play üzerinden yönetilir; fiyatlandırma satın alma ekranında gösterilir.',
           'Abonelik, iptal edilmedikçe dönem sonunda otomatik olarak yenilenir.',
           'İptaller, App Store (iOS) veya Google Play hesap ayarlarından en geç bir gün önce yapılmalıdır.',
-          'Deneme ve preview süreleri (örn. 7 günlük Pro önizleme) yalnızca bir kez geçerlidir.',
+          'Tanıtım teklifleri (varsa) yalnızca bir kez geçerlidir; uygunluk App Store veya Google Play tarafından belirlenir.',
           'Referral kodundan kazanılan haklarda iade yapılmaz; satın alınan abonelikler platform iade politikasına tabidir.',
         ],
       ),

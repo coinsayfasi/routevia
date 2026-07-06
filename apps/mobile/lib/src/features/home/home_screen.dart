@@ -8,7 +8,6 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../core/billing_catalog.dart';
 import '../../core/constants.dart';
 import '../../core/error_utils.dart';
 import '../../core/geo_utils.dart';
@@ -2238,34 +2237,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         color: Colors.white.withValues(alpha: 0.78),
                         fontSize: 12.5,
                         height: 1.3,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: RouteviaColors.amber.withValues(alpha: 0.16),
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(
-                            color: RouteviaColors.amber.withValues(alpha: 0.5)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.bolt, size: 13, color: RouteviaColors.amber),
-                          const SizedBox(width: 4),
-                          Text(
-                            context.tr(
-                              '${BillingCatalog.trialDays} gün ücretsiz dene',
-                              '${BillingCatalog.trialDays}-day free trial',
-                            ),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 11.5,
-                            ),
-                          ),
-                        ],
                       ),
                     ),
                   ],

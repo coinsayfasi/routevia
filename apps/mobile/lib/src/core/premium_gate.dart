@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/providers.dart';
-import 'billing_catalog.dart';
 import 'theme.dart';
 
 /// Returns `true` when the user has an active Pro or preview entitlement.
@@ -73,27 +72,6 @@ class _PremiumGateSheet extends StatelessWidget {
                 height: 1.45,
               ),
             ),
-            const SizedBox(height: 12),
-            // ── Trial vurgusu ──
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: RouteviaColors.amber.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: RouteviaColors.amber.withValues(alpha: 0.5)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.bolt, color: RouteviaColors.amber, size: 16),
-                  const SizedBox(width: 6),
-                  Text(
-                    '${BillingCatalog.trialDays} gün ücretsiz · istediğin an iptal',
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                  ),
-                ],
-              ),
-            ),
             const SizedBox(height: 20),
             SizedBox(
               width: double.infinity,
@@ -102,7 +80,7 @@ class _PremiumGateSheet extends StatelessWidget {
                   Navigator.pop(context);
                   context.push('/premium');
                 },
-                child: Text('${BillingCatalog.trialDays} Gün Ücretsiz Dene'),
+                child: const Text('Routevia Pro\'yu Keşfet'),
               ),
             ),
             const SizedBox(height: 8),
