@@ -16,6 +16,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 bool _isNetworkError(Object error) {
   final msg = error.toString().toLowerCase();
   return error is SocketException ||
+      error is HttpException ||
       msg.contains('clientexception') ||
       msg.contains('connection abort') ||
       msg.contains('connection reset') ||
@@ -28,6 +29,7 @@ bool _isNetworkError(Object error) {
       msg.contains('network is unreachable') ||
       msg.contains('failed host lookup') ||
       msg.contains('connection timed out') ||
+      msg.contains('invalid statuscode') ||
       msg.contains('tile.openstreetmap.org');
 }
 
