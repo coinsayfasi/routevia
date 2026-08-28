@@ -1,7 +1,7 @@
 name: mobile
 description: Routevia mobile app
 publish_to: 'none'
-version: 1.2.46+106
+version: 1.2.46+107
 
 environment:
   sdk: ^3.10.8
@@ -29,7 +29,7 @@ dependencies:
   url_launcher: ^6.3.2
   share_plus: ^11.1.0
   app_links: ^6.4.0
-  purchases_flutter: ^8.4.0
+  purchases_flutter: ^9.12.3
   image_picker: ^1.2.0
   google_mobile_ads: ^8.0.0
   # AdMob mediation adapter (bidding) — AppLovin (boosts eCPM via auction)

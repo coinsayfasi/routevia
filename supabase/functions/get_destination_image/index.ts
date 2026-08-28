@@ -14,6 +14,33 @@ function slugify(str: string): string {
     .slice(0, 80);
 }
 
+// ─── Yanlış-görsel guardrail'i ────────────────────────────────────────────────
+// Wikidata/Wikipedia araması alakasız sonuç döndürebilir ("Af Kule" → "American
+// Film Institute", "Club Aida" → "Winx Club"). Aday başlık yer adıyla anlamlı bir
+// token paylaşmıyorsa REDDET → yanlış görsel yerine placeholder'a düşülür.
+function _normTr(s: string): string {
+  return (s || "").toLowerCase()
+    .replace(/ç/g, "c").replace(/ğ/g, "g").replace(/ı/g, "i")
+    .replace(/ö/g, "o").replace(/ş/g, "s").replace(/ü/g, "u").replace(/â/g, "a")
+    .replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+const _PLACE_STOP = new Set(
+  ("the a an of and in ve ile icin hotel otel restaurant restoran cafe kafe cay coffee " +
+   "museum muze park plaji plaj koyu koy avm outlet resort suite bungalov marina winery " +
+   "vineyards garden bahce merkezi merkez turkey turkiye izmir city kebap kebab house sofrasi " +
+   "usta ev yemekleri palace suites apart pansiyon").split(" "),
+);
+function _placeTokens(s: string): string[] {
+  return _normTr(s).split(" ").filter((t) => t.length >= 3 && !_PLACE_STOP.has(t));
+}
+/** Aday (Wikidata label / Wikipedia başlığı) yer adıyla güçlü eşleşiyor mu? */
+function matchesPlace(placeName: string, candidate: string): boolean {
+  const q = _placeTokens(placeName);
+  if (q.length === 0) return false; // ayırt edici token yoksa güvenli tarafta kal
+  const c = new Set(_placeTokens(candidate));
+  return q.some((t) => c.has(t));
+}
+
 // ─── Wikimedia Commons direct URL resolver ────────────────────────────────────
 
 /**
@@ -104,6 +131,8 @@ async function getWikidataImage(
           searchData?.search ?? [];
 
         for (const item of items) {
+          // Guardrail: aday etiketi yer adıyla eşleşmiyorsa atla (yanlış görseli ele)
+          if (!matchesPlace(placeName, item.label)) continue;
           // 2. Get P18 (image) claim
           const entityParams = new URLSearchParams({
             action: "wbgetentities",
@@ -201,6 +230,8 @@ async function getEnglishTitleViaTurkishWiki(query: string): Promise<string | nu
       searchData?.query?.search ?? [];
 
     for (const result of results) {
+      // Guardrail: TR arama sonucu yer adıyla eşleşmiyorsa köprüleme (yanlış görseli ele)
+      if (!matchesPlace(query, result.title)) continue;
       const linkParams = new URLSearchParams({
         action: "query",
         pageids: String(result.pageid),
@@ -262,6 +293,8 @@ async function getWikipediaImage(
       const results: Array<{ pageid: number; title: string }> =
         (await searchRes.json())?.query?.search ?? [];
       for (const result of results) {
+        // Guardrail: arama sonucu yer adıyla eşleşmiyorsa atla (ör. "Club Aida" → "Winx Club")
+        if (!matchesPlace(placeName, result.title)) continue;
         const imgParams = new URLSearchParams({
           action: "query",
           pageids: String(result.pageid),

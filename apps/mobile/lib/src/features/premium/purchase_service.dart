@@ -58,7 +58,8 @@ class PurchaseService {
 
   static Future<CustomerInfo> purchasePackage(Package package) async {
     await ensureConfigured();
-    return await Purchases.purchasePackage(package);
+    final result = await Purchases.purchase(PurchaseParams.package(package));
+    return result.customerInfo;
   }
 
   static Future<CustomerInfo> restorePurchases() async {

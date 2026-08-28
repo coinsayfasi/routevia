@@ -94,7 +94,7 @@ class _BootstrapAppState extends State<_BootstrapApp> {
     try {
       await Supabase.initialize(
         url: AppConstants.supabaseUrl,
-        anonKey: AppConstants.supabaseAnonKey,
+        publishableKey: AppConstants.supabaseAnonKey,
         authOptions: const FlutterAuthClientOptions(
           // Implicit flow: tokens arrive in URL fragment — no PKCE code
           // verifier needed. Reliable for mobile deep links.

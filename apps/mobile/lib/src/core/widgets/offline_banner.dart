@@ -62,7 +62,7 @@ class _OfflineBannerState extends State<OfflineBanner>
       children: [
         SizeTransition(
           sizeFactor: _heightAnim,
-          axisAlignment: -1,
+          alignment: const Alignment(-1.0, -1.0),
           child: Material(
             color: const Color(0xFFF59E0B),
             child: SafeArea(
