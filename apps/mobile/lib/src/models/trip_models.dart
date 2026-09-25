@@ -1,3 +1,5 @@
+import 'return_plan.dart';
+
 class ProvinceModel {
   ProvinceModel({required this.id, required this.name, required this.slug});
 
@@ -361,14 +363,33 @@ class TripStop {
 }
 
 class TripDay {
-  TripDay({required this.dayNumber, required this.stops});
+  TripDay({
+    required this.dayNumber,
+    required this.stops,
+    this.travelMinutes,
+    this.durationEstimated = true,
+    this.budgetMinutes,
+    this.returnPlan,
+  });
 
   final int dayNumber;
   final List<TripStop> stops;
+  final int? travelMinutes;
+  final bool durationEstimated;
+  final int? budgetMinutes;
+  final ReturnPlan? returnPlan;
 
   factory TripDay.fromMap(Map<String, dynamic> map) {
     return TripDay(
       dayNumber: (map['day_number'] as num).toInt(),
+      travelMinutes: (map['travel_minutes'] as num?)?.toInt(),
+      durationEstimated: map['duration_estimated'] as bool? ?? true,
+      budgetMinutes: (map['budget_minutes'] as num?)?.toInt(),
+      returnPlan: map['return_plan'] is Map
+          ? ReturnPlan.fromMap(
+              Map<String, dynamic>.from(map['return_plan'] as Map),
+            )
+          : null,
       stops: ((map['stops'] as List?) ?? const [])
           .map((e) => TripStop.fromMap(Map<String, dynamic>.from(e as Map)))
           .toList(),
@@ -414,7 +435,9 @@ class TripPlan {
       personaMode: map['persona_mode']?.toString() ?? 'explorer',
       preferences: ((map['preferences'] as List?) ?? const []).cast<String>(),
       province: map['province'] is Map
-          ? ProvinceModel.fromMap(Map<String, dynamic>.from(map['province'] as Map))
+          ? ProvinceModel.fromMap(
+              Map<String, dynamic>.from(map['province'] as Map),
+            )
           : ProvinceModel(id: '', name: '', slug: ''),
       daysPlan: ((map['days_plan'] as List?) ?? const [])
           .map((e) => TripDay.fromMap(Map<String, dynamic>.from(e as Map)))
@@ -446,6 +469,10 @@ class TripPlan {
         .map(
           (d) => {
             'day_number': d.dayNumber,
+            'travel_minutes': d.travelMinutes,
+            'duration_estimated': d.durationEstimated,
+            'budget_minutes': d.budgetMinutes,
+            'return_plan': d.returnPlan?.toMap(),
             'stops': d.stops
                 .map(
                   (s) => {

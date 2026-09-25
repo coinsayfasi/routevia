@@ -13,9 +13,10 @@ import '../../data/providers.dart';
 import '../../models/community_post_models.dart';
 
 class CommunityPostEditorScreen extends ConsumerStatefulWidget {
-  const CommunityPostEditorScreen({super.key, this.initialPost});
+  const CommunityPostEditorScreen({super.key, this.initialPost, this.draft});
 
   final CommunityPostModel? initialPost;
+  final CommunityPostDraft? draft;
 
   @override
   ConsumerState<CommunityPostEditorScreen> createState() =>
@@ -46,7 +47,18 @@ class _CommunityPostEditorScreenState
     super.initState();
     _post = widget.initialPost;
     _hydrateFromPost();
+    _hydrateFromDraft();
     _loadRoutes();
+  }
+
+  void _hydrateFromDraft() {
+    final draft = widget.draft;
+    if (draft == null || _post != null) return;
+    _titleCtrl.text = draft.title;
+    _summaryCtrl.text = draft.summary;
+    _bodyCtrl.text = draft.body;
+    if (draft.city.isNotEmpty) _cityCtrl.text = draft.city;
+    _relatedRouteId = draft.relatedRouteId;
   }
 
   void _hydrateFromPost() {
@@ -69,6 +81,12 @@ class _CommunityPostEditorScreenState
       _routeOptions = trips
           .where((trip) => (trip['source'] as String?) == 'remote')
           .toList(growable: false);
+      // Taslaktan gelen rota yalnız cihazdaysa (sunucuda yoksa) bağlantıyı düşür.
+      if (_post == null &&
+          _relatedRouteId != null &&
+          !_routeOptions.any((t) => t['id']?.toString() == _relatedRouteId)) {
+        _relatedRouteId = null;
+      }
     });
   }
 
@@ -113,7 +131,8 @@ class _CommunityPostEditorScreenState
     final base = _draftValidationError();
     if (base != null) return base;
     final hasCover =
-        _pickedCover != null || ((_post?.coverImageUrl ?? '').trim().isNotEmpty);
+        _pickedCover != null ||
+        ((_post?.coverImageUrl ?? '').trim().isNotEmpty);
     if (!hasCover) {
       return context.tr(
         'Kapak gorseli olmadan incelemeye gonderemezsin.',
@@ -480,7 +499,12 @@ class _CommunityPostEditorScreenState
           ),
           const SizedBox(height: 10),
           DropdownButtonFormField<String?>(
-            initialValue: _relatedRouteId,
+            // Liste async yüklenir; değer listede yoksa menü çökmesin.
+            key: ValueKey(_routeOptions.length),
+            initialValue:
+                _routeOptions.any((t) => t['id']?.toString() == _relatedRouteId)
+                ? _relatedRouteId
+                : null,
             decoration: InputDecoration(
               labelText: context.tr('Bağlı Rota', 'Related Route'),
             ),

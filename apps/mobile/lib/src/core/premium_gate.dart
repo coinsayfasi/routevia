@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/providers.dart';
+import 'i18n.dart';
 import 'theme.dart';
 
 /// Returns `true` when the user has an active Pro or preview entitlement.
@@ -55,19 +56,25 @@ class _PremiumGateSheet extends StatelessWidget {
             const SizedBox(height: 14),
             Text(
               feature != null
-                  ? '$feature Pro ile kullanılabilir'
-                  : 'Bu özellik Routevia Pro ile açılır',
+                  ? context.tr(
+                      '$feature Pro ile kullanılabilir',
+                      '$feature is available with Pro',
+                    )
+                  : context.tr(
+                      'Bu özellik Routevia Pro ile açılır',
+                      'This feature unlocks with Routevia Pro',
+                    ),
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontWeight: FontWeight.w800,
-                fontSize: 18,
-              ),
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
             ),
             const SizedBox(height: 8),
-            const Text(
-              'Sınırsız plan, trend harita, offline paket, rota optimizasyonu ve daha fazlası.',
+            Text(
+              context.tr(
+                'Sınırsız plan, dönüş saati koruması, trend harita, offline paket ve daha fazlası.',
+                'Unlimited plans, return-time protection, trend map, offline packs and more.',
+              ),
               textAlign: TextAlign.center,
-              style: TextStyle(
+              style: const TextStyle(
                 color: RouteviaColors.textSecondary,
                 height: 1.45,
               ),
@@ -80,13 +87,15 @@ class _PremiumGateSheet extends StatelessWidget {
                   Navigator.pop(context);
                   context.push('/premium');
                 },
-                child: const Text('Routevia Pro\'yu Keşfet'),
+                child: Text(
+                  context.tr('Routevia Pro\'yu Keşfet', 'Explore Routevia Pro'),
+                ),
               ),
             ),
             const SizedBox(height: 8),
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Şimdilik Değil'),
+              child: Text(context.tr('Şimdilik Değil', 'Not Now')),
             ),
           ],
         ),

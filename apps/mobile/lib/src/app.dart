@@ -108,7 +108,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/community-post-editor',
         builder: (context, state) => CommunityPostEditorScreen(
-          initialPost: state.extra as CommunityPostModel?,
+          initialPost: state.extra is CommunityPostModel
+              ? state.extra as CommunityPostModel
+              : null,
+          draft: state.extra is CommunityPostDraft
+              ? state.extra as CommunityPostDraft
+              : null,
         ),
       ),
       GoRoute(

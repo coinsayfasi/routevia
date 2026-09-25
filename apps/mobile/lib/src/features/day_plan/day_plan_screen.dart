@@ -4,32 +4,40 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/error_utils.dart';
 import '../../core/constants.dart';
+import '../../core/i18n.dart';
 import '../../core/widgets/trip_com_card.dart';
+import '../../data/local_cache.dart';
 import '../../data/providers.dart';
 import '../../models/trip_models.dart';
+import '../../models/journey_progress.dart';
+import '../../models/journey_track.dart';
+import 'journey_log_screen.dart';
 
 // ─── Kategori Türkçe etiket haritası ────────────────────────────────────────
-String _categoryTr(String cat) => const {
-  'museum': 'Müze',
-  'historical': 'Tarihi',
-  'nature': 'Doğa',
-  'beach': 'Plaj',
-  'viewpoint': 'Manzara',
-  'food': 'Yemek',
-  'cafe': 'Kafe',
-  'lodging': 'Konaklama',
-  'activity': 'Aktivite',
-  'market': 'Çarşı',
-  'tour': 'Tur',
-  'waterfall': 'Şelale',
-  'canyon': 'Kanyon',
-}[cat] ?? cat;
+String _categoryTr(String cat) =>
+    const {
+      'museum': 'Müze',
+      'historical': 'Tarihi',
+      'nature': 'Doğa',
+      'beach': 'Plaj',
+      'viewpoint': 'Manzara',
+      'food': 'Yemek',
+      'cafe': 'Kafe',
+      'lodging': 'Konaklama',
+      'activity': 'Aktivite',
+      'market': 'Çarşı',
+      'tour': 'Tur',
+      'waterfall': 'Şelale',
+      'canyon': 'Kanyon',
+    }[cat] ??
+    cat;
 
 class DayPlanScreen extends ConsumerStatefulWidget {
   const DayPlanScreen({super.key, required this.plan});
@@ -45,9 +53,18 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
   bool _sharing = false;
   bool _optimizing = false;
   late TripPlan _plan;
-  final Map<String, bool> _checkedStops = {};
+  JourneyProgress _journey = JourneyProgress();
+  bool _progressReady = false;
+  bool _progressSaving = false;
   final Map<String, bool> _checkingStops = {};
   bool _celebrationShown = false;
+
+  // Gezi günlüğü: yalnız kullanıcı açınca ve uygulama açıkken GPS izi kaydedilir.
+  JourneyTrack _track = JourneyTrack();
+  int? _trackDay;
+  StreamSubscription<Position>? _positionSub;
+  int _unsavedPoints = 0;
+  late final LocalCache _cache;
 
   // Konfeti animasyonu (dialog içinde kendi controller'ı var, bu sınıfta gerek yok)
 
@@ -55,9 +72,136 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
   void initState() {
     super.initState();
     _plan = widget.plan;
+    _cache = ref.read(localCacheProvider);
+    if (_plan.daysPlan.isNotEmpty) {
+      _selectedDay = _plan.daysPlan.first.dayNumber;
+    }
+    unawaited(_loadProgress());
+    unawaited(_loadTrack(_selectedDay));
     // Aktif gezi olarak kaydet
+    unawaited(ref.read(localCacheProvider).setActivePlan(_plan.toMap()));
+  }
+
+  @override
+  void dispose() {
+    // dispose içinde setState/ref kullanılamaz: kaydı sessizce durdur ve sakla.
+    final sub = _positionSub;
+    _positionSub = null;
+    unawaited(sub?.cancel());
+    final day = _trackDay;
+    if (day != null && sub != null) {
+      unawaited(
+        _cache
+            .saveJourneyTrack(_plan.tripId, day, _track.withRecording(false))
+            .catchError((_) {}),
+      );
+    }
+    super.dispose();
+  }
+
+  Future<void> _loadTrack(int day) async {
+    if (_positionSub != null) {
+      return; // kayıt sürerken başka günün izini yükleme
+    }
+    try {
+      final t = await _cache.readJourneyTrack(_plan.tripId, day);
+      if (mounted) {
+        setState(() {
+          _track = t;
+          _trackDay = day;
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _persistTrack() async {
+    final day = _trackDay;
+    if (day == null) return;
+    _unsavedPoints = 0;
+    try {
+      await _cache.saveJourneyTrack(_plan.tripId, day, _track);
+    } catch (_) {}
+  }
+
+  Future<void> _startRecording(int day) async {
+    final messenger = ScaffoldMessenger.of(context);
+    String msg(String tr, String en) => context.tr(tr, en);
+    if (!await Geolocator.isLocationServiceEnabled()) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            msg(
+              'Rota kaydı için cihazın konum servisini aç.',
+              'Turn on location services to record your route.',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            msg(
+              'Konum izni olmadan rota kaydedilemez. Günlük, gezdiğin durakları yine gösterir.',
+              'Your route cannot be recorded without location permission. The log still shows your visited stops.',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+    if (_trackDay != day) await _loadTrack(day);
+    if (!mounted) return;
+    setState(() {
+      _trackDay = day;
+      _track = _track.withRecording(true);
+    });
+    _positionSub =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            distanceFilter: 15,
+          ),
+        ).listen((pos) {
+          final next = _track.append(
+            TrackPoint(pos.latitude, pos.longitude, pos.timestamp),
+            accuracyMeters: pos.accuracy,
+          );
+          if (identical(next, _track) || !mounted) return;
+          setState(() => _track = next);
+          if (++_unsavedPoints >= 5) unawaited(_persistTrack());
+        }, onError: (_) => unawaited(_stopRecording(save: true)));
+    unawaited(_persistTrack());
     unawaited(
-      ref.read(localCacheProvider).setActivePlan(_plan.toMap()),
+      ref
+          .read(repositoryProvider)
+          .logAppEvent('journey_track_started', payload: {'day': day})
+          .catchError((_) {}),
+    );
+  }
+
+  Future<void> _stopRecording({bool save = true}) async {
+    final sub = _positionSub;
+    _positionSub = null;
+    await sub?.cancel();
+    _track = _track.withRecording(false);
+    if (mounted) setState(() {});
+    if (save) await _persistTrack();
+  }
+
+  void _openJourneyLog(TripDay day) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            JourneyLogScreen(plan: _plan, day: day, progress: _journey),
+      ),
     );
   }
 
@@ -65,8 +209,9 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
   bool get _allDaysCompleted {
     if (_plan.daysPlan.isEmpty) return false;
     return _plan.daysPlan.every(
-      (day) => day.stops.isNotEmpty &&
-          day.stops.every((s) => _checkedStops[s.place.id] == true),
+      (day) =>
+          day.stops.isNotEmpty &&
+          day.stops.every((s) => _journey.resolved(day.dayNumber, s.place.id)),
     );
   }
 
@@ -121,9 +266,7 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
           'Aç: routevia://share/$token\n'
           'Paylaşım kodu: $token\n'
           'Uygulamayı indir: ${Platform.isIOS ? AppConstants.appStoreUrl : AppConstants.playStoreUrl}';
-      await SharePlus.instance.share(
-        ShareParams(text: text),
-      );
+      await SharePlus.instance.share(ShareParams(text: text));
       await repo.logAppEvent(
         'plan_shared',
         payload: {'trip_id': _plan.tripId, 'token': token},
@@ -140,8 +283,13 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Paylaşım bağlantısı üretilemedi. Genel paylaşım açıldı.'),
+        SnackBar(
+          content: Text(
+            context.tr(
+              'Paylaşım bağlantısı üretilemedi. Genel paylaşım açıldı.',
+              'Could not create a share link. Opened general sharing instead.',
+            ),
+          ),
         ),
       );
     } finally {
@@ -157,65 +305,306 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
     final url = Platform.isIOS
         ? 'https://maps.apple.com/?daddr=$lat,$lng&q=$name'
         : 'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng';
-    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    final opened = await launchUrl(
+      Uri.parse(url),
+      mode: LaunchMode.externalApplication,
+    );
+    if (opened) {
+      unawaited(
+        ref
+            .read(repositoryProvider)
+            .logAppEvent(
+              'trip_navigation_started',
+              payload: {'trip_id': _plan.tripId, 'day': _selectedDay},
+            )
+            .catchError((_) {}),
+      );
+    }
   }
 
   Future<void> _optimizeToday() async {
     if (_optimizing) return;
+    final selected = _plan.daysPlan.firstWhere(
+      (d) => d.dayNumber == _selectedDay,
+    );
+    if (!_progressReady || _journey.startedDays.contains(selected.dayNumber)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.tr(
+              'Başladığın günün sırası korunuyor. Optimizasyonu geziye başlamadan kullan.',
+              'The order of a day you have started is kept. Optimize before starting the trip.',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
     setState(() => _optimizing = true);
     try {
-      final out = await ref.read(repositoryProvider).optimizeTripPlanV2(plan: _plan);
+      final out = await ref
+          .read(repositoryProvider)
+          .optimizeTripPlanV2(plan: _plan, dayNumber: _selectedDay);
       final optimized = out['plan'] as TripPlan? ?? _plan;
-      final premiumUsed = out['premium_used'] == true;
+      final saved = out['saved_minutes'] as int? ?? 0;
+      final estimated = out['estimated'] == true;
+      if (!mounted) return;
+      await ref
+          .read(localCacheProvider)
+          .saveJourneyProgress(optimized.tripId, _journey);
       if (!mounted) return;
       setState(() => _plan = optimized);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            premiumUsed
-                ? 'Plan güncellendi. Premium rota akışı hazır.'
-                : 'Plan güncellendi. Günün rota akışı hazır.',
+            saved > 0
+                ? context.tr(
+                    '${estimated ? 'Tahmini yol süresiyle' : 'Yol sürelerine göre'} $saved dakika daha kısa rota.',
+                    '${estimated ? 'Using estimated travel times' : 'Using road travel times'}: a route $saved min shorter.',
+                  )
+                : context.tr(
+                    'Bu gün için daha kısa bir sıra bulunamadı. Süreler ${estimated ? 'tahmini' : 'yol verisine dayalı'}.',
+                    'No shorter order found for this day. Times are ${estimated ? 'estimated' : 'based on road data'}.',
+                  ),
           ),
         ),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(friendlyError(e))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     } finally {
       if (mounted) setState(() => _optimizing = false);
     }
   }
 
-  Future<void> _toggleCheckin(String placeId) async {
-    if (_checkingStops[placeId] == true) return;
-    setState(() => _checkingStops[placeId] = true);
+  Future<void> _loadProgress() async {
     try {
-      final isChecked = await ref.read(repositoryProvider).toggleCheckin(placeId);
-      if (!mounted) return;
-      setState(() => _checkedStops[placeId] = isChecked);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(isChecked ? 'Check-in kaydedildi ✓' : 'Check-in kaldırıldı'),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-      // Tüm plan tamamlandı mı kontrol et
-      if (isChecked && _allDaysCompleted && !_celebrationShown) {
-        setState(() => _celebrationShown = true);
-        await Future<void>.delayed(const Duration(milliseconds: 400));
-        if (!mounted) return;
-        await _showCelebration();
+      final progress = await ref
+          .read(localCacheProvider)
+          .readJourneyProgress(_plan.tripId);
+      if (mounted) {
+        setState(() {
+          _journey = progress;
+          _progressReady = true;
+        });
       }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(friendlyError(e))),
-      );
-    } finally {
-      if (mounted) setState(() => _checkingStops.remove(placeId));
+    } catch (_) {
+      if (mounted) setState(() => _progressReady = true);
     }
+  }
+
+  Future<void> _saveProgress(JourneyProgress next) async {
+    if (!_progressReady || _progressSaving || _optimizing) return;
+    setState(() => _progressSaving = true);
+    try {
+      await ref
+          .read(localCacheProvider)
+          .saveJourneyProgress(_plan.tripId, next);
+      if (!mounted) return;
+      setState(() => _journey = next);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              context.tr(
+                'Gezi ilerlemesi kaydedilemedi. Tekrar dene.',
+                'Could not save trip progress. Try again.',
+              ),
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _progressSaving = false);
+    }
+  }
+
+  Future<void> _toggleCheckin(String placeId) async {
+    final status = _journey.status(_selectedDay, placeId);
+    await _saveProgress(
+      _journey.mark(
+        _selectedDay,
+        placeId,
+        status == 'visited' ? null : 'visited',
+      ),
+    );
+    if (mounted &&
+        _allDaysCompleted &&
+        !_celebrationShown &&
+        _journey.stops.values.any((v) => v == 'visited')) {
+      setState(() => _celebrationShown = true);
+      await _showCelebration();
+    }
+  }
+
+  String _daySummary(TripDay day) {
+    final travel = day.travelMinutes ?? 0;
+    final total =
+        travel + day.stops.fold<int>(0, (sum, stop) => sum + stop.durationMin);
+    final budget = day.budgetMinutes;
+    return context.tr(
+      '${day.stops.length} durak • $total dk toplam • $travel dk yol'
+          '${day.durationEstimated ? ' (tahmini)' : ''}'
+          '${budget != null ? ' • $budget dk içinde' : ''}',
+      '${day.stops.length} stops • $total min total • $travel min travel'
+          '${day.durationEstimated ? ' (estimated)' : ''}'
+          '${budget != null ? ' • within $budget min' : ''}',
+    );
+  }
+
+  String _clock(DateTime value) =>
+      '${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
+
+  Future<void> _navigateReturn(TripDay day) async {
+    final back = day.returnPlan;
+    if (back == null) return;
+    final url = Platform.isIOS
+        ? 'https://maps.apple.com/?daddr=${back.lat},${back.lng}&dirflg=${_plan.transportMode == 'car' ? 'd' : 'w'}'
+        : 'https://www.google.com/maps/dir/?api=1&destination=${back.lat},${back.lng}&travelmode=${_plan.transportMode == 'car' ? 'driving' : 'walking'}';
+    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  }
+
+  Widget _journeyCard(TripDay day) {
+    final next = _journey.nextStop(day);
+    final started = _journey.startedDays.contains(day.dayNumber);
+    final back = day.returnPlan;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              started
+                  ? (next == null
+                        ? context.tr(
+                            'Günün durakları tamamlandı',
+                            "Today's stops are done",
+                          )
+                        : context.tr('Sıradaki durak', 'Next stop'))
+                  : context.tr(
+                      'Kendi hızında keşfet',
+                      'Explore at your own pace',
+                    ),
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              started && next != null
+                  ? next.place.name
+                  : started
+                  ? context.tr(
+                      'Gezdiklerin ve atladıkların bu cihazda saklandı.',
+                      'Visited and skipped stops are saved on this device.',
+                    )
+                  : context.tr(
+                      'Geziyi başlat; gezdiğin yerleri işaretleyerek sıradaki durağa geç.',
+                      'Start the trip and mark places as visited to move to the next stop.',
+                    ),
+            ),
+            if (!_progressReady) const LinearProgressIndicator(),
+            if (!started)
+              FilledButton.icon(
+                onPressed: !_progressReady || _progressSaving || _optimizing
+                    ? null
+                    : () => _saveProgress(_journey.start(day.dayNumber)),
+                icon: const Icon(Icons.play_arrow),
+                label: Text(context.tr('Geziye başla', 'Start trip')),
+              ),
+            if (started && next != null) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  FilledButton.icon(
+                    onPressed: () => _openNavigation(next),
+                    icon: const Icon(Icons.navigation),
+                    label: Text(context.tr('Yol tarifi', 'Directions')),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _progressSaving
+                        ? null
+                        : () => _toggleCheckin(next.place.id),
+                    icon: const Icon(Icons.check),
+                    label: Text(context.tr('Gezdim', 'Visited')),
+                  ),
+                  TextButton(
+                    onPressed: _progressSaving
+                        ? null
+                        : () => _saveProgress(
+                            _journey.mark(
+                              day.dayNumber,
+                              next.place.id,
+                              'skipped',
+                            ),
+                          ),
+                    child: Text(context.tr('Bu durağı atla', 'Skip this stop')),
+                  ),
+                ],
+              ),
+            ],
+            if (started) ...[
+              const Divider(height: 24),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: _positionSub != null && _trackDay == day.dayNumber,
+                onChanged: (on) =>
+                    on ? _startRecording(day.dayNumber) : _stopRecording(),
+                title: Text(context.tr('Rotamı kaydet', 'Record my route')),
+                subtitle: Text(
+                  _trackDay == day.dayNumber && _track.hasTrack
+                      ? context.tr(
+                          '${_track.distanceKm.toStringAsFixed(1)} km kaydedildi · yalnızca uygulama açıkken',
+                          '${_track.distanceKm.toStringAsFixed(1)} km recorded · only while the app is open',
+                        )
+                      : context.tr(
+                          'GPS izi yalnızca bu cihazda saklanır; uygulama açıkken kaydedilir.',
+                          'Your GPS track stays on this device and is recorded while the app is open.',
+                        ),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => _openJourneyLog(day),
+                icon: const Icon(Icons.auto_stories_outlined),
+                label: Text(context.tr('Gezi günlüğü', 'Trip log')),
+              ),
+            ],
+            if (back != null) ...[
+              const Divider(height: 24),
+              Text(
+                context.tr(
+                  'Dönüş: ${back.label} • ${_clock(back.deadline)}',
+                  'Return: ${back.label} • ${_clock(back.deadline)}',
+                ),
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              Text(
+                context.tr(
+                  '${back.arrival == null ? '' : 'Planlanan varış ${_clock(back.arrival!)} • '}${back.bufferMinutes} dk zaman payı',
+                  '${back.arrival == null ? '' : 'Planned arrival ${_clock(back.arrival!)} • '}${back.bufferMinutes} min buffer',
+                ),
+              ),
+              Text(
+                context.tr(
+                  'Plan ${back.deadline.day}.${back.deadline.month}.${back.deadline.year} için hazırlandı; canlı varış takibi değildir.',
+                  'Planned for ${back.deadline.day}.${back.deadline.month}.${back.deadline.year}; this is not live arrival tracking.',
+                ),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              TextButton.icon(
+                onPressed: () => _navigateReturn(day),
+                icon: const Icon(Icons.keyboard_return),
+                label: Text(context.tr('Dönüş yolunu aç', 'Open return route')),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _showCelebration() async {
@@ -284,7 +673,9 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
     // Bugünkü tamamlanma yüzdesi
     final dayStopCount = day.stops.length;
     final dayCheckedCount = dayStopCount > 0
-        ? day.stops.where((s) => _checkedStops[s.place.id] == true).length
+        ? day.stops
+              .where((s) => _journey.resolved(day.dayNumber, s.place.id))
+              .length
         : 0;
     final dayProgress = dayStopCount > 0 ? dayCheckedCount / dayStopCount : 0.0;
 
@@ -325,6 +716,14 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
       ),
       body: Column(
         children: [
+          if (day.travelMinutes != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Text(
+                _daySummary(day),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
           // ── Başlık kartı ─────────────────────────────────────────────────
           Container(
             width: double.infinity,
@@ -420,9 +819,7 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
                         : 'Plan menzili: ${_plan.radiusUsedKm} km',
                   ),
                 ),
-                Chip(
-                  label: Text(_districtScopeLabel(_plan.districtStrict)),
-                ),
+                Chip(label: Text(_districtScopeLabel(_plan.districtStrict))),
               ],
             ),
           ),
@@ -442,9 +839,10 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
                               child: ChoiceChip(
                                 label: Text('Gün ${d.dayNumber}'),
                                 selected: _selectedDay == d.dayNumber,
-                                onSelected: (_) => setState(
-                                  () => _selectedDay = d.dayNumber,
-                                ),
+                                onSelected: (_) {
+                                  setState(() => _selectedDay = d.dayNumber);
+                                  unawaited(_loadTrack(d.dayNumber));
+                                },
                               ),
                             ),
                           )
@@ -478,26 +876,27 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
           Expanded(
             child: ListView.separated(
               padding: const EdgeInsets.fromLTRB(12, 6, 12, 24),
-              itemCount: day.stops.length + 1,
+              itemCount: day.stops.length + 2,
               separatorBuilder: (context, index) => const SizedBox(height: 10),
-              itemBuilder: (context, index) {
+              itemBuilder: (context, itemIndex) {
+                if (itemIndex == 0) return _journeyCard(day);
+                final index = itemIndex - 1;
                 if (index == day.stops.length) {
-                  return TripComCard(
-                    provinceName: _plan.province.name,
-                  );
+                  return TripComCard(provinceName: _plan.province.name);
                 }
                 final stop = day.stops[index];
                 final slot = _slotLabel(stop, index);
-                final isChecked = _checkedStops[stop.place.id] ?? false;
+                final isChecked =
+                    _journey.status(day.dayNumber, stop.place.id) == 'visited';
+                final isSkipped =
+                    _journey.status(day.dayNumber, stop.place.id) == 'skipped';
                 return InkWell(
                   borderRadius: BorderRadius.circular(14),
-                  onTap: () => context.go('/place', extra: stop.place),
+                  onTap: () => context.push('/place', extra: stop.place),
                   child: Ink(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: isChecked
-                          ? const Color(0xFFF0FDF4)
-                          : Colors.white,
+                      color: isChecked ? const Color(0xFFF0FDF4) : Colors.white,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
                         color: isChecked
@@ -578,11 +977,32 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
                                 children: [
                                   Chip(label: Text(slot)),
                                   Chip(
-                                    label: Text(_categoryTr(stop.place.category)),
+                                    label: Text(
+                                      _categoryTr(stop.place.category),
+                                    ),
                                   ),
                                   Chip(label: Text('${stop.durationMin} dk')),
                                 ],
                               ),
+                              if (isSkipped)
+                                TextButton.icon(
+                                  onPressed: _progressSaving
+                                      ? null
+                                      : () => _saveProgress(
+                                          _journey.mark(
+                                            day.dayNumber,
+                                            stop.place.id,
+                                            null,
+                                          ),
+                                        ),
+                                  icon: const Icon(Icons.undo),
+                                  label: Text(
+                                    context.tr(
+                                      'Atlandı · Geri al',
+                                      'Skipped · Undo',
+                                    ),
+                                  ),
+                                ),
                               const SizedBox(height: 8),
                               Row(
                                 children: [
@@ -607,8 +1027,9 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
                                           side: const BorderSide(
                                             color: Color(0xFF0B3B68),
                                           ),
-                                          foregroundColor:
-                                              const Color(0xFF0B3B68),
+                                          foregroundColor: const Color(
+                                            0xFF0B3B68,
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -617,56 +1038,65 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
                                   Expanded(
                                     child: SizedBox(
                                       height: 32,
-                                      child: Builder(builder: (context) {
-                                        final isChecking =
-                                            _checkingStops[stop.place.id] ==
-                                            true;
-                                        return OutlinedButton.icon(
-                                          onPressed: isChecking
-                                              ? null
-                                              : () => _toggleCheckin(
-                                                  stop.place.id),
-                                          icon: isChecking
-                                              ? const SizedBox(
-                                                  width: 13,
-                                                  height: 13,
-                                                  child:
-                                                      CircularProgressIndicator(
-                                                    strokeWidth: 2,
+                                      child: Builder(
+                                        builder: (context) {
+                                          final isChecking =
+                                              _checkingStops[stop.place.id] ==
+                                              true;
+                                          return OutlinedButton.icon(
+                                            onPressed:
+                                                isChecking ||
+                                                    !_progressReady ||
+                                                    _progressSaving
+                                                ? null
+                                                : () => _toggleCheckin(
+                                                    stop.place.id,
                                                   ),
-                                                )
-                                              : Icon(
-                                                  isChecked
-                                                      ? Icons
-                                                            .check_circle_rounded
-                                                      : Icons.flag_outlined,
-                                                  size: 15,
-                                                ),
-                                          label: Text(
-                                            isChecked ? 'Gidildi ✓' : 'Geldim!',
-                                          ),
-                                          style: OutlinedButton.styleFrom(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
+                                            icon: isChecking
+                                                ? const SizedBox(
+                                                    width: 13,
+                                                    height: 13,
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                          strokeWidth: 2,
+                                                        ),
+                                                  )
+                                                : Icon(
+                                                    isChecked
+                                                        ? Icons
+                                                              .check_circle_rounded
+                                                        : Icons.flag_outlined,
+                                                    size: 15,
+                                                  ),
+                                            label: Text(
+                                              isChecked
+                                                  ? 'Gidildi ✓'
+                                                  : 'Gezdim',
                                             ),
-                                            textStyle: const TextStyle(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                            side: BorderSide(
-                                              color: isChecked
+                                            style: OutlinedButton.styleFrom(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 8,
+                                                  ),
+                                              textStyle: const TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                              side: BorderSide(
+                                                color: isChecked
+                                                    ? const Color(0xFF166534)
+                                                    : const Color(0xFF374151),
+                                              ),
+                                              foregroundColor: isChecked
                                                   ? const Color(0xFF166534)
                                                   : const Color(0xFF374151),
+                                              backgroundColor: isChecked
+                                                  ? const Color(0xFFDCFCE7)
+                                                  : null,
                                             ),
-                                            foregroundColor: isChecked
-                                                ? const Color(0xFF166534)
-                                                : const Color(0xFF374151),
-                                            backgroundColor: isChecked
-                                                ? const Color(0xFFDCFCE7)
-                                                : null,
-                                          ),
-                                        );
-                                      }),
+                                          );
+                                        },
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -716,10 +1146,7 @@ class _CelebrationDialogState extends State<_CelebrationDialog>
   @override
   void initState() {
     super.initState();
-    _particles = List.generate(
-      40,
-      (_) => _ConfettiParticle(rng: _rng),
-    );
+    _particles = List.generate(40, (_) => _ConfettiParticle(rng: _rng));
     _ctrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2500),
@@ -758,10 +1185,7 @@ class _CelebrationDialogState extends State<_CelebrationDialog>
                   ),
                 ),
               ),
-              const Text(
-                '🎉',
-                style: TextStyle(fontSize: 52),
-              ),
+              const Text('🎉', style: TextStyle(fontSize: 52)),
               const SizedBox(height: 12),
               const Text(
                 'Gezi Tamamlandı!',
@@ -776,10 +1200,7 @@ class _CelebrationDialogState extends State<_CelebrationDialog>
                 '${widget.provinceName} gezinde ${widget.totalStops} durağı'
                 ' tamamladın. Harika bir gezi olmuştur! 🏆',
                 textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Color(0xFF475569),
-                  height: 1.5,
-                ),
+                style: const TextStyle(color: Color(0xFF475569), height: 1.5),
               ),
               const SizedBox(height: 24),
               Row(
@@ -816,12 +1237,12 @@ class _CelebrationDialogState extends State<_CelebrationDialog>
 
 class _ConfettiParticle {
   _ConfettiParticle({required math.Random rng})
-      : x = rng.nextDouble(),
-        startY = -0.1 - rng.nextDouble() * 0.3,
-        speed = 0.4 + rng.nextDouble() * 0.6,
-        size = 5.0 + rng.nextDouble() * 7,
-        color = _kConfettiColors[rng.nextInt(_kConfettiColors.length)],
-        rotationSpeed = (rng.nextDouble() - 0.5) * 8;
+    : x = rng.nextDouble(),
+      startY = -0.1 - rng.nextDouble() * 0.3,
+      speed = 0.4 + rng.nextDouble() * 0.6,
+      size = 5.0 + rng.nextDouble() * 7,
+      color = _kConfettiColors[rng.nextInt(_kConfettiColors.length)],
+      rotationSpeed = (rng.nextDouble() - 0.5) * 8;
 
   final double x;
   final double startY;
@@ -842,10 +1263,7 @@ const _kConfettiColors = [
 ];
 
 class _ConfettiPainter extends CustomPainter {
-  const _ConfettiPainter({
-    required this.particles,
-    required this.progress,
-  });
+  const _ConfettiPainter({required this.particles, required this.progress});
 
   final List<_ConfettiParticle> particles;
   final double progress;
@@ -862,9 +1280,14 @@ class _ConfettiPainter extends CustomPainter {
       canvas.save();
       canvas.translate(px, py);
       canvas.rotate(rotation);
-      final paint = Paint()..color = p.color.withValues(alpha: (1 - progress * 0.6).clamp(0, 1));
+      final paint = Paint()
+        ..color = p.color.withValues(alpha: (1 - progress * 0.6).clamp(0, 1));
       canvas.drawRect(
-        Rect.fromCenter(center: Offset.zero, width: p.size, height: p.size * 0.6),
+        Rect.fromCenter(
+          center: Offset.zero,
+          width: p.size,
+          height: p.size * 0.6,
+        ),
         paint,
       );
       canvas.restore();

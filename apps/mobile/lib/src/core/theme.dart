@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class RouteviaColors {
   // Brand
@@ -67,96 +68,101 @@ ThemeData buildRouteviaTheme() {
     outline: RouteviaColors.border,
   );
 
+  // Plus Jakarta Sans: geometric, rounded-friendly sans with a modern
+  // travel-app feel — swaps in over the previous system-font text theme
+  // while keeping every existing size/weight/spacing value untouched.
+  final baseTextTheme = TextTheme(
+    displayLarge: const TextStyle(
+      color: RouteviaColors.textPrimary,
+      fontWeight: FontWeight.w900,
+      fontSize: 36,
+      letterSpacing: -1.0,
+      height: 1.1,
+    ),
+    displayMedium: const TextStyle(
+      color: RouteviaColors.textPrimary,
+      fontWeight: FontWeight.w800,
+      fontSize: 28,
+      letterSpacing: -0.5,
+      height: 1.15,
+    ),
+    headlineLarge: const TextStyle(
+      color: RouteviaColors.textPrimary,
+      fontWeight: FontWeight.w700,
+      fontSize: 22,
+      letterSpacing: -0.3,
+    ),
+    headlineMedium: const TextStyle(
+      color: RouteviaColors.textPrimary,
+      fontWeight: FontWeight.w700,
+      fontSize: 18,
+      letterSpacing: -0.2,
+    ),
+    titleLarge: const TextStyle(
+      color: RouteviaColors.textPrimary,
+      fontWeight: FontWeight.w700,
+      fontSize: 16,
+    ),
+    titleMedium: const TextStyle(
+      color: RouteviaColors.textPrimary,
+      fontWeight: FontWeight.w600,
+      fontSize: 14,
+    ),
+    titleSmall: const TextStyle(
+      color: RouteviaColors.textSecondary,
+      fontWeight: FontWeight.w600,
+      fontSize: 13,
+    ),
+    bodyLarge: const TextStyle(
+      color: RouteviaColors.textPrimary,
+      fontSize: 15,
+      height: 1.5,
+    ),
+    bodyMedium: const TextStyle(
+      color: RouteviaColors.textPrimary,
+      fontSize: 14,
+      height: 1.5,
+    ),
+    bodySmall: const TextStyle(
+      color: RouteviaColors.textSecondary,
+      fontSize: 12,
+      height: 1.4,
+    ),
+    labelLarge: const TextStyle(
+      color: RouteviaColors.textPrimary,
+      fontWeight: FontWeight.w600,
+      fontSize: 14,
+      letterSpacing: 0.1,
+    ),
+    labelMedium: const TextStyle(
+      color: RouteviaColors.textSecondary,
+      fontWeight: FontWeight.w500,
+      fontSize: 12,
+    ),
+    labelSmall: const TextStyle(
+      color: RouteviaColors.textTertiary,
+      fontWeight: FontWeight.w500,
+      fontSize: 11,
+      letterSpacing: 0.2,
+    ),
+  );
+
   return ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
     scaffoldBackgroundColor: RouteviaColors.background,
 
-    textTheme: const TextTheme(
-      displayLarge: TextStyle(
-        color: RouteviaColors.textPrimary,
-        fontWeight: FontWeight.w900,
-        fontSize: 36,
-        letterSpacing: -1.0,
-        height: 1.1,
-      ),
-      displayMedium: TextStyle(
-        color: RouteviaColors.textPrimary,
-        fontWeight: FontWeight.w800,
-        fontSize: 28,
-        letterSpacing: -0.5,
-        height: 1.15,
-      ),
-      headlineLarge: TextStyle(
-        color: RouteviaColors.textPrimary,
-        fontWeight: FontWeight.w700,
-        fontSize: 22,
-        letterSpacing: -0.3,
-      ),
-      headlineMedium: TextStyle(
-        color: RouteviaColors.textPrimary,
-        fontWeight: FontWeight.w700,
-        fontSize: 18,
-        letterSpacing: -0.2,
-      ),
-      titleLarge: TextStyle(
-        color: RouteviaColors.textPrimary,
-        fontWeight: FontWeight.w700,
-        fontSize: 16,
-      ),
-      titleMedium: TextStyle(
-        color: RouteviaColors.textPrimary,
-        fontWeight: FontWeight.w600,
-        fontSize: 14,
-      ),
-      titleSmall: TextStyle(
-        color: RouteviaColors.textSecondary,
-        fontWeight: FontWeight.w600,
-        fontSize: 13,
-      ),
-      bodyLarge: TextStyle(
-        color: RouteviaColors.textPrimary,
-        fontSize: 15,
-        height: 1.5,
-      ),
-      bodyMedium: TextStyle(
-        color: RouteviaColors.textPrimary,
-        fontSize: 14,
-        height: 1.5,
-      ),
-      bodySmall: TextStyle(
-        color: RouteviaColors.textSecondary,
-        fontSize: 12,
-        height: 1.4,
-      ),
-      labelLarge: TextStyle(
-        color: RouteviaColors.textPrimary,
-        fontWeight: FontWeight.w600,
-        fontSize: 14,
-        letterSpacing: 0.1,
-      ),
-      labelMedium: TextStyle(
-        color: RouteviaColors.textSecondary,
-        fontWeight: FontWeight.w500,
-        fontSize: 12,
-      ),
-      labelSmall: TextStyle(
-        color: RouteviaColors.textTertiary,
-        fontWeight: FontWeight.w500,
-        fontSize: 11,
-        letterSpacing: 0.2,
-      ),
-    ),
+    textTheme: GoogleFonts.plusJakartaSansTextTheme(baseTextTheme),
 
-    appBarTheme: const AppBarTheme(
+    appBarTheme: AppBarTheme(
       centerTitle: false,
       backgroundColor: RouteviaColors.surface,
       surfaceTintColor: Colors.transparent,
       foregroundColor: RouteviaColors.textPrimary,
       elevation: 0,
       scrolledUnderElevation: 1,
-      shadowColor: Color(0x14000000),
-      titleTextStyle: TextStyle(
+      shadowColor: const Color(0x14000000),
+      titleTextStyle: GoogleFonts.plusJakartaSans(
         color: RouteviaColors.textPrimary,
         fontWeight: FontWeight.w700,
         fontSize: 18,

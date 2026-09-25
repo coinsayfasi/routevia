@@ -2,9 +2,14 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { corsHeaders, errorResponse, jsonResponse } from "../_shared/http.ts";
 import { getServiceClient, requireUser } from "../_shared/client.ts";
 
+import { hasActivePro } from "../_shared/pro_access.ts";
+import { fetchRcProExpiry } from "../_shared/revenuecat.ts";
+
 type Coord = { lat: number; lng: number };
 type Payload = {
   trip_day_id?: string;
+  matrix?: boolean;
+  pro_feature?: "return_deadline";
   coords?: Coord[];
   profile?: "driving" | "walking" | "cycling";
 };
@@ -17,6 +22,36 @@ serve(async (req) => {
     const body = (await req.json()) as Payload;
     let coords: Coord[] = [];
     const authHeader = req.headers.get("Authorization") ?? undefined;
+
+    let proAuthorized = false;
+    if (body.pro_feature !== undefined) {
+      if (body.pro_feature !== "return_deadline" || body.matrix !== true) {
+        return jsonResponse({ error: "invalid_pro_feature" }, 400);
+      }
+      let user;
+      try { user = await requireUser(authHeader); }
+      catch { return jsonResponse({ error: "unauthorized" }, 401); }
+      const service = getServiceClient();
+      const [profile, entitlements] = await Promise.all([
+        service.from("profiles").select("role").eq("id", user.id).maybeSingle(),
+        service.from("user_entitlements").select("entitlement_key,expires_at").eq("user_id", user.id),
+      ]);
+      if (profile.error || entitlements.error) return jsonResponse({ error: "entitlement_unavailable" }, 503);
+      if (!hasActivePro(profile.data?.role, entitlements.data ?? [])) {
+        // DB yalnızca satın alma anında senkronlanıyor; yenilenmiş abonelikler için RevenueCat'e danış.
+        let rcExpiry: string | null;
+        try { rcExpiry = await fetchRcProExpiry(user.id); }
+        catch { return jsonResponse({ error: "entitlement_unavailable" }, 503); }
+        if (!rcExpiry) return jsonResponse({ error: "pro_required" }, 403);
+        await service.from("user_entitlements").delete()
+          .eq("user_id", user.id).eq("entitlement_key", "routevia_pro");
+        await service.from("user_entitlements").insert({
+          user_id: user.id, entitlement_key: "routevia_pro", expires_at: rcExpiry,
+        });
+      }
+      proAuthorized = true;
+    }
+    const matrixResponse = (data: Record<string, unknown>) => jsonResponse({ ...data, pro_authorized: proAuthorized });
 
     if (body.trip_day_id) {
       if (!/^[0-9a-fA-F-]{36}$/.test(body.trip_day_id)) {
@@ -71,12 +106,52 @@ serve(async (req) => {
       return jsonResponse({ mode: "straight", points: coords });
     }
 
-    const profile = body.profile ?? "driving";
-    const osrmBase = Deno.env.get("OSRM_BASE_URL") ?? "http://localhost:5000";
-    const path = coords.map((c) => `${c.lng},${c.lat}`).join(";");
-    const url = `${osrmBase}/route/v1/${profile}/${path}?overview=full&geometries=geojson`;
+    if (body.matrix) {
+      if (coords.length > 25 || coords.length !== body.coords?.length) {
+        return jsonResponse({ error: "invalid_coordinates" }, 400);
+      }
+      const profile = body.profile ?? "driving";
+      // OSRM profiles depend on the dataset loaded into each server.
+      // Never send walking/cycling requests to a driving-only dataset.
+      const envKey = profile === "walking" ? "OSRM_WALKING_BASE_URL"
+        : profile === "cycling" ? "OSRM_CYCLING_BASE_URL" : "OSRM_BASE_URL";
+      if (!["walking", "cycling", "driving"].includes(profile)) {
+        return jsonResponse({ error: "invalid_profile" }, 400);
+      }
+      const base = Deno.env.get(envKey);
+      if (!base) return matrixResponse({ mode: "unavailable" });
+      try {
+        const path = coords.map((c) => `${c.lng},${c.lat}`).join(";");
+        const response = await fetch(`${base.replace(/\/$/, "")}/table/v1/${profile}/${path}?annotations=duration`, {
+          signal: AbortSignal.timeout(8_000),
+        });
+        if (!response.ok) return matrixResponse({ mode: "unavailable" });
+        const data = await response.json();
+        const durations = data.durations;
+        if (data.code !== "Ok" || !Array.isArray(durations) || durations.length !== coords.length ||
+            !durations.every((row: unknown) => Array.isArray(row) && row.length === coords.length &&
+              row.every((value: unknown) => value === null || (typeof value === "number" && Number.isFinite(value) && value >= 0)))) {
+          return matrixResponse({ mode: "unavailable" });
+        }
+        return matrixResponse({ mode: "osrm", durations });
+      } catch {
+        return matrixResponse({ mode: "unavailable" });
+      }
+    }
 
-    const resp = await fetch(url, { method: "GET", signal: AbortSignal.timeout(8_000) });
+    const profile = body.profile ?? "driving";
+    const osrmBase = Deno.env.get("OSRM_BASE_URL");
+    // Yol servisi yapılandırılmamış/erişilemezse 500 yerine açıkça işaretli düz çizgi.
+    if (!osrmBase) return jsonResponse({ mode: "straight", points: coords, fallback: true });
+    const path = coords.map((c) => `${c.lng},${c.lat}`).join(";");
+    const url = `${osrmBase.replace(/\/$/, "")}/route/v1/${profile}/${path}?overview=full&geometries=geojson`;
+
+    let resp: Response;
+    try {
+      resp = await fetch(url, { method: "GET", signal: AbortSignal.timeout(8_000) });
+    } catch {
+      return jsonResponse({ mode: "straight", points: coords, fallback: true });
+    }
     if (!resp.ok) {
       return jsonResponse({ mode: "straight", points: coords, fallback: true });
     }

@@ -182,3 +182,20 @@ class CommunityPostModel {
     );
   }
 }
+
+/// Yeni gönderi için ön doldurma (ör. gezi günlüğünden). Kayıt değildir; editör yeni taslak açar.
+class CommunityPostDraft {
+  const CommunityPostDraft({
+    required this.title,
+    required this.summary,
+    this.body = '',
+    this.city = '',
+    this.relatedRouteId,
+  });
+
+  final String title;
+  final String summary;
+  final String body;
+  final String city;
+  final String? relatedRouteId;
+}

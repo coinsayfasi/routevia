@@ -1,6 +1,8 @@
 import 'package:hive/hive.dart';
 
 import '../core/constants.dart';
+import '../models/journey_progress.dart';
+import '../models/journey_track.dart';
 
 class LocalCache {
   // In-memory singleton — avoids repeated Hive.openBox I/O across calls.
@@ -100,7 +102,6 @@ class LocalCache {
     if (raw is String) return DateTime.tryParse(raw);
     return null;
   }
-
 
   Future<void> setPreferredProvinceSlug(String? slug) async {
     final box = await _openSafeBox();
@@ -307,9 +308,9 @@ class LocalCache {
     final box = await _openSafeBox();
     final raw = box.get('visited_provinces');
     if (raw is! Map) return {};
-    return Map<String, dynamic>.from(raw).map(
-      (k, v) => MapEntry(k, (v is Map ? v['name'] : v)?.toString() ?? k),
-    );
+    return Map<String, dynamic>.from(
+      raw,
+    ).map((k, v) => MapEntry(k, (v is Map ? v['name'] : v)?.toString() ?? k));
   }
 
   // ── Proximity notification cooldown ────────────────────────────────────────
@@ -391,6 +392,44 @@ class LocalCache {
   // DayPlanScreen açıldığında yazılır, gezi tamamlandığında veya kullanıcı
   // manuel kapatınca silinir. MainTabsScreen bu değeri okuyarak sticky bar gösterir.
 
+  Future<JourneyProgress> readJourneyProgress(String tripId) async {
+    final box = await _openSafeBox();
+    final raw = box.get('journey_progress:$tripId');
+    return raw is Map
+        ? JourneyProgress.fromMap(Map<String, dynamic>.from(raw))
+        : JourneyProgress();
+  }
+
+  Future<void> saveJourneyProgress(
+    String tripId,
+    JourneyProgress progress,
+  ) async {
+    final box = await _openSafeBox();
+    await box.put('journey_progress:$tripId', progress.toMap());
+  }
+
+  Future<JourneyTrack> readJourneyTrack(String tripId, int day) async {
+    final box = await _openSafeBox();
+    final raw = box.get('journey_track:$tripId:$day');
+    return raw is Map
+        ? JourneyTrack.fromMap(Map<String, dynamic>.from(raw))
+        : JourneyTrack();
+  }
+
+  Future<void> saveJourneyTrack(
+    String tripId,
+    int day,
+    JourneyTrack track,
+  ) async {
+    final box = await _openSafeBox();
+    await box.put('journey_track:$tripId:$day', track.toMap());
+  }
+
+  Future<void> deleteJourneyTrack(String tripId, int day) async {
+    final box = await _openSafeBox();
+    await box.delete('journey_track:$tripId:$day');
+  }
+
   Future<void> setActivePlan(Map<String, dynamic> planJson) async {
     final box = await _openSafeBox();
     await box.put('active_plan', {
@@ -405,8 +444,7 @@ class LocalCache {
     if (raw is! Map) return null;
     // 24 saatten eski planı otomatik temizle
     final savedAt = DateTime.tryParse(raw['_saved_at']?.toString() ?? '');
-    if (savedAt != null &&
-        DateTime.now().difference(savedAt).inHours >= 24) {
+    if (savedAt != null && DateTime.now().difference(savedAt).inHours >= 24) {
       await box.delete('active_plan');
       return null;
     }
@@ -440,6 +478,9 @@ class LocalCache {
     }
     final posts = raw['posts'];
     if (posts is! List) return null;
-    return posts.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    return posts
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
   }
 }

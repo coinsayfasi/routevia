@@ -4,9 +4,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:go_router/go_router.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:latlong2/latlong.dart' as ll;
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -119,7 +121,10 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
     final saved = await showDialog<String?>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Kişisel Notum', style: TextStyle(fontWeight: FontWeight.w800)),
+        title: const Text(
+          'Kişisel Notum',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
         content: TextField(
           controller: ctrl,
           minLines: 3,
@@ -127,7 +132,8 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
           maxLength: 500,
           autofocus: true,
           decoration: const InputDecoration(
-            hintText: 'Bu yer hakkında kişisel bir not bırak (yalnızca sen görürsün)…',
+            hintText:
+                'Bu yer hakkında kişisel bir not bırak (yalnızca sen görürsün)…',
             border: OutlineInputBorder(),
           ),
         ),
@@ -759,7 +765,11 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
                         },
                         fallbackWidget: Container(
                           color: cat.color.withValues(alpha: 0.15),
-                          child: Icon(cat.icon, size: 56, color: cat.color.withValues(alpha: 0.4)),
+                          child: Icon(
+                            cat.icon,
+                            size: 56,
+                            color: cat.color.withValues(alpha: 0.4),
+                          ),
                         ),
                       ),
                     // Photo attribution badge
@@ -768,14 +778,20 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
                         right: 10,
                         top: MediaQuery.of(context).padding.top + 52,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 3,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.black54,
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
                             '📸 ${_imageCredit!.length > 28 ? '${_imageCredit!.substring(0, 28)}…' : _imageCredit!}',
-                            style: const TextStyle(color: Colors.white, fontSize: 10),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                            ),
                           ),
                         ),
                       ),
@@ -921,6 +937,12 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 12),
+                  _MapPreviewCard(
+                    lat: (_detail ?? widget.place).lat ?? 0,
+                    lng: (_detail ?? widget.place).lng ?? 0,
+                    onTap: _openNavigation,
+                  ),
                   const SizedBox(height: 8),
                   // Personal note button
                   SizedBox(
@@ -928,12 +950,16 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
                     child: OutlinedButton.icon(
                       onPressed: _showNoteDialog,
                       icon: Icon(
-                        _personalNote != null ? Icons.edit_note : Icons.note_add_outlined,
+                        _personalNote != null
+                            ? Icons.edit_note
+                            : Icons.note_add_outlined,
                         size: 18,
                         color: const Color(0xFF0F766E),
                       ),
                       label: Text(
-                        _personalNote != null ? 'Notumu Düzenle' : 'Kişisel Not Ekle',
+                        _personalNote != null
+                            ? 'Notumu Düzenle'
+                            : 'Kişisel Not Ekle',
                         style: const TextStyle(color: Color(0xFF0F766E)),
                       ),
                       style: OutlinedButton.styleFrom(
@@ -954,7 +980,11 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(Icons.sticky_note_2_outlined, size: 20, color: Color(0xFF0F766E)),
+                          const Icon(
+                            Icons.sticky_note_2_outlined,
+                            size: 20,
+                            color: Color(0xFF0F766E),
+                          ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
@@ -1402,7 +1432,10 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            context.tr('Yakınındaki Benzer Yerler', 'Similar Nearby Places'),
+                            context.tr(
+                              'Yakınındaki Benzer Yerler',
+                              'Similar Nearby Places',
+                            ),
                             style: const TextStyle(
                               fontWeight: FontWeight.w800,
                               fontSize: 15,
@@ -1414,12 +1447,14 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
                             child: ListView.separated(
                               scrollDirection: Axis.horizontal,
                               itemCount: _similarPlaces.length,
-                              separatorBuilder: (_, _) => const SizedBox(width: 10),
+                              separatorBuilder: (_, _) =>
+                                  const SizedBox(width: 10),
                               itemBuilder: (context, i) {
                                 final sp = _similarPlaces[i];
                                 final spCat = _styleOf(sp.category);
                                 return GestureDetector(
-                                  onTap: () => context.push('/place', extra: sp),
+                                  onTap: () =>
+                                      context.push('/place', extra: sp),
                                   child: SizedBox(
                                     width: 150,
                                     child: ClipRRect(
@@ -1433,8 +1468,16 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
                                             category: sp.category,
                                             fit: BoxFit.cover,
                                             fallbackWidget: Container(
-                                              color: spCat.color.withValues(alpha: 0.15),
-                                              child: Icon(spCat.icon, size: 32, color: spCat.color.withValues(alpha: 0.5)),
+                                              color: spCat.color.withValues(
+                                                alpha: 0.15,
+                                              ),
+                                              child: Icon(
+                                                spCat.icon,
+                                                size: 32,
+                                                color: spCat.color.withValues(
+                                                  alpha: 0.5,
+                                                ),
+                                              ),
                                             ),
                                           ),
                                           const DecoratedBox(
@@ -1442,7 +1485,10 @@ class _PlaceDetailScreenState extends ConsumerState<PlaceDetailScreen> {
                                               gradient: LinearGradient(
                                                 begin: Alignment.topCenter,
                                                 end: Alignment.bottomCenter,
-                                                colors: [Colors.transparent, Color(0xB3000000)],
+                                                colors: [
+                                                  Colors.transparent,
+                                                  Color(0xB3000000),
+                                                ],
                                                 stops: [0.4, 1.0],
                                               ),
                                             ),
@@ -2252,6 +2298,101 @@ class _StatChip extends StatelessWidget {
             style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Small tappable map preview shown on the place detail screen — a static,
+/// non-interactive glance at the pin's surroundings that opens the full
+/// navigation sheet on tap instead of duplicating the full map screen.
+class _MapPreviewCard extends StatelessWidget {
+  const _MapPreviewCard({
+    required this.lat,
+    required this.lng,
+    required this.onTap,
+  });
+
+  final double lat;
+  final double lng;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    if (lat == 0 && lng == 0) return const SizedBox.shrink();
+    final center = ll.LatLng(lat, lng);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox(
+          height: 140,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              IgnorePointer(
+                child: FlutterMap(
+                  options: MapOptions(
+                    initialCenter: center,
+                    initialZoom: 14,
+                    interactionOptions: const InteractionOptions(
+                      flags: InteractiveFlag.none,
+                    ),
+                  ),
+                  children: [
+                    TileLayer(
+                      urlTemplate:
+                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'com.routevia.app',
+                    ),
+                    MarkerLayer(
+                      markers: [
+                        Marker(
+                          point: center,
+                          width: 36,
+                          height: 36,
+                          child: const Icon(
+                            Icons.location_on,
+                            color: RouteviaColors.rose,
+                            size: 36,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Positioned(
+                right: 8,
+                bottom: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.92),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.open_in_full, size: 12),
+                      SizedBox(width: 4),
+                      Text(
+                        'Yol tarifi al',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

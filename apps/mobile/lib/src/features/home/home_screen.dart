@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
@@ -30,14 +31,23 @@ import '../premium/purchase_service.dart';
 import '../../core/widgets/trip_com_card.dart';
 import '../../core/widgets/hotel_section.dart';
 import 'rota_ai_sheet.dart';
+import 'quick_plan_sheet.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HomeScreen
 // ─────────────────────────────────────────────────────────────────────────────
 
 const _kHotelProvinces = {
-  'istanbul', 'antalya', 'izmir', 'nevsehir', 'mugla',
-  'trabzon', 'mardin', 'ankara', 'bursa', 'gaziantep',
+  'istanbul',
+  'antalya',
+  'izmir',
+  'nevsehir',
+  'mugla',
+  'trabzon',
+  'mardin',
+  'ankara',
+  'bursa',
+  'gaziantep',
 };
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -752,7 +762,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           if (PurchaseService.hasPro(customerInfo)) {
             isPro = true;
             final rcExpiry = PurchaseService.proExpiryDate(customerInfo);
-            if (rcExpiry != null && (expiry == null || rcExpiry.isAfter(expiry))) {
+            if (rcExpiry != null &&
+                (expiry == null || rcExpiry.isAfter(expiry))) {
               expiry = rcExpiry;
             }
           }
@@ -1551,67 +1562,108 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _showSnack('Önce bir il seç.');
       return;
     }
-    final premiumState = ref.read(premiumStateProvider).valueOrNull;
-    if (premiumState != null && !premiumState.canGeneratePlan) {
+    setState(() => _quickPlanBuilding = true);
+    try {
+      final premiumState = await ref.read(premiumStateProvider.future);
+      final saved = await ref
+          .read(repositoryProvider)
+          .listSavedPlaces(type: 'favorite')
+          .catchError((_) => <Map<String, dynamic>>[]);
       if (!mounted) return;
-      if (AdService().isRewardedReady) {
-        final watch = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Plan limitine ulaştın'),
-            content: const Text(
-              'Kısa bir video izleyerek bugün 1 plan daha oluşturabilirsin.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Premium\'a Geç'),
+      final choice = await showModalBottomSheet<QuickPlanChoice>(
+        context: context,
+        isScrollControlled: true,
+        builder: (sheetContext) => QuickPlanSheet(
+          isPro: premiumState.isPro,
+          onPro: () {
+            Navigator.pop(sheetContext);
+            showPremiumGate(
+              context,
+              feature: context.tr(
+                'Dönüş saatimi koru',
+                'Protect my return time',
               ),
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Video İzle'),
-              ),
-            ],
-          ),
-        );
+            );
+          },
+          lat: _position?.latitude,
+          lng: _position?.longitude,
+          savedPlaces: {
+            for (final row in saved)
+              if (row['place'] is PlaceModel)
+                (row['place'] as PlaceModel).id: row['place'] as PlaceModel,
+          }.values.toList(),
+          candidates: {
+            for (final p in _popularPlaces.take(12)) p.id: p,
+          }.values.toList(),
+        ),
+      );
+      if (choice == null || !mounted) return;
+      if (!premiumState.canGeneratePlan) {
         if (!mounted) return;
-        if (watch == true) {
-          bool rewarded = false;
-          await AdService().showRewardedAd(onRewarded: () => rewarded = true);
+        if (AdService().isRewardedReady) {
+          final watch = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Plan limitine ulaştın'),
+              content: const Text(
+                'Kısa bir video izleyerek bugün 1 plan daha oluşturabilirsin.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Premium\'a Geç'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Video İzle'),
+                ),
+              ],
+            ),
+          );
           if (!mounted) return;
-          if (!rewarded) {
-            // ignore: use_build_context_synchronously
+          if (watch == true) {
+            bool rewarded = false;
+            await AdService().showRewardedAd(onRewarded: () => rewarded = true);
+            if (!mounted) return;
+            if (!rewarded) {
+              // ignore: use_build_context_synchronously
+              showPremiumGate(context, feature: 'Günlük plan limiti doldu');
+              return;
+            }
+            // Rewarded earned — bypass the limit check and proceed with plan generation
+          } else {
             showPremiumGate(context, feature: 'Günlük plan limiti doldu');
             return;
           }
-          // Rewarded earned — bypass the limit check and proceed with plan generation
         } else {
+          // ignore: use_build_context_synchronously
           showPremiumGate(context, feature: 'Günlük plan limiti doldu');
           return;
         }
-      } else {
-        // ignore: use_build_context_synchronously
-        showPremiumGate(context, feature: 'Günlük plan limiti doldu');
-        return;
       }
-    }
-    setState(() => _quickPlanBuilding = true);
-    try {
       final repo = ref.read(repositoryProvider);
+      final departure = DateTime.now();
       final plan = await repo.generateTripPlan(
         provinceSlug: slug,
         days: 1,
-        transportMode: _position != null ? 'walk' : 'transit',
+        transportMode: choice.mode,
         pace: 'fast',
+        budgetMinutes: choice.minutes,
+        returnPlan: choice.returnPlan,
+        mustIncludePlaceIds: [
+          if (choice.requiredPlaceId != null) choice.requiredPlaceId!,
+        ],
         personaMode: _persona,
         preferences: _prefs.toList(),
-        maxRadiusKm: 8,
+        maxRadiusKm: choice.mode == 'walk' ? 5 : 25,
         allowOutsideDistrict: true,
         startLat: _position?.latitude,
         startLng: _position?.longitude,
-        startHour: DateTime.now().hour.clamp(8, 20),
+        startHour: departure.hour,
+        startMinute: departure.hour * 60 + departure.minute,
       );
       if (!mounted) return;
+      ref.invalidate(premiumStateProvider);
       context.push('/day-plan', extra: plan);
     } catch (e) {
       if (!mounted) return;
@@ -1700,14 +1752,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         ),
                         const SizedBox(height: 24),
                       ],
-                      if (_provinceSlug != null && _provinceSlug!.isNotEmpty &&
-                          (_pickMode != 'lodging' || !_kHotelProvinces.contains(_provinceSlug!)))
+                      if (_provinceSlug != null &&
+                          _provinceSlug!.isNotEmpty &&
+                          (_pickMode != 'lodging' ||
+                              !_kHotelProvinces.contains(_provinceSlug!)))
                         TripComCard(
                           provinceName: _selectedProvinceName,
                           districtName: _selectedDistrictNameOrNull,
                         ),
                       const SizedBox(height: 24),
-                      if (_foodPicks.isNotEmpty && _pickMode != 'food' && _pickMode != 'lodging') ...[
+                      if (_foodPicks.isNotEmpty &&
+                          _pickMode != 'food' &&
+                          _pickMode != 'lodging') ...[
                         _buildFoodSection(),
                         const SizedBox(height: 24),
                       ],
@@ -2211,8 +2267,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   color: RouteviaColors.amber.withValues(alpha: 0.18),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.workspace_premium,
-                    color: RouteviaColors.amber, size: 26),
+                child: const Icon(
+                  Icons.workspace_premium,
+                  color: RouteviaColors.amber,
+                  size: 26,
+                ),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -2220,7 +2279,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      context.tr('Routevia Pro\'yu Keşfet', 'Discover Routevia Pro'),
+                      context.tr(
+                        'Routevia Pro\'yu Keşfet',
+                        'Discover Routevia Pro',
+                      ),
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w800,
@@ -2243,8 +2305,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              const Icon(Icons.arrow_forward_ios,
-                  color: Colors.white54, size: 16),
+              const Icon(
+                Icons.arrow_forward_ios,
+                color: Colors.white54,
+                size: 16,
+              ),
             ],
           ),
         ),
@@ -2254,11 +2319,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Widget _buildRotaAiBar() {
     if (_provinceSlug == null) return const SizedBox.shrink();
-    final provinceName = _provinces
-        .firstWhere(
-          (p) => p['slug'] == _provinceSlug,
-          orElse: () => <String, dynamic>{},
-        )['name'] as String? ??
+    final provinceName =
+        _provinces.firstWhere(
+              (p) => p['slug'] == _provinceSlug,
+              orElse: () => <String, dynamic>{},
+            )['name']
+            as String? ??
         _provinceSlug!;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
@@ -3124,100 +3190,100 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ),
         const SizedBox(height: 14),
         if (_pickMode != 'lodging')
-        SizedBox(
-          height: 236,
-          child: _popularLoading
-              ? const Center(
-                  child: CircularProgressIndicator(
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      RouteviaColors.teal,
-                    ),
-                    strokeWidth: 2.5,
-                  ),
-                )
-              : _displayTopPicks().isEmpty
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.explore_off_rounded,
-                          size: 40,
-                          color: RouteviaColors.textTertiary.withValues(
-                            alpha: 0.5,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          _popularServiceError
-                              ? 'Servis geçici kullanılamıyor.'
-                              : _districtId != null
-                              ? '$_selectedDistrictName için henüz yeterli veri yok.\n"Tüm İl" seçerek tüm ili görebilirsin.'
-                              : 'Bu il için öneriler hazırlanıyor.',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: RouteviaColors.textSecondary,
-                            fontSize: 13,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        TextButton(
-                          onPressed: _loadPopularForProvince,
-                          child: Text(context.tr('Tekrar Dene', 'Retry')),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  scrollDirection: Axis.horizontal,
-                  itemBuilder: (context, i) {
-                    final p = _displayTopPicks()[i];
-                    final province = _provinces.firstWhere(
-                      (pr) => pr['slug'] == _provinceSlug,
-                      orElse: () => <String, dynamic>{},
-                    );
-                    final provinceLat = (province['lat'] as num?)?.toDouble();
-                    final provinceLng = (province['lng'] as num?)?.toDouble();
-                    final districtSlug =
-                        _districts.firstWhere(
-                              (d) => d['id'] == _districtId,
-                              orElse: () => <String, dynamic>{},
-                            )['slug']
-                            as String?;
-                    final districtName =
-                        _districts.firstWhere(
-                              (d) => d['id'] == _districtId,
-                              orElse: () => <String, dynamic>{},
-                            )['name']
-                            as String?;
-                    return _TopPickCard(
-                      place: p,
-                      locationLabel: _selectedProvinceName,
-                      isMustSee:
-                          _featuredPlaceIds.contains(p.id) ||
-                          _mustSeeBoostForPersonal(p) > 0,
-                      onTap: () => context.push(
-                        '/map-explore',
-                        extra: {
-                          'lat': p.lat ?? provinceLat ?? _position?.latitude,
-                          'lng': p.lng ?? provinceLng ?? _position?.longitude,
-                          'place_id': p.id,
-                          'province_slug': _provinceSlug,
-                          'district_id': _districtId,
-                          'district_slug': districtSlug,
-                          'district_name': districtName,
-                        },
+          SizedBox(
+            height: 236,
+            child: _popularLoading
+                ? const Center(
+                    child: CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        RouteviaColors.teal,
                       ),
-                    );
-                  },
-                  separatorBuilder: (_, _) => const SizedBox(width: 12),
-                  itemCount: _displayTopPicks().length,
-                ),
-        ),
+                      strokeWidth: 2.5,
+                    ),
+                  )
+                : _displayTopPicks().isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.explore_off_rounded,
+                            size: 40,
+                            color: RouteviaColors.textTertiary.withValues(
+                              alpha: 0.5,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            _popularServiceError
+                                ? 'Servis geçici kullanılamıyor.'
+                                : _districtId != null
+                                ? '$_selectedDistrictName için henüz yeterli veri yok.\n"Tüm İl" seçerek tüm ili görebilirsin.'
+                                : 'Bu il için öneriler hazırlanıyor.',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: RouteviaColors.textSecondary,
+                              fontSize: 13,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          TextButton(
+                            onPressed: _loadPopularForProvince,
+                            child: Text(context.tr('Tekrar Dene', 'Retry')),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    scrollDirection: Axis.horizontal,
+                    itemBuilder: (context, i) {
+                      final p = _displayTopPicks()[i];
+                      final province = _provinces.firstWhere(
+                        (pr) => pr['slug'] == _provinceSlug,
+                        orElse: () => <String, dynamic>{},
+                      );
+                      final provinceLat = (province['lat'] as num?)?.toDouble();
+                      final provinceLng = (province['lng'] as num?)?.toDouble();
+                      final districtSlug =
+                          _districts.firstWhere(
+                                (d) => d['id'] == _districtId,
+                                orElse: () => <String, dynamic>{},
+                              )['slug']
+                              as String?;
+                      final districtName =
+                          _districts.firstWhere(
+                                (d) => d['id'] == _districtId,
+                                orElse: () => <String, dynamic>{},
+                              )['name']
+                              as String?;
+                      return _TopPickCard(
+                        place: p,
+                        locationLabel: _selectedProvinceName,
+                        isMustSee:
+                            _featuredPlaceIds.contains(p.id) ||
+                            _mustSeeBoostForPersonal(p) > 0,
+                        onTap: () => context.push(
+                          '/map-explore',
+                          extra: {
+                            'lat': p.lat ?? provinceLat ?? _position?.latitude,
+                            'lng': p.lng ?? provinceLng ?? _position?.longitude,
+                            'place_id': p.id,
+                            'province_slug': _provinceSlug,
+                            'district_id': _districtId,
+                            'district_slug': districtSlug,
+                            'district_name': districtName,
+                          },
+                        ),
+                      );
+                    },
+                    separatorBuilder: (_, _) => const SizedBox(width: 12),
+                    itemCount: _displayTopPicks().length,
+                  ),
+          ),
       ],
     );
   }
@@ -5107,7 +5173,7 @@ class _TopPickCard extends StatelessWidget {
       if (_isGoodNow()) context.tr('Şimdi uygun', 'Good now'),
     ].take(2).toList(growable: false);
 
-    return GestureDetector(
+    final card = GestureDetector(
       onTap: onTap,
       child: SizedBox(
         width: isMustSee ? 224 : 200,
@@ -5346,6 +5412,10 @@ class _TopPickCard extends StatelessWidget {
         ),
       ),
     );
+    return card
+        .animate()
+        .fadeIn(duration: 260.ms, curve: Curves.easeOut)
+        .slideY(begin: 0.08, end: 0, duration: 260.ms, curve: Curves.easeOut);
   }
 
   String _resolveDisplayCategory(PlaceModel place) {

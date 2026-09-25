@@ -10,8 +10,10 @@ import '../core/geo_utils.dart';
 import '../models/community_post_models.dart';
 import '../models/event_models.dart';
 import '../models/trip_models.dart';
+import '../models/return_plan.dart';
 import '../models/weather_models.dart';
 import 'fallback_provinces.dart';
+import 'day_route_planner.dart';
 import 'local_cache.dart';
 import 'must_see_places.dart';
 
@@ -385,7 +387,10 @@ class RouteviaRepository {
               transform: TransformOptions(width: width, quality: quality),
             ),
       );
-      _signedUrlCache[cacheKey] = _SignedUrlCacheEntry(url: url, cachedAt: DateTime.now());
+      _signedUrlCache[cacheKey] = _SignedUrlCacheEntry(
+        url: url,
+        cachedAt: DateTime.now(),
+      );
       return url;
     } catch (_) {
       try {
@@ -394,7 +399,10 @@ class RouteviaRepository {
               .from('community-posts')
               .createSignedUrl(path, 60 * 60 * 24 * 7),
         );
-        _signedUrlCache[cacheKey] = _SignedUrlCacheEntry(url: url, cachedAt: DateTime.now());
+        _signedUrlCache[cacheKey] = _SignedUrlCacheEntry(
+          url: url,
+          cachedAt: DateTime.now(),
+        );
         return url;
       } catch (_) {
         return null;
@@ -544,6 +552,34 @@ class RouteviaRepository {
     ]);
   }
 
+  /// Sahibe özel gün planı bağlamı (dönüş noktası/saatı dahil). Paylaşım uçları bu kolonu seçmez.
+  static Map<String, dynamic> _dayPlanningMetadata(TripDay day) => {
+    'travel_minutes': day.travelMinutes,
+    'duration_estimated': day.durationEstimated,
+    'budget_minutes': day.budgetMinutes,
+    'return_plan': day.returnPlan?.toMap(),
+  }..removeWhere((_, v) => v == null);
+
+  static Map<String, dynamic>? _parsePlanningMetadata(Object? raw) {
+    if (raw is! Map) return null;
+    final map = Map<String, dynamic>.from(raw);
+    // Bozuk dönüş kaydı gezinin açılmasını engellemesin.
+    if (map['return_plan'] != null) {
+      try {
+        ReturnPlan.fromMap(
+          Map<String, dynamic>.from(map['return_plan'] as Map),
+        );
+      } catch (_) {
+        map.remove('return_plan');
+      }
+    }
+    return map;
+  }
+
+  static bool _isMissingPlanningMetadata(PostgrestException e) =>
+      e.message.contains('planning_metadata') &&
+      (e.code == 'PGRST204' || e.code == '42703');
+
   Future<TripPlan> _saveTripRemote(TripPlan trip) async {
     final user = _client.auth.currentUser;
     if (user == null) return trip;
@@ -568,14 +604,35 @@ class RouteviaRepository {
 
     try {
       final dayPayload = trip.daysPlan
-          .map((day) => {'trip_id': tripId, 'day_number': day.dayNumber})
+          .map(
+            (day) => {
+              'trip_id': tripId,
+              'day_number': day.dayNumber,
+              'planning_metadata': _dayPlanningMetadata(day),
+            },
+          )
           .toList();
-      final insertedDays = await _runAuthed(
-        () => _client
-            .from('trip_days_clean')
-            .insert(dayPayload)
-            .select('id,day_number'),
-      );
+      dynamic insertedDays;
+      try {
+        insertedDays = await _runAuthed(
+          () => _client
+              .from('trip_days_clean')
+              .insert(dayPayload)
+              .select('id,day_number'),
+        );
+      } on PostgrestException catch (e) {
+        // planning_metadata migration henüz uygulanmamış sunucuda kaydı bozmadan devam et.
+        if (!_isMissingPlanningMetadata(e)) rethrow;
+        insertedDays = await _runAuthed(
+          () => _client
+              .from('trip_days_clean')
+              .insert([
+                for (final row in dayPayload)
+                  {'trip_id': row['trip_id'], 'day_number': row['day_number']},
+              ])
+              .select('id,day_number'),
+        );
+      }
 
       final dayIdByNumber = {
         for (final raw in (insertedDays as List))
@@ -1168,10 +1225,10 @@ class RouteviaRepository {
     if (user == null) throw Exception('auth session missing');
     if (enabled) {
       await _runAuthed(
-        () => _client.from('user_event_reminders').upsert(
-          {'user_id': user.id, 'event_id': eventId},
-          onConflict: 'user_id,event_id',
-        ),
+        () => _client.from('user_event_reminders').upsert({
+          'user_id': user.id,
+          'event_id': eventId,
+        }, onConflict: 'user_id,event_id'),
       );
     } else {
       await _runAuthed(
@@ -1471,9 +1528,28 @@ class RouteviaRepository {
     double? startLat,
     double? startLng,
     int startHour = 9,
+    int? budgetMinutes,
+    int? startMinute,
+    ReturnPlan? returnPlan,
     List<String> mustIncludePlaceIds = const [],
   }) async {
-    final generated = await generateDemoTripPlan(
+    if (budgetMinutes != null && (days != 1 || budgetMinutes <= 0)) {
+      throw const FormatException(
+        'Süreli plan için bir gün ve geçerli bir süre seçin.',
+      );
+    }
+    if (returnPlan != null) {
+      final now = DateTime.now();
+      if (!returnPlan.valid ||
+          !returnPlan.deadline.isAfter(now) ||
+          returnPlan.deadline.year != now.year ||
+          returnPlan.deadline.month != now.month ||
+          returnPlan.deadline.day != now.day ||
+          days != 1) {
+        throw const FormatException('Bugün için ileride bir dönüş saati seç.');
+      }
+    }
+    var generated = await generateDemoTripPlan(
       provinceSlug: provinceSlug,
       days: days,
       transportMode: transportMode,
@@ -1486,30 +1562,81 @@ class RouteviaRepository {
       startLat: startLat,
       startLng: startLng,
       startHour: startHour,
+      persist: budgetMinutes == null && returnPlan == null,
+      mustIncludePlaceIds: mustIncludePlaceIds,
     );
+    if (budgetMinutes != null || returnPlan != null) {
+      final result = await _routeDay(
+        generated.daysPlan.first,
+        mode: transportMode,
+        startLat: startLat,
+        startLng: startLng,
+        budgetMinutes: budgetMinutes,
+        startMinute: startMinute ?? startHour.clamp(0, 23) * 60,
+        returnPlan: returnPlan,
+        requiredPlaceIds: mustIncludePlaceIds.toSet(),
+      );
+      generated = TripPlan(
+        tripId: generated.tripId,
+        days: 1,
+        transportMode: generated.transportMode,
+        pace: generated.pace,
+        personaMode: generated.personaMode,
+        preferences: generated.preferences,
+        province: generated.province,
+        daysPlan: [result.day],
+        startLat: generated.startLat,
+        startLng: generated.startLng,
+        radiusUsedKm: generated.radiusUsedKm,
+        districtStrict: generated.districtStrict,
+      );
+    }
+    if (budgetMinutes != null) {
+      unawaited(
+        _safeLogEvent(
+          'quick_plan_created',
+          payload: {
+            'budget_minutes': budgetMinutes,
+            'transport_mode': transportMode,
+            'stops': generated.daysPlan.first.stops.length,
+            'estimated': generated.daysPlan.first.durationEstimated,
+          },
+        ),
+      );
+    }
     // AI enrichment — fire-and-forget, never block the user
     if (AppConstants.useLlm) {
       unawaited(_enrichTripWithAi(generated));
     }
+    TripPlan result = generated;
     try {
-      final persisted = await _saveTripRemote(generated);
-      await _persistTripArtifacts(persisted);
-      return persisted;
+      result = await _saveTripRemote(generated);
     } catch (_) {
-      await _persistTripArtifacts(generated);
-      return generated;
+      // Sunucu kaydı başarısızsa plan yine cihazda saklanır.
     }
+    try {
+      await _persistTripArtifacts(result);
+    } finally {
+      // Plan kullanıcıya bir kez teslim ediliyor → sayaç kayıt yolundan bağımsız, tam bir kez artar.
+      await _cache.incrementDailyPlanCount();
+    }
+    return result;
   }
 
   Future<void> _enrichTripWithAi(TripPlan plan) async {
     try {
-      final daysPayload = plan.daysPlan.map((d) => {
-        'day': d.dayNumber,
-        'stops': d.stops.map((s) => {
-          'name': s.place.name,
-          'category': s.place.category,
-        }).toList(),
-      }).toList();
+      final daysPayload = plan.daysPlan
+          .map(
+            (d) => {
+              'day': d.dayNumber,
+              'stops': d.stops
+                  .map(
+                    (s) => {'name': s.place.name, 'category': s.place.category},
+                  )
+                  .toList(),
+            },
+          )
+          .toList();
       await _invokeFunction(
         'generate_trip_plan_v2',
         body: {
@@ -1538,6 +1665,8 @@ class RouteviaRepository {
     double? startLat,
     double? startLng,
     int startHour = 9,
+    bool persist = true,
+    List<String> mustIncludePlaceIds = const [],
   }) async {
     final provinceRes = await _client
         .from('provinces')
@@ -1764,6 +1893,11 @@ class RouteviaRepository {
       );
     }
 
+    if (!places.map((p) => p.id).toSet().containsAll(mustIncludePlaceIds)) {
+      throw const FormatException(
+        'Seçtiğin zorunlu durak bu bölgenin rota verisinde bulunamadı. Farklı bir durak seç.',
+      );
+    }
     final perDay = _stopsPerDayForPace(pace);
 
     // ── Sort all available places by proximity to user ─────────────────────
@@ -1854,11 +1988,19 @@ class RouteviaRepository {
     void use(PlaceModel p) => usedIds.add(p.id);
 
     // ── Day composition ────────────────────────────────────────────────────
-    int minute = startHour.clamp(6, 14) * 60;
+    int minute = startHour.clamp(0, 23) * 60;
     final dayPlans = <TripDay>[];
 
     for (int d = 1; d <= days; d++) {
       final composed = <PlaceModel>[];
+      if (d == 1) {
+        for (final p in places.where(
+          (p) => mustIncludePlaceIds.contains(p.id),
+        )) {
+          composed.add(p);
+          use(p);
+        }
+      }
 
       // Slot: Cultural (museum / historical / tour)
       final c1 = pickFrom(bucketCultural);
@@ -1936,7 +2078,7 @@ class RouteviaRepository {
       if (stops.isNotEmpty) {
         dayPlans.add(TripDay(dayNumber: d, stops: stops));
       }
-      minute = startHour.clamp(6, 14) * 60;
+      minute = startHour.clamp(0, 23) * 60;
     }
 
     final trip = TripPlan(
@@ -1948,9 +2090,13 @@ class RouteviaRepository {
       preferences: preferences,
       province: province,
       daysPlan: dayPlans,
+      startLat: startLat,
+      startLng: startLng,
+      radiusUsedKm: maxRadiusKm,
+      districtStrict: !allowOutsideDistrict,
     );
 
-    await _persistTripArtifacts(trip);
+    if (persist) await _persistTripArtifacts(trip);
     await _cache.recordVisitedProvince(province.slug, province.name);
     return trip;
   }
@@ -2016,11 +2162,21 @@ class RouteviaRepository {
         .maybeSingle();
     if (tripRow == null) return null;
 
-    final dayRows = await _client
-        .from('trip_days_clean')
-        .select('id,day_number')
-        .eq('trip_id', tripId)
-        .order('day_number');
+    dynamic dayRows;
+    try {
+      dayRows = await _client
+          .from('trip_days_clean')
+          .select('id,day_number,planning_metadata')
+          .eq('trip_id', tripId)
+          .order('day_number');
+    } on PostgrestException catch (e) {
+      if (!_isMissingPlanningMetadata(e)) rethrow;
+      dayRows = await _client
+          .from('trip_days_clean')
+          .select('id,day_number')
+          .eq('trip_id', tripId)
+          .order('day_number');
+    }
 
     final days = (dayRows as List)
         .map((e) => Map<String, dynamic>.from(e as Map))
@@ -2088,9 +2244,17 @@ class RouteviaRepository {
           })
           .whereType<TripStop>()
           .toList();
+      final meta = TripDay.fromMap({
+        ...?_parsePlanningMetadata(day['planning_metadata']),
+        'day_number': day['day_number'],
+      });
       return TripDay(
-        dayNumber: (day['day_number'] as num).toInt(),
+        dayNumber: meta.dayNumber,
         stops: dayStops,
+        travelMinutes: meta.travelMinutes,
+        durationEstimated: meta.durationEstimated,
+        budgetMinutes: meta.budgetMinutes,
+        returnPlan: meta.returnPlan,
       );
     }).toList();
 
@@ -3988,66 +4152,186 @@ class RouteviaRepository {
     return {for (final it in items) (it['place_id'] as String): it};
   }
 
+  Future<DayRouteResult> _routeDay(
+    TripDay day, {
+    required String mode,
+    double? startLat,
+    double? startLng,
+    int? budgetMinutes,
+    int? startMinute,
+    ReturnPlan? returnPlan,
+    Set<String> requiredPlaceIds = const {},
+  }) async {
+    if (day.stops.any((s) => !hasCoordinates(s.place))) {
+      throw const FormatException(
+        'Bazı durakların konumu eksik. Rota değiştirilemedi.',
+      );
+    }
+    final hasOrigin =
+        startLat != null &&
+        startLng != null &&
+        startLat.isFinite &&
+        startLng.isFinite &&
+        startLat.abs() <= 90 &&
+        startLng.abs() <= 180;
+    if (returnPlan != null && !returnPlan.valid) {
+      throw const FormatException('Dönüş noktası geçersiz.');
+    }
+    final coords = [
+      if (hasOrigin) (lat: startLat, lng: startLng),
+      ...day.stops.map((s) => (lat: s.place.lat!, lng: s.place.lng!)),
+      if (returnPlan != null) (lat: returnPlan.lat, lng: returnPlan.lng),
+    ];
+    if (returnPlan != null &&
+        (coords.length < 2 ||
+            coords.length > 25 ||
+            !{'walk', 'car', 'bike'}.contains(mode))) {
+      throw const FormatException(
+        'Dönüş planı için yürüme veya araç seç ve en fazla 23 durak kullan.',
+      );
+    }
+    var matrix = estimateTravelMatrix(coords, mode);
+    var estimated = true;
+    if (coords.length >= 2 && coords.length <= 25 && mode != 'transit') {
+      try {
+        final response = await _invokeFunction(
+          'get_route_polyline',
+          body: {
+            'matrix': true,
+            if (returnPlan != null) 'pro_feature': 'return_deadline',
+            'profile': mode == 'car'
+                ? 'driving'
+                : mode == 'bike'
+                ? 'cycling'
+                : 'walking',
+            'coords': coords.map((c) => {'lat': c.lat, 'lng': c.lng}).toList(),
+          },
+        );
+        final data = response.data as Map;
+        if (returnPlan != null && data['pro_authorized'] != true) {
+          throw const FormatException(
+            'Pro dönüş planı sunucuda henüz kullanıma açık değil.',
+          );
+        }
+        if (data['mode'] == 'osrm' && data['durations'] is List) {
+          final rows = (data['durations'] as List)
+              .map(
+                (r) => (r as List)
+                    .map((v) => v == null ? null : (v as num).toDouble())
+                    .toList(),
+              )
+              .toList();
+          if (rows.length == coords.length &&
+              rows.every(
+                (r) =>
+                    r.length == coords.length &&
+                    r.every((v) => v == null || (v.isFinite && v >= 0)),
+              )) {
+            matrix = rows;
+            estimated = false;
+          }
+        }
+      } catch (error) {
+        if (returnPlan != null) {
+          if (error is FunctionException && error.status == 403) {
+            throw const FormatException(
+              'Dönüş saati planlaması için aktif Routevia Pro gerekli. Satın alımlarını geri yükleyip tekrar dene.',
+            );
+          }
+          if (error is FormatException) rethrow;
+          throw const FormatException(
+            'Pro erişimi doğrulanamadı. İnternet bağlantını kontrol edip tekrar dene.',
+          );
+        }
+        // Offline basic routes retain clearly labelled estimates.
+      }
+    }
+    final result = planDayRoute(
+      day: day,
+      matrix: matrix,
+      hasOrigin: hasOrigin,
+      budgetMinutes: budgetMinutes,
+      startMinute: startMinute,
+      returnPlan: returnPlan,
+      requiredPlaceIds: requiredPlaceIds,
+    );
+    if (budgetMinutes == null &&
+        day.budgetMinutes != null &&
+        result.travelMinutes +
+                result.day.stops.fold<int>(0, (sum, s) => sum + s.durationMin) >
+            day.budgetMinutes!) {
+      throw const FormatException(
+        'Güncel yol süreleri seçtiğin süreyi aşıyor. Daha uzun süreyle yeni bir plan oluştur.',
+      );
+    }
+    return DayRouteResult(
+      TripDay(
+        dayNumber: day.dayNumber,
+        stops: result.day.stops,
+        travelMinutes: result.travelMinutes,
+        durationEstimated: estimated,
+        budgetMinutes: budgetMinutes ?? day.budgetMinutes,
+        returnPlan: result.day.returnPlan,
+      ),
+      result.travelMinutes,
+      result.savedMinutes,
+    );
+  }
+
   Future<Map<String, dynamic>> optimizeTripPlanV2({
     required TripPlan plan,
+    required int dayNumber,
   }) async {
-    var premium = false;
-    try {
-      final entitlements = await getEntitlements();
-      final now = DateTime.now().toUtc();
-      premium = entitlements.any((e) {
-        final key = e['entitlement_key'] as String?;
-        if (key != 'routevia_pro') return false;
-        final ex = DateTime.tryParse((e['expires_at'] as String?) ?? '');
-        return ex != null && ex.isAfter(now);
-      });
-    } catch (_) {
-      premium = false;
+    final day = plan.daysPlan.firstWhere((d) => d.dayNumber == dayNumber);
+    if (day.returnPlan != null) {
+      throw const FormatException(
+        'Bu plan dönüş saatine göre hazırlandı. Saat veya durakları değiştirmek için yeni bir dönüş planı oluştur.',
+      );
     }
-
+    final result = await _routeDay(
+      day,
+      mode: plan.transportMode,
+      startLat: dayNumber == 1 ? plan.startLat : null,
+      startLng: dayNumber == 1 ? plan.startLng : null,
+    );
+    var updated = TripPlan(
+      tripId: 'demo-${DateTime.now().millisecondsSinceEpoch}',
+      days: plan.days,
+      transportMode: plan.transportMode,
+      pace: plan.pace,
+      personaMode: plan.personaMode,
+      preferences: plan.preferences,
+      province: plan.province,
+      daysPlan: plan.daysPlan
+          .map((d) => d.dayNumber == dayNumber ? result.day : d)
+          .toList(),
+      startLat: plan.startLat,
+      startLng: plan.startLng,
+      radiusUsedKm: plan.radiusUsedKm,
+      districtStrict: plan.districtStrict,
+    );
+    // Save as a new version so existing shared links keep their original plan.
+    // If offline, the local ID prevents sharing a stale server-side route.
     try {
-      final result = await _invokeFunction(
-        'optimize_trip_v2',
-        body: {
-          'days_plan': plan.toMap()['days_plan'],
-          'pace': plan.pace,
-          'persona_mode': plan.personaMode,
-          'preferences': plan.preferences,
-          'premium': premium,
+      updated = await _saveTripRemote(updated);
+    } catch (_) {}
+    await _persistTripArtifacts(updated);
+    await _cache.setActivePlan(updated.toMap());
+    unawaited(
+      _safeLogEvent(
+        'day_route_optimized',
+        payload: {
+          'day': dayNumber,
+          'saved_minutes': result.savedMinutes,
+          'estimated': result.day.durationEstimated,
         },
-      );
-
-      final data = Map<String, dynamic>.from((result.data as Map?) ?? const {});
-      final daysRaw = ((data['days_plan'] as List?) ?? const [])
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList();
-      if (daysRaw.isEmpty) return {'plan': plan, 'premium_used': premium};
-
-      final updated = TripPlan(
-        tripId: plan.tripId,
-        days: plan.days,
-        transportMode: plan.transportMode,
-        pace: plan.pace,
-        personaMode: plan.personaMode,
-        preferences: plan.preferences,
-        province: plan.province,
-        daysPlan: daysRaw.map(TripDay.fromMap).toList(),
-        startLat: plan.startLat,
-        startLng: plan.startLng,
-        radiusUsedKm: plan.radiusUsedKm,
-        districtStrict: plan.districtStrict,
-      );
-
-      await _persistTripArtifacts(updated);
-      return {
-        'plan': updated,
-        'premium_used':
-            ((data['meta'] as Map?)?['premium_used'] as bool?) ?? premium,
-        'reason': ((data['meta'] as Map?)?['reason'] as String?) ?? 'optimized',
-      };
-    } catch (_) {
-      return {'plan': plan, 'premium_used': false, 'reason': 'fallback'};
-    }
+      ),
+    );
+    return {
+      'plan': updated,
+      'saved_minutes': result.savedMinutes,
+      'estimated': result.day.durationEstimated,
+    };
   }
 
   Future<List<Map<String, dynamic>>> getSmartSeasonSuggestions({
@@ -6183,7 +6467,9 @@ class RouteviaRepository {
     try {
       final rows = await _client
           .from('places_clean')
-          .select('id,name,slug,category,short_summary,popularity_score,provinces(name,slug)')
+          .select(
+            'id,name,slug,category,short_summary,popularity_score,provinces(name,slug)',
+          )
           .eq('category', category)
           .neq('id', placeId)
           .order('popularity_score', ascending: false)
@@ -6200,7 +6486,10 @@ class RouteviaRepository {
         });
       }).toList();
       // Prefer same province, fall back to any
-      final sameProvince = all.where((p) => p.provinceSlug == provinceSlug).take(limit).toList();
+      final sameProvince = all
+          .where((p) => p.provinceSlug == provinceSlug)
+          .take(limit)
+          .toList();
       if (sameProvince.isNotEmpty) return sameProvince;
       return all.take(limit).toList();
     } catch (_) {
