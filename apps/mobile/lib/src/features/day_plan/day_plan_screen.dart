@@ -4,7 +4,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -13,7 +12,7 @@ import '../../core/error_utils.dart';
 import '../../core/constants.dart';
 import '../../core/i18n.dart';
 import '../../core/widgets/trip_com_card.dart';
-import '../../data/local_cache.dart';
+import '../../data/journey_recorder.dart';
 import '../../data/providers.dart';
 import '../../models/trip_models.dart';
 import '../../models/journey_progress.dart';
@@ -59,12 +58,8 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
   final Map<String, bool> _checkingStops = {};
   bool _celebrationShown = false;
 
-  // Gezi günlüğü: yalnız kullanıcı açınca ve uygulama açıkken GPS izi kaydedilir.
-  JourneyTrack _track = JourneyTrack();
-  int? _trackDay;
-  StreamSubscription<Position>? _positionSub;
-  int _unsavedPoints = 0;
-  late final LocalCache _cache;
+  // Gezi günlüğü kaydı ortak servistedir; günlük haritası da canlı dinler.
+  late final JourneyRecorder _recorder;
 
   // Konfeti animasyonu (dialog içinde kendi controller'ı var, bu sınıfta gerek yok)
 
@@ -72,128 +67,55 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
   void initState() {
     super.initState();
     _plan = widget.plan;
-    _cache = ref.read(localCacheProvider);
+    _recorder = ref.read(journeyRecorderProvider);
     if (_plan.daysPlan.isNotEmpty) {
       _selectedDay = _plan.daysPlan.first.dayNumber;
     }
     unawaited(_loadProgress());
-    unawaited(_loadTrack(_selectedDay));
+    unawaited(_recorder.load(_plan.tripId, _selectedDay));
     // Aktif gezi olarak kaydet
     unawaited(ref.read(localCacheProvider).setActivePlan(_plan.toMap()));
   }
 
   @override
   void dispose() {
-    // dispose içinde setState/ref kullanılamaz: kaydı sessizce durdur ve sakla.
-    final sub = _positionSub;
-    _positionSub = null;
-    unawaited(sub?.cancel());
-    final day = _trackDay;
-    if (day != null && sub != null) {
-      unawaited(
-        _cache
-            .saveJourneyTrack(_plan.tripId, day, _track.withRecording(false))
-            .catchError((_) {}),
-      );
+    // Gün planından çıkınca bu gezinin kaydı durur (arka planda sessizce sürmez).
+    if (_recorder.recording && _recorder.tripId == _plan.tripId) {
+      unawaited(_recorder.stop());
     }
     super.dispose();
   }
 
-  Future<void> _loadTrack(int day) async {
-    if (_positionSub != null) {
-      return; // kayıt sürerken başka günün izini yükleme
-    }
-    try {
-      final t = await _cache.readJourneyTrack(_plan.tripId, day);
-      if (mounted) {
-        setState(() {
-          _track = t;
-          _trackDay = day;
-        });
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _persistTrack() async {
-    final day = _trackDay;
-    if (day == null) return;
-    _unsavedPoints = 0;
-    try {
-      await _cache.saveJourneyTrack(_plan.tripId, day, _track);
-    } catch (_) {}
-  }
-
-  Future<void> _startRecording(int day) async {
-    final messenger = ScaffoldMessenger.of(context);
-    String msg(String tr, String en) => context.tr(tr, en);
-    if (!await Geolocator.isLocationServiceEnabled()) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            msg(
-              'Rota kaydı için cihazın konum servisini aç.',
-              'Turn on location services to record your route.',
-            ),
-          ),
-        ),
-      );
+  Future<void> _toggleRecording(int day, bool on) async {
+    if (!on) {
+      await _recorder.stop();
       return;
     }
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            msg(
-              'Konum izni olmadan rota kaydedilemez. Günlük, gezdiğin durakları yine gösterir.',
-              'Your route cannot be recorded without location permission. The log still shows your visited stops.',
-            ),
-          ),
-        ),
-      );
-      return;
-    }
-    if (_trackDay != day) await _loadTrack(day);
+    final result = await _recorder.start(_plan.tripId, day);
     if (!mounted) return;
-    setState(() {
-      _trackDay = day;
-      _track = _track.withRecording(true);
-    });
-    _positionSub =
-        Geolocator.getPositionStream(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.high,
-            distanceFilter: 15,
-          ),
-        ).listen((pos) {
-          final next = _track.append(
-            TrackPoint(pos.latitude, pos.longitude, pos.timestamp),
-            accuracyMeters: pos.accuracy,
-          );
-          if (identical(next, _track) || !mounted) return;
-          setState(() => _track = next);
-          if (++_unsavedPoints >= 5) unawaited(_persistTrack());
-        }, onError: (_) => unawaited(_stopRecording(save: true)));
-    unawaited(_persistTrack());
+    final message = switch (result) {
+      RecorderStartResult.serviceDisabled => context.tr(
+        'Rota kaydı için cihazın konum servisini aç.',
+        'Turn on location services to record your route.',
+      ),
+      RecorderStartResult.permissionDenied => context.tr(
+        'Konum izni olmadan rota kaydedilemez. Günlük, gezdiğin durakları yine gösterir.',
+        'Your route cannot be recorded without location permission. The log still shows your visited stops.',
+      ),
+      RecorderStartResult.started => null,
+    };
+    if (message != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+      return;
+    }
     unawaited(
       ref
           .read(repositoryProvider)
           .logAppEvent('journey_track_started', payload: {'day': day})
           .catchError((_) {}),
     );
-  }
-
-  Future<void> _stopRecording({bool save = true}) async {
-    final sub = _positionSub;
-    _positionSub = null;
-    await sub?.cancel();
-    _track = _track.withRecording(false);
-    if (mounted) setState(() {});
-    if (save) await _persistTrack();
   }
 
   void _openJourneyLog(TripDay day) {
@@ -471,6 +393,10 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
     final next = _journey.nextStop(day);
     final started = _journey.startedDays.contains(day.dayNumber);
     final back = day.returnPlan;
+    final recorder = ref.watch(journeyRecorderProvider);
+    final track = recorder.isFor(_plan.tripId, day.dayNumber)
+        ? recorder.track
+        : JourneyTrack();
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -551,15 +477,14 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
               const Divider(height: 24),
               SwitchListTile.adaptive(
                 contentPadding: EdgeInsets.zero,
-                value: _positionSub != null && _trackDay == day.dayNumber,
-                onChanged: (on) =>
-                    on ? _startRecording(day.dayNumber) : _stopRecording(),
+                value: recorder.isRecordingFor(_plan.tripId, day.dayNumber),
+                onChanged: (on) => _toggleRecording(day.dayNumber, on),
                 title: Text(context.tr('Rotamı kaydet', 'Record my route')),
                 subtitle: Text(
-                  _trackDay == day.dayNumber && _track.hasTrack
+                  track.hasTrack
                       ? context.tr(
-                          '${_track.distanceKm.toStringAsFixed(1)} km kaydedildi · yalnızca uygulama açıkken',
-                          '${_track.distanceKm.toStringAsFixed(1)} km recorded · only while the app is open',
+                          '${track.distanceKm.toStringAsFixed(1)} km kaydedildi · yalnızca uygulama açıkken',
+                          '${track.distanceKm.toStringAsFixed(1)} km recorded · only while the app is open',
                         )
                       : context.tr(
                           'GPS izi yalnızca bu cihazda saklanır; uygulama açıkken kaydedilir.',
@@ -841,7 +766,9 @@ class _DayPlanScreenState extends ConsumerState<DayPlanScreen> {
                                 selected: _selectedDay == d.dayNumber,
                                 onSelected: (_) {
                                   setState(() => _selectedDay = d.dayNumber);
-                                  unawaited(_loadTrack(d.dayNumber));
+                                  unawaited(
+                                    _recorder.load(_plan.tripId, d.dayNumber),
+                                  );
                                 },
                               ),
                             ),
